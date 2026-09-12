@@ -2,18 +2,16 @@
 
 本文面向项目开发者，定义五个 Agent 的开发边界、交接对象及验收条件。开发负责人是实现和维护模块的团队成员；Agent 是运行时执行任务的程序角色。角色数量不等于所需开发人数，一名成员可以承担多个模块。
 
-## 认领表
-
-尚未分配具体人员；成员认领后填写姓名或 GitHub 用户名，并补充对应 issue / PR。
+## 速览
 
 | 模块 | 开发负责人 | 协作负责人 | 当前状态 | 职责说明 |
 |---|---|---|---|---|
-| 协调 Agent | 待认领 | 待认领 | 设计阶段 | [coordinator](../agents/coordinator.md) |
-| 药材靶点 Agent | 待认领 | 待认领 | 设计阶段 | [herb_targets](../agents/herb_targets.md) |
-| 疾病靶点 Agent | 待认领 | 待认领 | 设计阶段 | [disease_targets](../agents/disease_targets.md) |
-| 网络分析 Agent | 待认领 | 待认领 | 设计阶段 | [network_analysis](../agents/network_analysis.md) |
-| 富集分析 Agent | 待认领 | 待认领 | 设计阶段 | [enrichment_analysis](../agents/enrichment_analysis.md) |
-| 共享数据处理与校验 | 待认领 | 两路靶点模块负责人 | 设计阶段 | 确定性程序，不单独设 Agent |
+| 协调 Agent | x | x | 设计阶段 | [coordinator](../agents/coordinator.md) |
+| 药材靶点 Agent | x | x | 设计阶段 | [herb_targets](../agents/herb_targets.md) |
+| 疾病靶点 Agent | x | x | 设计阶段 | [disease_targets](../agents/disease_targets.md) |
+| 网络分析 Agent | x | x | 设计阶段 | [network_analysis](../agents/network_analysis.md) |
+| 富集分析 Agent | X | x | 设计阶段 | [enrichment_analysis](../agents/enrichment_analysis.md) |
+| 共享数据处理与校验 | x | 两路靶点模块负责人 | 设计阶段 | 确定性程序，不单独设 Agent |
 
 ## 1. 协调 Agent
 
