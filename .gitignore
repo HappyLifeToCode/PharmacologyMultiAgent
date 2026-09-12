@@ -1,0 +1,69 @@
+# Local assistant context and internal materials
+/AGENTS.md
+/AGENTS.local.md
+/CLAUDE.md
+/.codex/
+/.claude/
+/.local/
+/local/
+/private/
+/docs/private/
+/docs/STATUS.md
+/docs/references/
+*.private.*
+
+# Credentials and machine-specific settings; safe examples remain shareable
+.env
+.env.*
+!.env.example
+!.env.template
+*.local.json
+*.local.toml
+*.local.yaml
+*.local.yml
+/configs/local/
+/secrets/
+/credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Browser sessions and authentication
+/.auth/
+/playwright/.auth/
+/.playwright-mcp/
+/browser-profiles/
+**/storage_state*.json
+**/storage-state*.json
+**/cookies*.json
+**/cookies*.txt
+
+# Research data and run artifacts: share separately after review
+/data/
+/runs/
+/reports/
+/logs/
+*.log
+/tmp/
+/temp/
+
+# Dependencies and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+~$*
