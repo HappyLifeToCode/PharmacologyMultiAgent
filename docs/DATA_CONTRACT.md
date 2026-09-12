@@ -14,6 +14,12 @@
 
 关系表不能由一列去重 gene symbol 替代。所有中间产物都引用对应原始文件和批次。各库具体列名在真实导出检查后确定。
 
+## 任务输入与执行设置
+
+研究任务保存在 [tasks/tasks.jsonl](../tasks/tasks.jsonl)，每行一条，以 task_id 标识；执行工具和模型来自 [configs/runtime.json](../configs/runtime.json)。字段说明见 [任务清单说明](../tasks/README.md)。研究任务与运行状态分开保存。
+
+交接清单中的 task_id 标识研究任务，agent_role 标识角色，attempt 标识重试；若同一角色进一步拆分多个子任务，调度器另设 subtask_id，避免混用研究任务编号。
+
 ## 运行状态
 
 每次运行使用独立 run_id。状态：pending、running、succeeded、partial、blocked、failed、skipped。只有产物存在且通过验证才标记 succeeded；零结果需注明完整查询或分析的依据。
