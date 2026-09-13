@@ -137,43 +137,108 @@ def load_herb(directory: str | Path, task: Mapping[str, Any]) -> dict[str, Any]:
     return {"genes": genes, "relations": relations, "source_counts": {"input_rows": len(rows), "kept_rows": len(relations), "genes": len(genes)}, "provenance": provenance}
 
 
-def load_disease(directory: str | Path, task: Mapping[str, Any]) -> dict[str, Any]:
-    """Load GeneCards and OMIM disease genes, retaining filter provenance."""
+def disease_policy(task):
+    scope = task.get("genecards_median_scope", "pooled_query_rows")
+    if scope != "pooled_query_rows":
+        raise ValueError("unsupported GeneCards median scope: " + str(scope))
+    status = task.get("genecards_median_status", "provisional")
+    if status not in ("provisional", "confirmed"):
+        raise ValueError("invalid GeneCards median status")
+    return {"scope": scope, "status": status, "operator": ">",
+            "row_unit": "disease_query_gene_record", "deduplicate_genes": "after_filter",
+            "note": "合并所有所选疾病的完整检索记录后计算中位数；跨疾病同一基因的分数分别保留，筛选后合并去重。"}
 
+
+def _disease_source(directory, task, name):
     directory = Path(directory)
     provenance = _load_provenance(directory)
-    _validate_source(provenance, "genecards", directory)
-    _validate_source(provenance, "omim", directory)
+    source = _validate_source(provenance, name, directory)
     _validate_mapping(provenance, directory)
     diseases = task.get("diseases")
     if not isinstance(diseases, list) or not diseases or any(not isinstance(x, str) or not x.strip() for x in diseases):
         raise ValueError("task.diseases must be a non-empty list of names")
-    for source_name in ("genecards", "omim"):
-        declared = provenance["sources"][source_name].get("diseases")
-        if not isinstance(declared, list) or set(declared) != set(diseases):
-            raise ValueError("provenance.sources.%s.diseases does not match task.diseases" % source_name)
-    gc_rows = _read_rows(directory / "genecards.csv", {"gene_symbol", "relevance_score"})
-    parsed = []
-    rejected = []
-    for number, row in enumerate(gc_rows, start=2):
+    declared = source.get("diseases")
+    if not isinstance(declared, list) or set(declared) != set(diseases):
+        raise ValueError("provenance.sources.%s.diseases does not match task.diseases" % name)
+    return provenance, diseases
+
+
+def _query_rows(directory, name, required, diseases):
+    # Multiple queries must retain their identity; a one-query legacy CSV is unambiguous.
+    if len(diseases) > 1:
+        required = required | {"disease"}
+    rows = _read_rows(Path(directory) / (name + ".csv"), required)
+    seen = set()
+    for row in rows:
+        query = row.get("disease", diseases[0])
+        if query not in diseases:
+            raise ValueError("%s.csv contains disease outside task scope" % name)
+        row["disease"] = query
+        key = (query, row["gene_symbol"])
+        if name == "genecards" and key in seen:
+            raise ValueError("duplicate GeneCards disease/gene row; review duplicated export pages")
+        seen.add(key)
+    return rows
+
+
+def load_genecards(directory, task):
+    provenance, diseases = _disease_source(directory, task, "genecards")
+    policy = disease_policy(task)
+    rows = _query_rows(directory, "genecards", {"gene_symbol", "relevance_score"}, diseases)
+    parsed, rejected = [], []
+    for number, row in enumerate(rows, start=2):
         try:
             score = float(row["relevance_score"])
             if not math.isfinite(score) or not _valid_symbol(row["gene_symbol"]):
                 raise ValueError
-            parsed.append({"gene_symbol": row["gene_symbol"], "relevance_score": score})
+            parsed.append({"gene_symbol": row["gene_symbol"], "relevance_score": score, "disease": row["disease"]})
         except (KeyError, TypeError, ValueError):
             rejected.append(number)
     if rejected:
         raise ValueError("invalid genecards.csv rows: " + repr(rejected))
-    gc_filter = filter_genecards(parsed, complete=True)
-    omim_rows = _read_rows(directory / "omim.csv", {"gene_symbol"})
-    omim, rejected = normalize_symbols([row.get("gene_symbol") for row in omim_rows])
+    result = filter_genecards(parsed, complete=True)
+    result.update(policy=policy, query_counts={q: sum(r["disease"] == q for r in parsed) for q in diseases})
+    genes, _ = normalize_symbols([row["gene_symbol"] for row in result["kept"]])
+    return {"genes": genes, "genecards_filter": result, "policy": policy,
+            "source_counts": {"genecards_input": len(rows), "genecards_kept": len(result["kept"]), "genecards_genes": len(genes)},
+            "provenance": {"sources": {"genecards": provenance["sources"]["genecards"]}, "mapping": provenance["mapping"]}}
+
+
+def load_omim(directory, task):
+    provenance, diseases = _disease_source(directory, task, "omim")
+    rows = _query_rows(directory, "omim", {"gene_symbol"}, diseases)
+    genes, rejected = normalize_symbols([row["gene_symbol"] for row in rows])
     if rejected:
         raise ValueError("invalid omim.csv rows: " + repr(rejected))
-    genes, _ = normalize_symbols([row["gene_symbol"] for row in gc_filter["kept"]] + omim)
-    gene_sources = {}
-    for row in gc_filter["kept"]:
-        gene_sources.setdefault(row["gene_symbol"], []).append("genecards")
-    for gene in omim:
-        gene_sources.setdefault(gene, []).append("omim")
-    return {"genes": genes, "genecards_filter": gc_filter, "gene_sources": gene_sources, "source_counts": {"genecards_input": len(gc_rows), "genecards_kept": len(gc_filter["kept"]), "omim_input": len(omim_rows), "genes": len(genes)}, "provenance": provenance}
+    return {"genes": genes, "associations": rows, "source_counts": {"omim_input": len(rows), "omim_genes": len(genes)},
+            "provenance": {"sources": {"omim": provenance["sources"]["omim"]}, "mapping": provenance["mapping"]}}
+
+
+def merge_disease(genecards, omim):
+    genes, rejected = normalize_symbols(genecards["genes"] + omim["genes"])
+    if rejected:
+        raise ValueError("invalid disease branch gene symbols")
+    gene_sources = {gene: [name for name, result in (("genecards", genecards), ("omim", omim)) if gene in result["genes"]] for gene in genes}
+    return {"genes": genes, "gene_sources": gene_sources, "genecards_filter": genecards["genecards_filter"],
+            "policy": genecards["policy"], "source_counts": dict(genecards["source_counts"], **omim["source_counts"], genes=len(genes)),
+            "provenance": {"genecards": genecards.get("provenance", {}), "omim": omim.get("provenance", {})}}
+
+
+def load_disease(directory, task):
+    """Legacy combined entry point; new runs use independent source stages."""
+    return merge_disease(load_genecards(directory, task), load_omim(directory, task))
+
+
+def source_inputs(directory, name):
+    """Select only this source's metadata and raw files for signatures/snapshots."""
+    directory = Path(directory).resolve()
+    provenance = _load_provenance(directory)
+    source = provenance.get("sources", {}).get(name, {})
+    mapping = provenance.get("mapping", {})
+    selected = {"sources": {name: source}, "mapping": mapping}
+    names = {"batman": "herb_targets.csv", "genecards": "genecards.csv", "omim": "omim.csv"}
+    files = set([names[name]] + source.get("raw_files", []) + mapping.get("raw_files", []))
+    for relative in files:
+        if not isinstance(relative, str) or not (directory / relative).resolve().is_relative_to(directory):
+            raise ValueError("source file escapes import directory")
+    return selected, sorted(files)

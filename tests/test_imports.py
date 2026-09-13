@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from pharm_demo.imports import load_disease, load_herb
+from pharm_demo.imports import load_disease, load_herb, load_genecards, load_omim
 
 
 def _fixture(tmp_path):
@@ -46,3 +46,37 @@ def test_loader_rejects_scope_or_confirmed_threshold_mismatch(tmp_path):
         load_herb(tmp_path, {"herbs": ["炙甘草"]})
     with pytest.raises(ValueError, match="threshold"):
         load_herb(tmp_path, {"herbs": ["白芍"], "batman_threshold": 0.7, "batman_threshold_confirmed": True})
+
+
+def test_pooled_five_queries_preserves_cross_disease_scores(tmp_path):
+    _fixture(tmp_path)
+    queries = ["Hyperthyroidism", "Hypothyroidism", "Thyroid cancer", "Thyroid nodules", "Thyroiditis"]
+    provenance = json.loads((tmp_path / "provenance.json").read_text())
+    for name in ("genecards", "omim"):
+        provenance["sources"][name]["diseases"] = queries
+    (tmp_path / "provenance.json").write_text(json.dumps(provenance))
+    rows = [(queries[0], "TP53", 1), (queries[1], "EGFR", 2), (queries[2], "AKT1", 3), (queries[3], "TP53", 101), (queries[4], "TNF", 1000)]
+    (tmp_path / "genecards.csv").write_text("disease,gene_symbol,relevance_score\n" + "\n".join("%s,%s,%s" % r for r in rows))
+    (tmp_path / "omim.csv").write_text("disease,gene_symbol\nThyroiditis,TP53\nThyroiditis,BRCA1\n")
+    result = load_disease(tmp_path, {"diseases": queries})
+    assert result["genecards_filter"]["median"] == 3
+    assert result["genecards_filter"]["input_count"] == 5
+    assert [r["gene_symbol"] for r in result["genecards_filter"]["kept"]] == ["TP53", "TNF"]
+    assert result["genes"] == ["TP53", "TNF", "BRCA1"]
+    assert result["gene_sources"]["TP53"] == ["genecards", "omim"]
+    assert result["policy"]["status"] == "provisional"
+
+
+def test_sources_validate_independently_and_require_query_identity(tmp_path):
+    _fixture(tmp_path)
+    task = {"diseases": ["Hyperthyroidism"]}
+    (tmp_path / "omim.csv").unlink()
+    assert load_genecards(tmp_path, task)["genes"] == ["EGFR"]
+    with pytest.raises(ValueError):
+        load_omim(tmp_path, task)
+    provenance = json.loads((tmp_path / "provenance.json").read_text())
+    task["diseases"].append("Thyroid cancer")
+    provenance["sources"]["genecards"]["diseases"] = task["diseases"]
+    (tmp_path / "provenance.json").write_text(json.dumps(provenance))
+    with pytest.raises(ValueError, match="disease"):
+        load_genecards(tmp_path, task)

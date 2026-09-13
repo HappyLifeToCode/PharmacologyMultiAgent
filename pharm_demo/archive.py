@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from .common import read_json, write_json, digest, now, public_artifact
 
-STAGE_DIRS = {"herb_targets": "01_batman", "disease_targets": "02_disease", "intersection": "03_intersect", "network_analysis": "04_ppi", "enrichment_analysis": "05_enrich"}
+STAGE_DIRS = {"herb_targets": "01_batman", "disease_targets": "02_disease", "genecards_targets": "02_disease/genecards", "omim_targets": "02_disease/omim", "intersection": "03_intersect", "network_analysis": "04_ppi", "enrichment_analysis": "05_enrich"}
 _ARCHIVE_LOCK = threading.RLock()
 
 

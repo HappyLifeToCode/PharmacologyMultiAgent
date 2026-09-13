@@ -8,8 +8,8 @@
 
 ```text
 herb_targets.csv     herb,compound_id,gene_symbol,score
-genecards.csv       gene_symbol,relevance_score
-omim.csv            gene_symbol
+genecards.csv       disease,gene_symbol,relevance_score
+omim.csv            disease,gene_symbol
 provenance.json      来源、完整性、查询范围、阈值与映射记录
 raw/                原始导出与基因映射依据
 ```
@@ -58,17 +58,21 @@ UTF-8 CSV 保留原始分数，不能只导入已筛选的 GeneCards 记录。BA
 
 运行器检查文件、查询范围、原始路径和确认状态，但不能仅凭台账证明每条数据真实性；实际原文抽检仍需保留。基因拼写校验不等于 HGNC 官方映射。
 
+各来源补充实际数据库 `version` 及阈值依据；BATMAN 要核对 v2.0，GeneCards 原文 v5.26.0 不能直接当成本次访问版本。当前导入校验尚未逐库强制验证版本字段或网页版本，人工来源核验仍是验收要求。`accessed_at` 在导入台账中使用 `YYYY-MM-DD`，不能填“待填写”后宣称可运行。
+
 ## 补充后运行
 
 在页面选择此前运行并点击“断点续跑”，或在项目目录使用：
 
 ```powershell
-& D:\Anaconda\envs\prim\python.exe scripts/run_tasks.py --resume 实际运行编号
+.\.venv\Scripts\python.exe scripts/run_tasks.py --resume 实际运行编号
 ```
 
 输入或参数变化会触发对应步骤重新执行，新产物保存到新的 attempt 目录；旧文件保留。输入与产物哈希一致且验收成功的步骤才复用。
 
 当前真实网络分支可调用 STRING 公开 API；NetworkX 度值会明确标注方法，不能冒充 CytoNCA。DAVID 正式导出、背景集确认及 CytoNCA 接入仍是待完成项，已有界面和角色不代表这些分析已完成。
+
+两侧导入通过后实际执行 Venny 2.1.0，保存输入、原始结果和图，并独立核对后才发布下游名单。Venny 失败时保留证据，不用本地交集替换；两非空列表无重叠则如实记录零交集。完整导入也不会自动补齐 CytoNCA 与 DAVID 尚未开发的步骤，详见 [当前进度](PROJECT_STATUS.md)。
 
 ## 分步归档与批次导入
 
@@ -88,3 +92,15 @@ data/pharm/<方名>/imports/<task_id>/<批次名>/
 ```
 
 在 `tasks/tasks.jsonl` 该任务增加 `"import_batch":"20260913_01"` 即明确选用该批次；不猜测“最新文件夹”。不配置时使用旧入口。每次补充/修订新建批次，`raw/` 原始导出保持不变。阶段归档为不可变历史，不能直接把历史归档当作可编辑导入区。
+
+修改任务的 `import_batch` 后需要从任务创建新运行；`--resume` 使用旧 manifest 的冻结任务，不会自动读取任务清单中的新批次值。仅在同一冻结导入位置补齐缺失文件时可恢复原运行；已有原始文件仍不得覆盖。
+
+## 双库独立导入与暂定中位数规则
+
+GeneCards 与 OMIM 各自校验本库来源台账、原始文件及共同映射依据；缺少 OMIM 文件不会阻止 GeneCards 独立处理。每支仅快照本库所需文件和元数据，另一数据库的单独更新不会使已成功分支失效。共同映射或任务参数变化仍会重新核验。
+
+多疾病 CSV 必须含 disease 列，与任务关键词完全对应；单疾病旧文件可省略，程序按唯一关键词补齐。GeneCards 合并全部查询行计算一个中位数，再严格保留 score > median，最后按基因去重并与 OMIM 合并。跨疾病同一基因保留各自分数，不预先取最大值或平均值；同一疾病/基因重复行会拒绝导入，避免重复分页改变中位数。零结果查询也必须包含在完整性台账的疾病范围中；台账不能代替原始查询证据。
+
+`genecards_median_scope=pooled_query_rows`，`genecards_median_status=provisional` 是当前默认规则。医生确认前保持暂定；若改口径，需要实现相应筛选规则并新建任务或运行，不能改写旧运行结果。分支产物保留中位数、输入/保留行数、每个查询的行数、保留记录及规则状态。
+
+新版真实来源证据分别归档在 `02_disease/genecards/run_<id>/attempt_<nn>/` 和 `02_disease/omim/run_<id>/attempt_<nn>/`；合并结果仍在 `02_disease/run_<id>/attempt_<nn>/`。两路原始文件不互相覆盖，旧版归档保持原样。

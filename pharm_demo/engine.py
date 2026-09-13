@@ -14,12 +14,15 @@ from pathlib import Path
 
 from .codex_runtime import execute, prepare_home
 from .common import ROOT, digest, now, read_json, safe_name, task_list, write_json, public_artifact
-from .processing import intersection, write_venn, analyze_network, write_network
+from .processing import analyze_network, write_network
+from .venny import run_venny
 from .archive import archive_run, import_directory
 from .sources import SOURCES, probe, string_network
 
-STAGES = ["coordinator_plan", "herb_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
-LABELS = dict(zip(STAGES, ["协调规划", "药材靶点", "疾病靶点", "标准化与交集", "网络分析", "富集分析", "协调验收"]))
+LEGACY_STAGES = ["coordinator_plan", "herb_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
+STAGES = ["coordinator_plan", "herb_targets", "genecards_targets", "omim_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
+LABELS = dict(zip(STAGES, ["协调规划", "药材靶点", "GeneCards 检索与筛选", "OMIM 关联靶点", "疾病靶点合并", "标准化与交集", "网络分析", "富集分析", "协调验收"]))
+SOURCE_ROLES = {"herb_targets": "batman", "genecards_targets": "genecards", "omim_targets": "omim"}
 LOCK = threading.RLock()
 ACTIVE = set()
 PLOT_LOCK = threading.Lock()
@@ -32,6 +35,7 @@ class Runner:
         self.manifest_path = self.directory / "manifest.json"
         self.manifest = read_json(self.manifest_path)
         self.task = self.manifest["task"]
+        self.stages = STAGES if self.manifest.get("workflow_version", 1) >= 2 else LEGACY_STAGES
         self.home = None
 
     def save(self):
@@ -65,9 +69,18 @@ class Runner:
             inputs["fixture"] = digest(ROOT / "examples/fixture.json")
         else:
             imports = import_directory(ROOT, self.task)
-            inputs["imports"] = {p.relative_to(imports).as_posix(): digest(p) for p in sorted(imports.rglob("*")) if p.is_file()} if imports.exists() else {}
-        if role in ("intersection", "network_analysis", "enrichment_analysis"):
-            inputs["targets"] = {key: digest(self.directory / path) for key, path in self.manifest.get("verified_targets", {}).items()}
+            if role in SOURCE_ROLES:
+                from .imports import source_inputs
+                try:
+                    metadata, files = source_inputs(imports, SOURCE_ROLES[role])
+                    inputs["imports"] = {"metadata": metadata, "files": {name: digest(imports / name) if (imports / name).is_file() else None for name in files}}
+                except (ValueError, OSError, TypeError, KeyError) as exc:
+                    inputs["imports"] = {"unavailable": str(exc)}
+            elif role == "disease_targets" and self.manifest.get("workflow_version", 1) < 2:
+                inputs["imports"] = {p.relative_to(imports).as_posix(): digest(p) for p in sorted(imports.rglob("*")) if p.is_file()} if imports.exists() else {}
+        if role in ("disease_targets", "intersection", "network_analysis", "enrichment_analysis"):
+            required = ("genecards_targets", "omim_targets") if role == "disease_targets" else ("herb_targets", "disease_targets")
+            inputs["targets"] = {key: digest(self.directory / path) for key, path in self.manifest.get("verified_targets", {}).items() if key in required}
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
     def reuse(self, role):
@@ -148,7 +161,7 @@ class Runner:
         return execute(prompt, directory, browser=browser, on_event=report_event, timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "360")), home=self.home)
 
     def agent_stage(self, role, instruction, evidence, browser=False, force_incomplete=None):
-        if role != "coordinator_review" and self.reuse(role):
+        if role != "coordinator_review" and not force_incomplete and self.reuse(role):
             return self.manifest["stages"][role]
         directory = self.begin(role)
         try:
@@ -170,7 +183,7 @@ class Runner:
                 self.save()
             return
         directory = self.begin(role)
-        source_names = ["batman"] if role == "herb_targets" else ["genecards", "omim"]
+        source_names = [SOURCE_ROLES[role]] if role in SOURCE_ROLES else ["genecards", "omim"]
         evidence = {}
         output = None
         missing = None
@@ -178,13 +191,35 @@ class Runner:
         try:
             if self.manifest["mode"] == "fixture":
                 fixture = read_json(ROOT / "examples/fixture.json")
-                genes = fixture["herb_genes" if role == "herb_targets" else "disease_genes"]
-                output = {"genes": genes, "evidence_type": "synthetic_fixture", "note": "仅供工程验证，非方剂研究结果"}
+                if role == "genecards_targets":
+                    from .processing import filter_genecards, normalize_symbols
+                    from .imports import disease_policy
+                    filtered = filter_genecards(fixture["genecards_rows"], complete=True)
+                    filtered["policy"] = disease_policy(self.task)
+                    genes, _ = normalize_symbols([r["gene_symbol"] for r in filtered["kept"]])
+                    output = {"genes": genes, "genecards_filter": filtered, "policy": filtered["policy"], "source_counts": {"genecards_input": filtered["input_count"], "genecards_kept": len(filtered["kept"]), "genecards_genes": len(genes)}}
+                elif role == "omim_targets":
+                    genes = fixture["omim_genes"]
+                    output = {"genes": genes, "source_counts": {"omim_input": len(genes), "omim_genes": len(genes)}}
+                else:
+                    genes = fixture["herb_genes" if role == "herb_targets" else "disease_genes"]
+                    output = {"genes": genes}
+                output.update(evidence_type="synthetic_fixture", note="固定测试集合及疾病标签，仅供工程验证，非本任务药理研究结果")
             elif input_dir.exists():
-                from .imports import load_herb, load_disease
+                from .imports import load_herb, load_disease, load_genecards, load_omim, source_inputs
                 snapshot = directory / "input_snapshot"
-                shutil.copytree(str(input_dir), str(snapshot))
-                output = (load_herb if role == "herb_targets" else load_disease)(snapshot, self.task)
+                if role in SOURCE_ROLES:
+                    metadata, files = source_inputs(input_dir, SOURCE_ROLES[role])
+                    snapshot.mkdir()
+                    write_json(snapshot / "provenance.json", metadata)
+                    for name in files:
+                        target = snapshot / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(input_dir / name, target)
+                else:
+                    shutil.copytree(str(input_dir), str(snapshot))
+                loaders = {"herb_targets": load_herb, "genecards_targets": load_genecards, "omim_targets": load_omim, "disease_targets": load_disease}
+                output = loaders[role](snapshot, self.task)
             else:
                 missing = "缺少真实导出及来源台账；请按 docs/IMPORTS.md 补充 " + str(input_dir)
         except (ValueError, KeyError, OSError) as exc:
@@ -204,7 +239,7 @@ class Runner:
                     instruction += "本次验收对象是合成测试集合的交接格式，不是药理数据完整性。genes 是显式提供的测试输入，格式与内容无矛盾即可 status=succeeded；把未访问数据库写在 findings，不作为合成工程任务的 blocker。"
             else:
                 urls = {name: SOURCES[name] for name in source_names}
-                instruction = "使用浏览器实际核验这些站点的查询入口：" + json.dumps(urls) + "。药材查询白芍/炙甘草；疾病检索 Hyperthyroidism。可以先观察可用入口再查询，保存至少一张实际页面截图。只做访问和导出能力检查，账号、验证码、网络错误分别记录。没有完整真实靶点表时 status=blocked，并给出明天需要的账号或导出文件。不要从摘要、常识或局部页面生成全量靶点表。"
+                instruction = "使用浏览器实际核验这些站点的查询入口：" + json.dumps(urls) + "。严格使用本任务的药材或疾病关键词：" + json.dumps(self.task["herbs"] if role == "herb_targets" else self.task["diseases"], ensure_ascii=False) + "。可先观察可用入口再查询，保存至少一张实际页面截图。仅核验本角色来源，不访问另一子任务的数据库。只做访问和导出能力检查，账号、验证码、网络错误分别记录。没有完整真实靶点表时 status=blocked，并说明所需账号或导出文件。不要从摘要、常识或局部页面生成全量靶点表。"
             result, meta = self.call_agent(role, directory, instruction, evidence, browser=output is None)
             if output is None:
                 result["status"] = "blocked"
@@ -220,6 +255,28 @@ class Runner:
         except Exception as exc:
             self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [missing or str(exc)], "artifacts": ["targets.json"] if output else ["source_reachability.json"]}, directory)
 
+    def disease_merge_stage(self):
+        role = "disease_targets"
+        if self.reuse(role):
+            path = next(p for p in self.manifest["stages"][role]["artifacts"] if p.endswith("/targets.json"))
+            self.manifest.setdefault("verified_targets", {})[role] = path
+            return
+        directory = self.begin(role)
+        refs = self.manifest.get("verified_targets", {})
+        required = ("genecards_targets", "omim_targets")
+        if not all(self.manifest["stages"][key]["status"] == "succeeded" and key in refs for key in required):
+            self.finish(role, {"status": "blocked", "summary": "等待 GeneCards 与 OMIM 两路通过检查；已完成分支的产物保留", "blockers": [LABELS[key] + "尚未通过检查" for key in required if self.manifest["stages"][key]["status"] != "succeeded" or key not in refs], "artifacts": []}, directory)
+            return
+        try:
+            from .imports import merge_disease
+            result = merge_disease(*(read_json(self.directory / refs[key]) for key in required))
+            result["evidence_type"] = "synthetic_fixture" if self.manifest["mode"] == "fixture" else "user_import_with_provenance"
+            write_json(directory / "targets.json", result)
+            self.manifest.setdefault("verified_targets", {})[role] = (directory / "targets.json").relative_to(self.directory).as_posix()
+            self.finish(role, {"status": "succeeded", "summary": "GeneCards 筛选结果与 OMIM 靶点合并去重，共 %d 个疾病靶点%s" % (len(result["genes"]), "（合成验证）" if self.manifest["mode"] == "fixture" else ""), "blockers": [], "findings": ["GeneCards 中位数口径：" + result["policy"]["scope"] + "；确认状态：" + result["policy"]["status"]], "artifacts": ["targets.json"]}, directory)
+        except Exception as exc:
+            self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": []}, directory)
+
     def intersection_stage(self):
         if self.reuse("intersection"):
             path = next(p for p in self.manifest["stages"]["intersection"]["artifacts"] if p.endswith("/intersection.json"))
@@ -234,21 +291,24 @@ class Runner:
                 return None
             herb = read_json(self.directory / refs["herb_targets"])
             disease = read_json(self.directory / refs["disease_targets"])
-            result = intersection(herb["genes"], disease["genes"])
+            self.event("intersection", "tool.started", "Playwright 操作官方 Venny 2.1.0，读取三个集合区域并核对")
+            result = run_venny(herb["genes"], disease["genes"], directory, synthetic=self.manifest["mode"] == "fixture")
+            result["method"] = {"tool": "Venny", "version": "2.1.0", "execution": "venny_execution.json", "verification": "independent_python_sets"}
             result["evidence_type"] = "synthetic_fixture" if self.manifest["mode"] == "fixture" else "user_import_with_provenance"
             write_json(directory / "intersection.json", result)
             (directory / "genes.txt").write_text("\n".join(result["genes"]) + "\n", encoding="utf-8")
-            with PLOT_LOCK:
-                write_venn(result, directory / "venn.png")
             self.manifest["metrics"] = {key: result[key] for key in ["herb_count", "disease_count", "intersection_count"]}
-            self.finish("intersection", {"status": "succeeded", "summary": "%d 个药材靶点与 %d 个疾病靶点交集为 %d 个%s" % (result["herb_count"], result["disease_count"], result["intersection_count"], "（合成验证）" if self.manifest["mode"] == "fixture" else ""), "blockers": [], "artifacts": ["intersection.json", "genes.txt", "venn.png"]}, directory)
+            self.event("intersection", "tool.succeeded", "Venny 2.1.0 结果与独立集合核对一致，已保存原图和浏览器证据")
+            self.finish("intersection", {"status": "succeeded", "summary": "Venny 2.1.0：%d 个药材靶点与 %d 个疾病靶点交集为 %d 个%s" % (result["herb_count"], result["disease_count"], result["intersection_count"], "（合成验证）" if self.manifest["mode"] == "fixture" else ""), "blockers": [], "artifacts": ["intersection.json", "genes.txt", "venny.png", "venny_page.png", "venny_results.txt", "venny_execution.json", "herb_input.txt", "disease_input.txt"]}, directory)
             return result
         except Exception as exc:
-            self.finish("intersection", {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": []}, directory)
+            self.event("intersection", "tool.failed", str(exc))
+            evidence = [p.name for p in directory.iterdir() if p.is_file() and public_artifact(p)]
+            self.finish("intersection", {"status": "failed", "summary": "Venny 交集步骤未通过：" + str(exc), "blockers": [str(exc)], "artifacts": evidence}, directory)
             return None
 
     def analysis_stage(self, role, common):
-        if self.reuse(role):
+        if common is not None and self.reuse(role):
             # Metrics are derived again from the verified artifact for the new report.
             for p in self.manifest["stages"][role]["artifacts"]:
                 if p.endswith("/network.json"):
@@ -344,14 +404,29 @@ class Runner:
         self.save()
         try:
             self.home = prepare_home()
-            planning = "制定本案例的简短执行安排，识别药材/疾病两路并行、交集依赖、网络/富集两路分析及阈值和账号的待确认项。不用工具；只做调度规划。"
+            planning = "制定本案例的简短执行安排：药材、GeneCards、OMIM 可独立并行；GeneCards 合并所有所选疾病完整记录后统一计算中位数，严格大于中位数的记录筛选后，与 OMIM 合并去重，再与药材靶点取交集。该中位数口径暂定，待医生确认。交集后网络与富集并行。识别阈值与账号待办。不用工具；只做规划。"
+            if self.manifest.get("workflow_version", 1) < 2:
+                planning = "恢复旧版运行：药材与疾病模块并行，疾病模块仍由一个会话负责两库；两路完成后取交集，再并行网络与富集。保持旧版七阶段，不宣称已拆分双库会话。核验数据与参数限制，不用工具。"
             if self.manifest["mode"] == "fixture":
                 planning += "本轮只规划合成工程验证：输入为 examples/fixture.json 的固定测试集合，网络和富集由本地程序计算，不访问 STRING 或 DAVID。规划正确且明确标注合成时返回 succeeded；真实数据库的账号、阈值和背景缺口属于后续真实运行的限制，放入 findings，不作为本轮规划的 blockers。仅当合成工程规划本身无法完成时返回 partial/blocked。"
-            self.agent_stage("coordinator_plan", planning, {"stage_order": STAGES, "runtime": read_json(ROOT / "configs/runtime.json")})
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = [pool.submit(self.source_stage, role) for role in ["herb_targets", "disease_targets"]]
-                for future in futures:
-                    future.result()
+            planning += "交集由执行器使用 Playwright 实际操作官方 Venny 2.1.0，再由 Python 独立核对；真实和合成模式均需要 Venny 网站可达。保存原图、结果文本和访问记录，失败不替换成本地图。该工具步骤不另开模型会话。"
+            self.agent_stage("coordinator_plan", planning, {"stage_order": self.stages, "runtime": read_json(ROOT / "configs/runtime.json")})
+            if self.manifest.get("workflow_version", 1) >= 2:
+                def disease_pipeline():
+                    with ThreadPoolExecutor(max_workers=2) as pool:
+                        futures = [pool.submit(self.source_stage, role) for role in ("genecards_targets", "omim_targets")]
+                        for future in futures:
+                            future.result()
+                    self.disease_merge_stage()
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [pool.submit(self.source_stage, "herb_targets"), pool.submit(disease_pipeline)]
+                    for future in futures:
+                        future.result()
+            else:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [pool.submit(self.source_stage, role) for role in ("herb_targets", "disease_targets")]
+                    for future in futures:
+                        future.result()
             common = self.intersection_stage()
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [pool.submit(self.analysis_stage, role, common) for role in ["network_analysis", "enrichment_analysis"]]
@@ -364,7 +439,7 @@ class Runner:
             self.agent_stage("coordinator_review", review_instruction, review_evidence)
             statuses = [stage["status"] for stage in self.manifest["stages"].values()]
             self.manifest["status"] = "succeeded" if all(s in ("succeeded", "skipped") for s in statuses) else "partial"
-            self.manifest["scientific_complete"] = self.manifest["mode"] == "live" and self.manifest["status"] == "succeeded"
+            self.manifest["scientific_complete"] = self.manifest["mode"] == "live" and self.manifest["status"] == "succeeded" and self.task.get("genecards_median_status", "provisional") == "confirmed"
         except Exception as exc:
             self.manifest["status"] = "failed"
             self.manifest["fatal_error"] = str(exc)
@@ -387,9 +462,13 @@ class Runner:
     def write_report(self):
         title = "药理多 Agent 运行报告"
         lines = ["# " + title, "", "运行：" + self.run_id, "", "模式：" + ("合成工程验证（不是药理研究结果）" if self.manifest["mode"] == "fixture" else "真实来源核验 / 分析"), "", "案例：" + self.task["formula"] + " × " + ", ".join(self.task["diseases"]), "", "状态：" + self.manifest["status"], ""]
+        if self.manifest.get("workflow_version", 1) >= 2:
+            from .imports import disease_policy
+            policy = disease_policy(self.task)
+            lines.extend(["GeneCards 中位数规则：" + policy["note"], "", "规则确认状态：" + policy["status"] + "（provisional 表示待医生确认）", ""])
         if self.task.get("research_notes"):
             lines.extend(["## 研究说明", "", self.task["research_notes"], ""])
-        for role in STAGES:
+        for role in self.stages:
             stage = self.manifest["stages"][role]
             lines.extend(["## " + LABELS[role], "", "状态：" + stage["status"], "", stage.get("summary", ""), ""])
             if stage.get("agent_session_id"):
@@ -441,7 +520,7 @@ def start(task_id=None, mode="live", resume=None, background=True):
             run_id = run_id.replace(".", "_")
             directory = ROOT / "runs" / run_id
             directory.mkdir()
-            manifest = {"run_id": run_id, "task": task, "mode": mode, "status": "pending", "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"), "scientific_complete": False, "stages": {role: {"label": LABELS[role], "status": "pending", "summary": "等待调度", "blockers": [], "artifacts": []} for role in STAGES}}
+            manifest = {"run_id": run_id, "task": task, "mode": mode, "status": "pending", "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"), "scientific_complete": False, "workflow_version": 2, "stages": {role: {"label": LABELS[role], "status": "pending", "summary": "等待调度", "blockers": [], "artifacts": []} for role in STAGES}}
             write_json(directory / "manifest.json", manifest)
         ACTIVE.add(run_id)
         def worker():

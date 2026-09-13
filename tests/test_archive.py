@@ -57,3 +57,20 @@ def test_explicit_import_batch(tmp_path):
     assert import_directory(tmp_path,task)==tmp_path/'data/pharm/芍药甘草汤/imports/t1/20260913_01'
     task['import_batch']='../outside'
     with pytest.raises(ValueError,match='unsafe'): import_directory(tmp_path,task)
+
+
+def test_disease_branches_archive_without_collisions(tmp_path):
+    run = make_run(tmp_path)
+    manifest = json.loads((run / 'manifest.json').read_text())
+    for role in ('genecards_targets', 'omim_targets', 'disease_targets'):
+        folder = run / role / 'attempt_01'
+        folder.mkdir(parents=True)
+        (folder / 'handoff.json').write_text(json.dumps({'role': role}))
+        manifest['stages'][role] = {'status': 'blocked', 'directory': role + '/attempt_01', 'attempt': 1}
+    (run / 'manifest.json').write_text(json.dumps(manifest))
+    archive_run(run)
+    disease = tmp_path / 'data/pharm/芍药甘草汤/02_disease'
+    for role, prefix in [('genecards_targets', 'genecards/'), ('omim_targets', 'omim/'), ('disease_targets', '')]:
+        record = json.loads((disease / (prefix + 'run_r1/attempt_01/handoff.json')).read_text())
+        assert record['role'] == role
+    assert len(archive_run(run)['reused']) == 4

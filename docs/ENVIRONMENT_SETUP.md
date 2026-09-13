@@ -1,16 +1,18 @@
 # 环境准备与验收
 
-2026-09-13 核验。本页区分软件安装、网站可达与研究分析完成。
+更新：2026-09-13，依据当日已留存的软件与网站核验记录。本次文档整理没有重新访问五站；软件安装、网站可达与研究分析完成分别判断。完整缺口见 [项目进度](PROJECT_STATUS.md)。
 
 ## Playwright MCP
 
 项目固定 `@playwright/mcp@0.0.64`，支持 `--save-trace`。
 
+启动等待上限为 `startup_timeout_sec=120`，等价于 Kimi 的 `startupTimeoutMs: 120000`。浏览器使用 headless + isolated 和当前 Python 环境安装的 Chromium。
+
 Codex 参数由 `pharm_demo/codex_runtime.py` 传入。它是允许 MCP 冷启动的等待上限，不是每一步固定睡眠 120 秒；普通工具调用超时另设为 90 秒。项目继续使用 icrc / gpt-5.6-luna / medium。
 
 ## Cytoscape 与 CytoNCA
 
-- Cytoscape **3.10.0**：[官方发布](https://github.com/cytoscape/cytoscape/releases/tag/3.10.0)。本机安装于 `D:\Tools\Cytoscape_v3.10.0`，打开 `Cytoscape.exe`。
+- Cytoscape **3.10.0**：[官方发布](https://github.com/cytoscape/cytoscape/releases/tag/3.10.0)。成员自行选择安装目录，Windows 安装后打开该目录的 `Cytoscape.exe`；个人路径不作为仓库启动要求。
 - CytoNCA **2.1.6**：[官方 App Store](https://apps.cytoscape.org/apps/cytonca)。本机通过 Cytoscape 自身 App 安装接口安装官方 JAR；桌面 App Store 列表及 Apps → CytoNCA → Open 已核验。
 - 本机 Java 为 17.0.15。3.10.0 首次启动出现 `Invalid CEN header`；已核验安装包与官方 SHA-256 一致，在该软件的 `Cytoscape.vmoptions` 增加 `-Djdk.util.zip.disableZip64ExtraFieldValidation=true` 后启动正常。此为旧包兼容设置，其他机器仅在复现同类问题时评估，不照搬至全局 Java。
 - 使用显式合成链 `TEST_A—TEST_B—TEST_C`，在 CytoNCA 勾选 Degree / without weight 并执行 Analyze，实际得到 **1、2、1**。已保存插件节点表和 `.cys` 会话，证明安装和该项计算可用。
@@ -19,7 +21,7 @@ CytoNCA 安装测试不代表已完成真实 STRING 网络分析。现有网络 
 
 ## 五站访问
 
-以下来自本机当前网络，不能替代学校网络实测。
+以下来自 2026-09-13 开发机网络的已留存观察，不能替代当前连通性或学校网络实测。
 
 | 来源 | 2026-09-13 实测 | 待办 |
 |---|---|---|
@@ -31,6 +33,8 @@ CytoNCA 安装测试不代表已完成真实 STRING 网络分析。现有网络 
 
 普通网站账号、API 申请和批量下载授权分别核验；不能将注册成功视为全部访问权限已获得。密码和验证码由账号持有人保管，登录态仅存本机忽略目录。
 
+OMIM 的普通复选框点击曾实际执行，随后仍出现新挑战，未进入主页。这只说明当次环境未通过，不能概括为“Playwright 永远不能通过”。注册与登录解决的是部分访问条件，尚需取得完整原始导出并接续数据导入。
+
 重新采集带日期的首页证据：
 
 ```powershell
@@ -38,6 +42,12 @@ CytoNCA 安装测试不代表已完成真实 STRING 网络分析。现有网络 
 ```
 
 结果写入新的 `runs/diagnostics/sites_<日期时间>/`，包含 HTTP 原始响应、浏览器页面、截图和访问时间，不覆盖历史结果。首页核验没有正式查询或导出。
+
+## Venny 与测试依赖
+
+Venny 2.1.0 由 Python Playwright 直接操作官方页面，不通过上述 MCP。新 live/fixture 运行都依赖 Chromium、模型服务和 Venny 访问；Venny 不读取其他 Agent 的登录态或兼容脚本配置。2026-09-13 已验证有交集3及无交集0，真实药理输入仍待上游完整数据。产物与失败规则见 [Venny 接入](VENNY.md)。
+
+项目单元测试会替换远端调用；本地43项自动测试通过不代表所有网站当下可达。已有 HTML 报告可离线展示，新执行不能当作纯离线测试。
 
 ## 数据沉淀
 

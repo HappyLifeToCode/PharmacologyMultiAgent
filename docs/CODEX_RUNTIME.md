@@ -8,7 +8,7 @@
 | 本地 profile | icrc |
 | 模型 | gpt-5.6-luna |
 | 思考强度 | medium |
-| 生效范围 | 本项目五个角色的任务会话 |
+| 生效范围 | 本项目六种角色的任务会话 |
 
 这些可共享的执行设置已写入 [runtime.json](../configs/runtime.json)，不含密钥或服务地址。研究内容保存在 [任务清单](../tasks/tasks.jsonl)，填写方法见 [任务说明](../tasks/README.md)。运行器分别读取两份文件，通过 scripts/run_tasks.py 或工作台启动角色；配置文件本身不会自动开始任务。
 
@@ -72,3 +72,7 @@ codex exec -p icrc -m gpt-5.6-luna -c 'model_reasoning_effort="medium"' --json -
 运行器从本机配置中提取所用模型服务设置，在被忽略的 local/codex-home/ 下建立精简执行环境并保存必要认证副本；不复制其他桌面插件，也不修改全局配置。该目录含私人配置，不能分发。
 
 浏览器任务每个会话独立使用 Playwright MCP 0.0.64、headless、isolated 和 120 秒启动超时，使用当前 Python 环境对应的 Playwright Chromium；首次安装命令见 [快速启动](../README.md#快速启动)。MCP 通过 npx 按锁定版本启动，无需复制其他项目的 playwright-mcp 文件夹，首次使用需要网络下载。执行权限使用 workspace-write 与自动审批审查，不启用绕过审批的命令参数。被拦截的操作记录原因；账号和验证码留待人工。
+
+Venny 阶段使用 `pharm_demo/venny.py` 直接驱动 Python Playwright；它实际操作网页并保留 trace，不启动额外 Codex 会话，也不经过 MCP。疾病合并是另一个无模型工具步骤。因此当前完整流程是六种角色、七个模型会话、九个阶段。工具的启动超时分别生效，不能把 MCP 的 120 秒等同于所有浏览器操作超时。
+
+2026-09-13 完整合成演练已验证七个不同会话均使用指定模型与思考强度，实际 Venny 操作通过；这不代表已自动导出五库真实数据。更新 `agents/*.md` 可能改变后续恢复的角色输入签名，历史运行不回写；状态与缺口见 [项目进度](PROJECT_STATUS.md)。

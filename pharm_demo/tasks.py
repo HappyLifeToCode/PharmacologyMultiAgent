@@ -44,6 +44,7 @@ def prepare_task(body):
             "research_notes": notes.strip(), "organism": "Homo sapiens", "taxon_id": 9606,
             "batman_threshold": None, "batman_threshold_confirmed": False,
             "genecards_filter": "relevance_score > median_of_complete_query_results",
+            "genecards_median_scope": "pooled_query_rows", "genecards_median_status": "provisional",
             "string_confidence": 0.9, "string_additional_nodes": 0,
             "enrichment_input": "herb_disease_intersection", "enrichment_background": None,
             "enrichment_test_required": "hypergeometric", "multiple_testing": "Benjamini-Hochberg", "fdr_lt": 0.05}
@@ -69,7 +70,7 @@ def save_task(body, project_root):
     temp = None
     try:
         original = path.read_bytes() if path.exists() else b""
-        text = original.decode("utf-8-sig")
+        text = original.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
         for line in text.splitlines():
             if not line.strip():
                 continue
@@ -78,7 +79,7 @@ def save_task(body, project_root):
                 if current != task:
                     raise ValueError("同名任务内容已被修改，请使用不同的研究说明保存新任务")
                 return task, False
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=str(directory), delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=str(directory), delete=False) as f:
             temp = Path(f.name)
             f.write(text + ("\n" if text and not text.endswith("\n") else ""))
             f.write(json.dumps(task, ensure_ascii=False) + "\n")
