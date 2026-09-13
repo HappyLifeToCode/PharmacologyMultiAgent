@@ -10,7 +10,7 @@
 | 思考强度 | medium |
 | 生效范围 | 本项目五个角色的任务会话 |
 
-这些可共享的执行设置已写入 [runtime.json](../configs/runtime.json)，不含密钥或服务地址。研究内容保存在 [任务清单](../tasks/tasks.jsonl)，填写方法见 [任务说明](../tasks/README.md)。后续调度器分别读取两份文件。当前尚未实现读取配置并启动角色的调度器；配置文件本身不会自动启动任务或修改 Codex 全局设置。
+这些可共享的执行设置已写入 [runtime.json](../configs/runtime.json)，不含密钥或服务地址。研究内容保存在 [任务清单](../tasks/tasks.jsonl)，填写方法见 [任务说明](../tasks/README.md)。运行器分别读取两份文件，通过 scripts/run_tasks.py 或工作台启动角色；配置文件本身不会自动开始任务。
 
 每个开发者自行准备可用的本地 icrc profile 和认证信息，仓库不包含组内服务凭据。模型是否可用由组内服务决定；不支持时应报告错误，不自动切换模型。
 
@@ -22,7 +22,7 @@
 codex -p icrc -m gpt-5.6-luna -c 'model_reasoning_effort="medium"'
 ```
 
-后续调度器启动独立任务会话的基本命令形式：
+调度器启动独立任务会话的基本命令形式：
 
 ```powershell
 codex exec -p icrc -m gpt-5.6-luna -c 'model_reasoning_effort="medium"' --json -
@@ -43,6 +43,13 @@ codex exec -p icrc -m gpt-5.6-luna -c 'model_reasoning_effort="medium"' --json -
 
 ## 核验状态与参考
 
-2026-09-12 已核对开发机 Codex CLI 0.153.2 支持 exec、-p、-m、-c、--json 及标准输入任务。已核验本地 icrc profile 存在；尚未调用组内服务测试指定模型，也未运行采集任务。
+2026-09-12 已核对开发机 Codex CLI 0.153.2 支持 exec、-p、-m、-c、--json 及标准输入任务。已核验本地 icrc profile 存在；已实际调用组内服务验证指定模型，并运行独立角色的真实站点核验。
 
 官方参数说明：[CLI Reference](https://developers.openai.com/codex/cli/reference/)、[Configuration Reference](https://developers.openai.com/codex/config-reference/)。具体参数以成员本机版本帮助为准。
+
+
+## 本地隔离与 Playwright
+
+运行器从本机配置中提取所用模型服务设置，在被忽略的 local/codex-home/ 下建立精简执行环境并保存必要认证副本；不复制其他桌面插件，也不修改全局配置。该目录含私人配置，不能分发。
+
+浏览器任务每个会话独立使用 Playwright MCP 0.0.64、headless、isolated 和 120 秒启动超时，使用 prim 环境已有 Chromium。执行权限使用 workspace-write 与自动审批审查，不启用绕过审批的命令参数。被拦截的操作记录原因；账号和验证码留待人工。

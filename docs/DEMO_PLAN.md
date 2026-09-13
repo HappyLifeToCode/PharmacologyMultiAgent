@@ -14,7 +14,7 @@ flowchart TD
     E --> R
 ```
 
-协调 Agent 根据依赖调度，验证交付清单和错误状态，必要时携带具体问题退回负责 Agent。角色文件只是设计，必须接入真实会话和工具后才能声称多 Agent 已实现。
+协调 Agent 根据依赖调度，验证交付清单和错误状态，必要时携带具体问题退回负责 Agent。角色已接入独立 Codex 会话，交接、工具调用和异常状态可在本机工作台查看。
 
 任务入口为 [tasks/tasks.jsonl](../tasks/tasks.jsonl)，执行设置为 [configs/runtime.json](../configs/runtime.json)。运行器读取任务内容后，结合角色职责分配具体工作。
 
@@ -27,7 +27,7 @@ flowchart TD
 5. 接通 STRING/CytoNCA 与 DAVID；记录人类物种、网络阈值、额外节点设置、背景集和统计方法。
 6. 完整运行并检验断点续跑，生成报告与协作过程展示。
 
-执行工具已选定 Codex CLI，使用本地 icrc profile、gpt-5.6-luna 模型和 medium 思考强度。每个角色由独立任务会话执行，参数显式传入，见 [Codex 执行配置](CODEX_RUNTIME.md)。网页工具接入、调度器与真实运行仍待实现和验证。
+执行工具已选定 Codex CLI，使用本地 icrc profile、gpt-5.6-luna 模型和 medium 思考强度。每个角色由独立任务会话执行，参数显式传入，见 [Codex 执行配置](CODEX_RUNTIME.md)。Playwright 网页接入与调度器已实现并实测；真实站点核验保留受限结果，完整科学数据链仍待补齐。
 
 ## Demo 验收成果
 

@@ -67,3 +67,6 @@ node_modules/
 Thumbs.db
 Desktop.ini
 ~$*
+
+# Transient local task-list write lock
+tasks/.tasks.lock

@@ -1,0 +1,9 @@
+{
+  "evidence_type": "synthetic_fixture",
+  "notice": "合成工程验证，基因集合和术语是测试输入，不代表方剂、疾病、数据库查询或药理结论。",
+  "herb_genes": ["TP53", "EGFR", "AKT1", "TNF", "IL6"],
+  "disease_genes": ["EGFR", "AKT1", "TNF", "TSHR"],
+  "edges": [{"source": "EGFR", "target": "AKT1", "score": 0.95}, {"source": "AKT1", "target": "TNF", "score": 0.91}],
+  "background": ["TP53", "EGFR", "AKT1", "TNF", "IL6", "TSHR", "INS", "ALB", "APOE", "VEGFA"],
+  "terms": {"TEST_SIGNAL_A": ["EGFR", "AKT1", "TNF"], "TEST_SIGNAL_B": ["TP53", "IL6", "TSHR", "ALB"]}
+}

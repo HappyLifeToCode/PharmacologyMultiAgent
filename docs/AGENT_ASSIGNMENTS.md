@@ -6,12 +6,12 @@
 
 | 模块 | 开发负责人 | 协作负责人 | 当前状态 | 职责说明 |
 |---|---|---|---|---|
-| 协调 Agent | x | x | 设计阶段 | [coordinator](../agents/coordinator.md) |
-| 药材靶点 Agent | x | x | 设计阶段 | [herb_targets](../agents/herb_targets.md) |
-| 疾病靶点 Agent | x | x | 设计阶段 | [disease_targets](../agents/disease_targets.md) |
-| 网络分析 Agent | x | x | 设计阶段 | [network_analysis](../agents/network_analysis.md) |
-| 富集分析 Agent | X | x | 设计阶段 | [enrichment_analysis](../agents/enrichment_analysis.md) |
-| 共享数据处理与校验 | x | 两路靶点模块负责人 | 设计阶段 | 确定性程序，不单独设 Agent |
+| 协调 Agent | x | x | 基础实现已完成，待模块深化 | [coordinator](../agents/coordinator.md) |
+| 药材靶点 Agent | x | x | 基础实现已完成，待模块深化 | [herb_targets](../agents/herb_targets.md) |
+| 疾病靶点 Agent | x | x | 基础实现已完成，待模块深化 | [disease_targets](../agents/disease_targets.md) |
+| 网络分析 Agent | x | x | 基础实现已完成，待模块深化 | [network_analysis](../agents/network_analysis.md) |
+| 富集分析 Agent | X | x | 基础实现已完成，待模块深化 | [enrichment_analysis](../agents/enrichment_analysis.md) |
+| 共享数据处理与校验 | x | 两路靶点模块负责人 | 基础实现已完成，待模块深化 | 确定性程序，不单独设 Agent |
 
 ## 1. 协调 Agent
 
