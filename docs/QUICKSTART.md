@@ -2,16 +2,16 @@
 
 ## 当前能力
 
-五个角色由独立 Codex CLI 会话执行，统一使用本机 `icrc`、`gpt-5.6-luna`、`medium`。协调角色分别进行规划和验收，因此一次完整运行包含六个模型会话；标准化与交集是确定性程序，不伪装成额外 Agent。
+五个角色由独立 Codex CLI 会话执行，默认使用 `icrc`、`gpt-5.6-luna`、`medium`，执行设置见 `configs/runtime.json`。协调角色分别进行规划和验收，因此一次完整运行包含六个模型会话；标准化与交集是确定性程序，不伪装成额外 Agent。
 
 页面展示任务依赖、会话编号、真实工具事件、交接结果、截图、统计图及运行报告。真实来源核验与合成工程验证分别保存，不能混用。
 
 ## 1. 启动页面
 
-在项目目录打开 PowerShell：
+首次使用先完成 [README 的环境安装与执行配置](../README.md#快速启动)。以下命令在项目根目录的 PowerShell 中执行，使用项目 `.venv`；已有环境可替换解释器路径。
 
 ```powershell
-& D:\Anaconda\envs\prim\python.exe server/app.py --port 8766
+.\.venv\Scripts\python.exe server/app.py --port 8766
 ```
 
 打开 [本机工作台](http://127.0.0.1:8766)。也可以使用 `scripts/start_demo.ps1`。服务仅监听本机，不自动对外开放。
@@ -32,8 +32,8 @@
 也可以从命令行运行：
 
 ```powershell
-& D:\Anaconda\envs\prim\python.exe scripts/run_tasks.py --mode live
-& D:\Anaconda\envs\prim\python.exe scripts/run_tasks.py --mode fixture
+.\.venv\Scripts\python.exe scripts/run_tasks.py --mode live
+.\.venv\Scripts\python.exe scripts/run_tasks.py --mode fixture
 ```
 
 两条命令是不同选择，按需执行其中一条。同一时刻只允许一个完整运行，内部的独立角色可以并行。
@@ -56,11 +56,11 @@
 ## 5. 环境检查
 
 ```powershell
-& D:\Anaconda\envs\prim\python.exe scripts/doctor.py
-& D:\Anaconda\envs\prim\python.exe -m pytest -q tests
+.\.venv\Scripts\python.exe scripts/doctor.py
+.\.venv\Scripts\python.exe -m pytest -q tests
 ```
 
-本次使用 `D:\Anaconda\envs\prim`（Python 3.9），所需 Python 库和 Chromium 已存在，没有重新创建环境。合作者在其他机器安装依赖前应核对本机条件，`requirements.txt` 给出依赖范围。
+`doctor.py` 检查本地依赖、命令和配置文件是否存在，结果保存在 `runs/diagnostics/environment.json`；它不验证模型服务认证或网站权限。测试验证代码与合成输入，不需要真实数据库账号，也不代表真实研究分析完成。
 
 Playwright MCP 固定 `0.0.64`，保留 `--save-trace`；Codex 的 MCP 启动超时使用 `startup_timeout_sec=120`（Kimi 同义设置为 120000 毫秒）。启动前缺少浏览器/MCP 会报错，不以“没有工具”的假定跳过科学步骤。
 

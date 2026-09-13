@@ -8,11 +8,46 @@
 
 ## 快速启动
 
+以下步骤面向首次克隆仓库的开发者，使用 **Windows PowerShell**。建议使用 Python 3.11；执行 Agent 还需要 Node.js（含 npm/npx）、兼容的 Codex CLI 和可用的模型服务。完整浏览器流程目前仅在 Windows 验证，尚未提供 macOS/Linux 的完整适配。
+
+### 1. 获取项目并安装依赖
+
+先安装 [Git](https://git-scm.com/downloads)、[Python](https://www.python.org/downloads/) 和 [Node.js LTS](https://nodejs.org/)，确保终端可以找到对应命令。
+
 ```powershell
-& D:\Anaconda\envs\prim\python.exe server/app.py --port 8766
+git clone https://github.com/HappyLifeToCode/PharmacologyMultiAgent.git
+cd PharmacologyMultiAgent
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-打开 [本机工作台](http://127.0.0.1:8766)。操作步骤见 [启动说明](docs/QUICKSTART.md)，组会展示见 [演示安排](docs/MEETING_DEMO.md)。
+命令直接使用项目内的虚拟环境，无需激活脚本或修改 PowerShell 执行策略。已有 Python 环境也可使用，将 `.\.venv\Scripts\python.exe` 换成该环境的解释器即可。
+
+### 2. 配置 Agent 执行环境
+
+按照 [Codex 执行配置](docs/CODEX_RUNTIME.md) 安装并配置兼容的 Codex CLI，确保 `codex --version` 和 `npx --version` 可运行。仓库默认使用 `icrc` profile、`gpt-5.6-luna` 模型和 `medium` 思考强度；这些是项目默认值，各成员需自行准备对应服务的访问权限，仓库不分发凭据。
+
+当前适配器读取独立的 `<profile>.config.toml` 文件，不能仅凭普通 Codex 登录就直接运行。其他服务或模型需修改 `configs/runtime.json`，并按执行配置文档核验 CLI 与配置格式的兼容性。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/doctor.py
+```
+
+检查输出中的依赖、Codex、npx、profile 和 Chromium 是否就绪。该检查仅核对本地环境，模型调用和数据库访问需在实际运行中验证。
+
+### 3. 启动工作台
+
+```powershell
+.\.venv\Scripts\python.exe server/app.py --port 8766
+```
+
+打开 [本机工作台](http://127.0.0.1:8766)。服务默认仅监听本机，终端保持运行即可。也可使用 `scripts/start_demo.ps1`，它优先使用项目 `.venv`，否则使用当前环境的 `python`，支持 `-Python` 显式指定解释器。
+
+页面查看和任务保存不需要调用模型；点击执行后才需要可用的 Codex 环境，合成工程验证也会调用模型。首次克隆没有历史运行数据，可先提交合成工程验证任务检查协作流程，再准备真实数据库账号、参数与导出。运行生成的 `data/`、`runs/`、`reports/` 默认不提交 Git。
+
+后续操作见 [启动说明](docs/QUICKSTART.md)，展示流程见 [演示安排](docs/MEETING_DEMO.md)。
 
 ### 从页面提交研究任务
 

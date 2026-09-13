@@ -7,3 +7,4 @@ networkx>=2.8
 scipy>=1.9
 toml>=0.10
 pytest>=7
+httpx>=0.23

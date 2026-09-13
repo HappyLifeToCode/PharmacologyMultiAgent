@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -123,7 +124,7 @@ class Runner:
             "你是药理多 Agent Demo 的独立工作会话。使用中文。范围只限本次任务，不修改项目代码，不读取账号文件，不安装软件，不注册账号，不发送信息给他人。",
             "你应独立核查收到的证据并返回结构化交接，不把别人的成功或失败机械当成自己的结论。不得编造靶点或富集结果。",
             definition,
-            "项目 Python：D:/Anaconda/envs/prim/python.exe。任务：" + json.dumps(self.task, ensure_ascii=False),
+            "项目 Python：" + Path(sys.executable).as_posix() + "。任务：" + json.dumps(self.task, ensure_ascii=False),
             "运行模式：" + self.manifest["mode"] + ("。这是明确标记的合成工程验证，所有基因集合和通路只用于验证代码，不代表该方剂的药理结果。" if self.manifest["mode"] == "fixture" else "。只承认真实来源证据。"),
             "当前输出目录：" + directory.as_posix(),
             "如果需要浏览器，只用 playwright browser_run_code / browser_take_screenshot / browser_wait_for。单次返回正文最多 1800 字，等待 2~5 秒；不要返回全页 DOM。不要因首页存在 LOGIN 链接就判定必须登录，只有查询或导出被拦才记录账号需求。遇验证码、访问拒绝不绕过，停止该站点并记录。",

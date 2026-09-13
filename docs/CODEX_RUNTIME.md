@@ -14,6 +14,25 @@
 
 每个开发者自行准备可用的本地 icrc profile 和认证信息，仓库不包含组内服务凭据。模型是否可用由组内服务决定；不支持时应报告错误，不自动切换模型。
 
+## 首次接入
+
+当前运行适配器按组内 CLI 的独立 profile 文件布局实现，完整流程仅在 Windows 验证。请从所用模型服务的维护者处获取兼容 CLI 的安装方式与配置说明，安装后确保终端能执行 `codex --version`。公开仓库不附带组内 CLI 安装包或服务凭据；仅安装另一版本的 Codex CLI 并登录，并不保证能直接使用此适配器。
+
+运行器默认从当前用户的 `.codex/` 目录读取：
+
+```text
+<用户主目录>/.codex/
+  config.toml           公共服务设置（如需）
+  icrc.config.toml      与 runtime.json 中 codex_profile 同名的独立 profile
+  auth.json             所用认证方式需要时提供
+```
+
+`icrc` 是默认 profile 名称，并非通用账号。其他 profile 对应 `<profile>.config.toml`；服务连接和认证必须由成员在本机配置，不能提交仓库。当前代码不会从 `config.toml` 的 `[profiles.<名称>]` 区段自动读取 profile，因此使用这种布局的 CLI 需要另行适配并验证。
+
+如需切换模型服务，编辑 `configs/runtime.json` 中的 `codex_profile`、`model` 和 `model_reasoning_effort`，并确认服务支持所选模型及思考强度。执行器还依赖 JSON 事件、结构化结果、MCP 配置和审批参数，兼容性以实际调用为准。项目不会修改用户全局默认模型。
+
+若配置文件存放在其他目录，可通过环境变量 `PHARM_CODEX_SOURCE_HOME` 指向该目录。环境检查与执行器均使用该来源目录。
+
 ## 命令形式
 
 交互式执行时，在项目目录使用：
@@ -52,4 +71,4 @@ codex exec -p icrc -m gpt-5.6-luna -c 'model_reasoning_effort="medium"' --json -
 
 运行器从本机配置中提取所用模型服务设置，在被忽略的 local/codex-home/ 下建立精简执行环境并保存必要认证副本；不复制其他桌面插件，也不修改全局配置。该目录含私人配置，不能分发。
 
-浏览器任务每个会话独立使用 Playwright MCP 0.0.64、headless、isolated 和 120 秒启动超时，使用 prim 环境已有 Chromium。执行权限使用 workspace-write 与自动审批审查，不启用绕过审批的命令参数。被拦截的操作记录原因；账号和验证码留待人工。
+浏览器任务每个会话独立使用 Playwright MCP 0.0.64、headless、isolated 和 120 秒启动超时，使用当前 Python 环境对应的 Playwright Chromium；首次安装命令见 [快速启动](../README.md#快速启动)。MCP 通过 npx 按锁定版本启动，无需复制其他项目的 playwright-mcp 文件夹，首次使用需要网络下载。执行权限使用 workspace-write 与自动审批审查，不启用绕过审批的命令参数。被拦截的操作记录原因；账号和验证码留待人工。

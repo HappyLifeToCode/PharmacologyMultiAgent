@@ -34,7 +34,7 @@ CytoNCA 安装测试不代表已完成真实 STRING 网络分析。现有网络 
 重新采集带日期的首页证据：
 
 ```powershell
-& D:\Anaconda\envs\prim\python.exe scripts/check_sites.py
+.\.venv\Scripts\python.exe scripts/check_sites.py
 ```
 
 结果写入新的 `runs/diagnostics/sites_<日期时间>/`，包含 HTTP 原始响应、浏览器页面、截图和访问时间，不覆盖历史结果。首页核验没有正式查询或导出。
