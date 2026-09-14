@@ -19,6 +19,7 @@ from .venny import run_venny
 from .archive import archive_run, import_directory
 from .sources import SOURCES, probe, string_network
 from .cytoscape import run_cytoscape
+from .david import run_david
 
 LEGACY_STAGES = ["coordinator_plan", "herb_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
 STAGES = ["coordinator_plan", "herb_targets", "genecards_targets", "omim_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
@@ -317,6 +318,8 @@ class Runner:
                     self.manifest["metrics"].update(network_nodes=network["node_count"], network_edges=network["edge_count"])
                 elif p.endswith("/enrichment_fixture.json"):
                     self.manifest["metrics"]["significant_terms"] = read_json(self.directory / p)["significant_count"]
+                elif p.endswith("/enrichment_david.json"):
+                    self.manifest["metrics"]["significant_terms"] = read_json(self.directory / p)["significant_count"]
             return
         if common is None:
             name = "string" if role == "network_analysis" else "david"
@@ -324,6 +327,7 @@ class Runner:
             return
         directory = self.begin(role)
         evidence, files, limitation = {}, [], None
+        tool_status = None
         try:
             if not common["genes"]:
                 self.finish(role, {"status": "skipped", "summary": "真实交集为空，按依赖规则跳过分析", "blockers": [], "artifacts": []}, directory)
@@ -392,19 +396,27 @@ class Runner:
                 files = ["enrichment_fixture.json", "enrichment_fixture.png"]
                 self.manifest["metrics"]["significant_terms"] = evidence["significant_count"]
             else:
-                evidence = {"genes": common["genes"], "background": self.task.get("enrichment_background"), "required_test": self.task["enrichment_test_required"]}
-                limitation = "DAVID 导出、背景集及实际统计方法尚待确认，未生成富集结果。"
+                self.event(role, "tool.started", "核对 DAVID 参数，按明确背景提交共同靶点并导出官方结果")
+                evidence = run_david(common["genes"], self.task, directory)
+                tool_status = evidence["status"]
+                limitation = evidence.get("limitation")
+                files = [p.name for p in directory.iterdir() if p.is_file() and public_artifact(p)]
+                if "significant_count" in evidence:
+                    self.manifest["metrics"]["significant_terms"] = evidence["significant_count"]
+                self.event(role, "tool." + tool_status, limitation or "DAVID 官方 GO/KEGG 表已导出并核对")
             instruction = "独立核查收到的分析证据、统计口径与限制，返回角色交接。无需重复计算或读取其他文件。合成数据必须明确写在 summary，不将本地算法标为 DAVID 或 CytoNCA。"
             if self.manifest["mode"] == "fixture":
                 instruction += "本次验收只判断合成输入、计算和交接是否一致。若通过，status=succeeded；真实数据库、CytoNCA、DAVID 尚未完成的限制写入 findings，不是合成工程任务的 blockers。若计算确实错误才返回 failed/partial，并指出具体数值错误。"
             if role == "enrichment_analysis" and self.manifest["mode"] == "live":
-                instruction = "使用浏览器检查 DAVID 提交及导出入口；不要注册账号。背景集未确认时不提交正式分析。记录缺少的条件和截图，不能编造富集表。"
-            result, meta = self.call_agent(role, directory, instruction, evidence, browser=(role == "enrichment_analysis" and self.manifest["mode"] == "live"))
+                instruction = "核查执行器返回的 DAVID 官方结果、识别计数、背景与限制。不要重复提交网络请求。EASE 是修改版 Fisher 检验，不标为普通超几何检验；BH 使用 benjamini，不能改用另一个 fdr 字段。工程样本不代表正式研究完成；blocked/partial 工具结果不得宣称完整成功，零显著结果不算失败。"
+            result, meta = self.call_agent(role, directory, instruction, evidence, browser=False)
             result["artifacts"].extend(files)
             if limitation:
                 if result["status"] not in ("failed", "blocked"):
                     result["status"] = "partial" if files else "blocked"
                 result["blockers"].append(limitation)
+            if tool_status in ("blocked", "partial") and result["status"] not in ("failed", "blocked"):
+                result["status"] = tool_status
             self.finish(role, result, directory, meta)
         except Exception as exc:
             files = [p.relative_to(directory).as_posix() for p in directory.rglob("*")

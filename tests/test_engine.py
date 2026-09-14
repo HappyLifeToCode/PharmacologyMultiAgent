@@ -102,6 +102,36 @@ def test_live_cytoscape_handoff_preserves_evidence_and_partial_status(isolated_p
     assert list((root / "data/pharm/SYNTHETIC/04_ppi").rglob("cytoscape_execution.json"))
 
 
+@pytest.mark.parametrize("outcome", ["succeeded", "blocked", "partial", "failed"])
+def test_live_david_uses_same_intersection_and_archives_outputs(isolated_project, monkeypatch, outcome):
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    def fake_david(genes, task, directory):
+        assert genes == ["TP53", "MDM2"]  # full common targets, no network Degree selection
+        result = {"status": outcome, "scientific_complete": False}
+        if outcome != "succeeded": result["limitation"] = "DAVID test limitation"
+        write_json(directory / "david_execution.json", result)
+        if outcome == "failed": raise ValueError("DAVID schema changed")
+        if outcome == "succeeded":
+            result["significant_count"] = 0
+            write_json(directory / "enrichment_david.json", result)
+            (directory / "david_all_terms.csv").write_text("category,term,benjamini\n")
+        return result
+    monkeypatch.setattr(engine, "run_david", fake_david)
+    runner.analysis_stage("enrichment_analysis", {"genes": ["TP53", "MDM2"], "evidence_type": "real_input"})
+    stage = runner.manifest["stages"]["enrichment_analysis"]
+    assert stage["status"] == outcome
+    assert any(p.endswith("david_execution.json") for p in stage["artifacts"])
+    assert list((root / "data/pharm/SYNTHETIC/05_enrich").rglob("david_execution.json"))
+    if outcome == "succeeded":
+        assert runner.manifest["metrics"]["significant_terms"] == 0
+        runner.manifest["metrics"].clear()
+        runner.analysis_stage("enrichment_analysis", {"genes": ["TP53", "MDM2"], "evidence_type": "real_input"})
+        assert runner.manifest["metrics"]["significant_terms"] == 0
+
+
 @pytest.mark.parametrize("error", ["Official Venny unavailable", "Venny results differ from independent Python set verification"])
 def test_venny_failure_cannot_pass_analysis_or_reuse_old_analysis(isolated_project, monkeypatch, error):
     root, calls = isolated_project
