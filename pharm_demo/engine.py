@@ -18,6 +18,7 @@ from .processing import analyze_network, write_network
 from .venny import run_venny
 from .archive import archive_run, import_directory
 from .sources import SOURCES, probe, string_network
+from .cytoscape import run_cytoscape
 
 LEGACY_STAGES = ["coordinator_plan", "herb_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
 STAGES = ["coordinator_plan", "herb_targets", "genecards_targets", "omim_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
@@ -333,10 +334,20 @@ class Runner:
                     net = {"nodes": common["genes"], "edges": fixture["edges"]}
                 else:
                     net = string_network(common["genes"], self.task, directory)
-                    limitation = "拓扑度值由 NetworkX 计算；Cytoscape/CytoNCA 尚未接通，不能标为原方案已完成。"
                 result = analyze_network(net["nodes"], net["edges"])
                 result["method"] = "NetworkX degree"
                 result["evidence_type"] = common["evidence_type"]
+                if self.manifest["mode"] == "live":
+                    result["provenance"] = net.get("provenance", {})
+                    net["evidence_type"] = common["evidence_type"]
+                    self.event(role, "tool.started", "将 STRING 节点和边交给 Cytoscape；按显式配置调用 CytoNCA")
+                    cyto = run_cytoscape(net, directory, self.task.get("network_topology"))
+                    result["cytoscape"] = cyto
+                    if cyto["status"] == "succeeded":
+                        result["method"] = cyto["method"]
+                        result["degree_table"] = result["degrees"] = cyto["degree_table"]
+                    limitation = cyto.get("limitation", "研究方法完整性尚待确认")
+                    self.event(role, "tool." + cyto["status"], limitation)
                 write_json(directory / "network.json", result)
                 with PLOT_LOCK:
                     write_network(result, directory / "network.png")
@@ -345,6 +356,8 @@ class Runner:
                     writer.writeheader()
                     writer.writerows(result["degree_table"])
                 evidence, files = result, ["network.json", "network.png", "degrees.csv"]
+                if self.manifest["mode"] == "live":
+                    files = [p.name for p in directory.iterdir() if p.is_file() and public_artifact(p)]
                 self.manifest["metrics"].update(network_nodes=result["node_count"], network_edges=result["edge_count"])
             elif self.manifest["mode"] == "fixture":
                 from scipy.stats import hypergeom
@@ -389,10 +402,13 @@ class Runner:
             result, meta = self.call_agent(role, directory, instruction, evidence, browser=(role == "enrichment_analysis" and self.manifest["mode"] == "live"))
             result["artifacts"].extend(files)
             if limitation:
-                result["status"] = "partial" if files else "blocked"
+                if result["status"] not in ("failed", "blocked"):
+                    result["status"] = "partial" if files else "blocked"
                 result["blockers"].append(limitation)
             self.finish(role, result, directory, meta)
         except Exception as exc:
+            files = [p.relative_to(directory).as_posix() for p in directory.rglob("*")
+                     if p.is_file() and public_artifact(p.relative_to(directory))]
             self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": files}, directory)
 
     def run(self):

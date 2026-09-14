@@ -48,6 +48,16 @@ def probe_all(directory):
 
 def string_network(genes, task, directory):
     """Use STRING's public API; preserve ID mapping, unmapped genes and raw data."""
+    import math
+    from .processing import normalize_symbols
+    normalized, rejected = normalize_symbols(genes)
+    if rejected or len(normalized) != len(genes) or not genes:
+        raise ValueError("STRING requires nonempty unique well-formed input symbols")
+    confidence = float(task["string_confidence"])
+    if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+        raise ValueError("STRING confidence must be finite and between 0 and 1")
+    if task["string_additional_nodes"] != 0:
+        raise ValueError("Only explicit STRING additional_nodes=0 is currently supported")
     target = Path(directory)
     session = requests.Session()
     from requests.adapters import HTTPAdapter
@@ -55,6 +65,8 @@ def string_network(genes, task, directory):
     retry = Retry(total=1, connect=1, read=1, backoff_factor=1, status_forcelist=[502, 503, 504], allowed_methods=["GET", "POST"])
     session.mount("https://", HTTPAdapter(max_retries=retry))
     target.mkdir(parents=True, exist_ok=True)
+    write_json(target / "string_input.json", {"genes": genes, "taxon_id": task["taxon_id"],
+               "confidence": confidence, "additional_nodes": 0, "requested_version": task.get("string_version", "12.0")})
     version_response = session.get("https://string-db.org/api/json/version", timeout=(10, 30))
     version_response.raise_for_status()
     versions = version_response.json()
@@ -110,9 +122,10 @@ def string_network(genes, task, directory):
             continue
         seen.add(key)
         score = float(edge["score"])
-        if score < float(task["string_confidence"]):
+        if not math.isfinite(score) or not 0 <= score <= 1 or score < confidence:
             raise ValueError("STRING 返回低于任务阈值的边")
         edges.append({"source": id_to_gene[a], "target": id_to_gene[b], "score": score})
-    meta = {"source": "STRING public API", "accessed_at": now(), "api": api, "version": required_version, "parameters": {"species": common["species"], "required_score": round(float(task["string_confidence"]) * 1000), "add_nodes": int(task["string_additional_nodes"])}, "unmapped": sorted(set(genes) - mapped), "mapped": sorted(mapped)}
+    connected = {e[k] for e in edges for k in ("source", "target")}
+    meta = {"source": "STRING public API", "accessed_at": now(), "api": api, "version": required_version, "parameters": {"species": common["species"], "required_score": round(float(task["string_confidence"]) * 1000), "add_nodes": int(task["string_additional_nodes"])}, "unmapped": sorted(set(genes) - mapped), "mapped": sorted(mapped), "isolated": sorted(mapped - connected)}
     write_json(target / "string_provenance.json", meta)
     return {"nodes": sorted(mapped), "edges": edges, "provenance": meta}

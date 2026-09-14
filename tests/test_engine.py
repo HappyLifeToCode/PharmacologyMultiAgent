@@ -68,6 +68,40 @@ def test_missing_live_data_blocks_science_but_checks_independent_sources(isolate
     assert not result["scientific_complete"]
 
 
+@pytest.mark.parametrize("outcome", ["succeeded", "blocked", "failed", "review_failed"])
+def test_live_cytoscape_handoff_preserves_evidence_and_partial_status(isolated_project, monkeypatch, outcome):
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    runner.task["network_topology"] = {"metrics": ["Degree"], "weighted": False, "purpose": "engineering_smoke"}
+    monkeypatch.setattr(engine, "string_network", lambda genes, task, directory:
+                        {"nodes": genes, "edges": [], "provenance": {"unmapped": []}})
+    def fake_cytoscape(net, directory, topology):
+        assert net["nodes"] == ["TP53"]
+        assert topology == runner.task["network_topology"]
+        result = {"status": "succeeded" if outcome == "review_failed" else outcome, "method": "CytoNCA test adapter", "limitation": "Research not confirmed",
+                  "degree_table": [{"gene_symbol": "TP53", "degree": 0.0}]}
+        write_json(directory / "cytoscape_execution.json", result)
+        if outcome == "failed":
+            raise ValueError("Plugin table mismatch")
+        return result
+    monkeypatch.setattr(engine, "run_cytoscape", fake_cytoscape)
+    if outcome == "review_failed":
+        def failed_review(*args, **kwargs):
+            return {"status": "failed", "summary": "Evidence rejected", "blockers": ["Review mismatch"], "artifacts": []}, None
+        monkeypatch.setattr(runner, "call_agent", failed_review)
+    runner.analysis_stage("network_analysis", {"genes": ["TP53"], "evidence_type": "real_input"})
+    stage = runner.manifest["stages"]["network_analysis"]
+    assert stage["status"] == ("failed" if outcome in ("failed", "review_failed") else "partial")
+    assert any(p.endswith("cytoscape_execution.json") for p in stage["artifacts"])
+    assert "archive_error" not in runner.manifest
+    if outcome != "failed":
+        network = engine.read_json(runner.directory / stage["directory"] / "network.json")
+        assert network["method"] == ("CytoNCA test adapter" if outcome in ("succeeded", "review_failed") else "NetworkX degree")
+    assert list((root / "data/pharm/SYNTHETIC/04_ppi").rglob("cytoscape_execution.json"))
+
+
 @pytest.mark.parametrize("error", ["Official Venny unavailable", "Venny results differ from independent Python set verification"])
 def test_venny_failure_cannot_pass_analysis_or_reuse_old_analysis(isolated_project, monkeypatch, error):
     root, calls = isolated_project
