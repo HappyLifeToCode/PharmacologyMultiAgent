@@ -13,5 +13,10 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=["live", "fixture"], default="live")
     parser.add_argument("--resume")
     args = parser.parse_args()
-    task_id = args.task or task_list()[0]["task_id"]
+    task_id = args.task
+    if not args.resume and not task_id:
+        tasks = task_list()
+        if not tasks:
+            parser.error("尚无本地任务，请先在工作台保存任务，或参照 tasks/README.md 创建本地任务清单。")
+        task_id = tasks[0]["task_id"]
     print("run_id=" + start(task_id, args.mode, resume=args.resume, background=False))

@@ -37,7 +37,11 @@ def safe_name(value):
 
 
 def task_list():
-    tasks = [json.loads(line) for line in (ROOT / "tasks/tasks.jsonl").read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    # Never load shared examples or the legacy tracked task list automatically.
+    path = ROOT / "tasks/tasks.local.jsonl"
+    if not path.exists():
+        return []
+    tasks = [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     ids = [safe_name(t["task_id"]) for t in tasks]
     if len(ids) != len(set(ids)):
         raise ValueError("任务清单存在重复 task_id")

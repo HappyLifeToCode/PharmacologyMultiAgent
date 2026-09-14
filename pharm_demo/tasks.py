@@ -61,7 +61,7 @@ def save_task(body, project_root):
     task = prepare_task(body)
     directory = Path(project_root) / "tasks"
     directory.mkdir(parents=True, exist_ok=True)
-    path, lock = directory / "tasks.jsonl", directory / ".tasks.lock"
+    path, lock = directory / "tasks.local.jsonl", directory / ".tasks.lock"
     try:
         fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:

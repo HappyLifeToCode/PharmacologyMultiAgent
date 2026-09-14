@@ -46,7 +46,7 @@ flowchart TD
 | 富集 | DAVID 入口和条件核验；合成模式使用本地超几何检验/BH 校正 | 正式 DAVID 提交、导出、背景集及方法复核 |
 | 证据与报告 | 分阶段归档、哈希、事件、下载及离线报告 | 用完整真实输入完成科学验收 |
 
-任务入口为 [tasks/tasks.jsonl](../tasks/tasks.jsonl)，也可在左侧“新建任务”填写。执行设置为 [configs/runtime.json](../configs/runtime.json)；默认 Codex CLI、icrc、gpt-5.6-luna、medium，接入要求见 [Codex 配置](CODEX_RUNTIME.md)。
+任务入口为 `tasks/tasks.local.jsonl`，也可在左侧“新建任务”填写。执行设置为 [configs/runtime.json](../configs/runtime.json)；默认 Codex CLI、icrc、gpt-5.6-luna、medium，接入要求见 [Codex 配置](CODEX_RUNTIME.md)。
 
 首轮选定的芍药甘草汤 × 甲亢是 Demo 案例，不是从原文方法段识别出的药材清单。甲状腺癌补充流程（独立癌症靶点网络 → 度值 Top 50 → 主要交集外候选靶点 → BATMAN 回溯成分与药材）尚未实现，不能把当前主流程描述为已覆盖这部分研究。
 

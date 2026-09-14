@@ -10,7 +10,7 @@
 | 思考强度 | medium |
 | 生效范围 | 本项目六种角色的任务会话 |
 
-这些可共享的执行设置已写入 [runtime.json](../configs/runtime.json)，不含密钥或服务地址。研究内容保存在 [任务清单](../tasks/tasks.jsonl)，填写方法见 [任务说明](../tasks/README.md)。运行器分别读取两份文件，通过 scripts/run_tasks.py 或工作台启动角色；配置文件本身不会自动开始任务。
+这些可共享的执行设置已写入 [runtime.json](../configs/runtime.json)，不含密钥或服务地址。研究内容保存在 [本地任务说明](../tasks/README.md)，填写方法见 [任务说明](../tasks/README.md)。运行器分别读取两份文件，通过 scripts/run_tasks.py 或工作台启动角色；配置文件本身不会自动开始任务。
 
 每个开发者自行准备可用的本地 icrc profile 和认证信息，仓库不包含组内服务凭据。模型是否可用由组内服务决定；不支持时应报告错误，不自动切换模型。
 

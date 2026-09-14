@@ -70,3 +70,7 @@ Desktop.ini
 
 # Transient local task-list write lock
 tasks/.tasks.lock
+
+# Personal workbench tasks, including the retired tracked location
+/tasks/tasks.local.jsonl
+/tasks/tasks.jsonl

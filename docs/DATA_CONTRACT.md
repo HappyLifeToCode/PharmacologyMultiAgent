@@ -18,7 +18,7 @@
 
 ## 任务输入与执行设置
 
-研究任务保存在 [tasks/tasks.jsonl](../tasks/tasks.jsonl)，每行一条，以 task_id 标识；执行工具和模型来自 [configs/runtime.json](../configs/runtime.json)。字段说明见 [任务清单说明](../tasks/README.md)。研究任务与运行状态分开保存。
+研究任务保存在 `tasks/tasks.local.jsonl`，每行一条，以 task_id 标识；执行工具和模型来自 [configs/runtime.json](../configs/runtime.json)。字段说明见 [任务清单说明](../tasks/README.md)。研究任务与运行状态分开保存。
 
 task_id 标识研究任务，agent_role 标识执行阶段，attempt 标识重试。当前双库通过 genecards_targets、omim_targets 两个阶段键区分，不额外生成 subtask_id；将来拆分逐疾病子任务时再定义相应编号契约。disease_targets 在新版中是程序合并阶段，在旧版中是联合疾病会话，应结合 workflow_version 判断。
 
@@ -54,7 +54,7 @@ runs/<run_id>/events.jsonl 按时间追加 timestamp、role、type、message；�
 
 ## 工作台任务提交
 
-`POST /api/tasks` 接收 `formula`、`herbs`（数组）、`diseases`（数组）、可选 `research_notes` 与 `import_batch`。服务端校验并追加到 `tasks/tasks.jsonl`，返回 `task` 和 `created`；重复的相同内容复用同一 ID。模型、凭据、任意输出路径不能经此接口设置。
+`POST /api/tasks` 接收 `formula`、`herbs`（数组）、`diseases`（数组）、可选 `research_notes` 与 `import_batch`。服务端校验并追加到 `tasks/tasks.local.jsonl`，返回 `task` 和 `created`；重复的相同内容复用同一 ID。模型、凭据、任意输出路径不能经此接口设置。
 
 `POST /api/run` 继续接收已保存的 `task_id` 与 `mode`，返回 `run_id`。任务保存成功而启动失败时不撤回任务；用户可稍后重试。新建/修改后的任务用于新的运行，已有 manifest 中的任务快照不变。
 

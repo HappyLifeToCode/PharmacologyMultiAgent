@@ -7,8 +7,43 @@ def body():
     return {"formula": "芍药甘草汤", "herbs": ["白芍", "炙甘草", "白芍"], "diseases": ["Hyperthyroidism"], "research_notes": "保留原始来源与访问日期"}
 
 
+def test_fresh_checkout_ignores_shared_and_legacy_tasks(tmp_path, monkeypatch):
+    from pharm_demo import common
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    assert common.task_list() == []
+    directory = tmp_path / "tasks"
+    directory.mkdir()
+    for name in ("tasks.jsonl", "tasks.example.jsonl"):
+        (directory / name).write_text('{"task_id":"shared_test"}\n', encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in directory.iterdir()}
+    assert common.task_list() == []
+    task, created = save_task(body(), tmp_path)
+    assert created and common.task_list() == [task]
+    for name, content in before.items():
+        assert (directory / name).read_bytes() == content
+
+
+def test_cli_empty_tasks_and_resume_without_task_list(tmp_path, monkeypatch, capsys):
+    import runpy
+    import sys
+    from pathlib import Path
+    from pharm_demo import common, engine
+    script = Path(__file__).resolve().parents[1] / "scripts/run_tasks.py"
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    calls = []
+    monkeypatch.setattr(engine, "start", lambda *args, **kwargs: calls.append((args, kwargs)) or "old_run")
+    monkeypatch.setattr(sys, "argv", [str(script)])
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(script), run_name="__main__")
+    assert error.value.code == 2 and not calls
+    assert "tasks/README.md" in capsys.readouterr().err
+    monkeypatch.setattr(sys, "argv", [str(script), "--resume", "old_run"])
+    runpy.run_path(str(script), run_name="__main__")
+    assert calls == [((None, "live"), {"resume": "old_run", "background": False})]
+
+
 def test_save_preserves_existing_tasks_and_deduplicates_retries(tmp_path):
-    p = tmp_path / "tasks/tasks.jsonl"
+    p = tmp_path / "tasks/tasks.local.jsonl"
     p.parent.mkdir()
     p.write_text('{"task_id":"existing","extra":"用户已有字段"}', encoding="utf-8-sig")
     task, created = save_task(body(), tmp_path)
@@ -27,7 +62,7 @@ def test_save_preserves_existing_tasks_and_deduplicates_retries(tmp_path):
 def test_invalid_tasks_are_not_persisted(tmp_path, change):
     with pytest.raises(ValueError):
         save_task(dict(body(), **change), tmp_path)
-    assert not (tmp_path / "tasks/tasks.jsonl").exists()
+    assert not (tmp_path / "tasks/tasks.local.jsonl").exists()
 
 
 def test_task_api_persists_and_starts_selected_task(tmp_path, monkeypatch):

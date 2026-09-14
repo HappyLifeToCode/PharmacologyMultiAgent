@@ -53,7 +53,7 @@ python -m venv .venv
 
 在左侧“新建任务”填写方剂或研究名称、药材、疾病关键词和可选研究说明。药材及疾病支持按行或逗号分隔。
 
-- **保存任务**：写入 `tasks/tasks.jsonl`，可从左侧选择后执行；相同内容重复保存会复用同一任务。
+- **保存任务**：写入 `tasks/tasks.local.jsonl`，可从左侧选择后执行；相同内容重复保存会复用同一任务。
 - **保存并启动**：保存任务后调用现有执行器，启动独立 Codex Agent 会话。页面选择新运行并展示状态、工具事件和交接产物，左侧表单保持可见。
 - **阶段详情**：点击中间任意流程节点，在右侧查看结果；左侧表单保持可见。产物文件点击直接下载，运行报告也提供下载入口。
 
@@ -106,14 +106,14 @@ Agent 负责执行任务、调用工具及反馈异常；中位数计算、去�
 | [组会演示手册](docs/MEETING_DEMO.md) | 新版双库并行演示、模式解释、离线准备与研究限制 |
 | [数据交接约定](docs/DATA_CONTRACT.md) | 产物、状态、来源记录与交接字段 |
 | [Codex 执行配置](docs/CODEX_RUNTIME.md) | CLI 参数、角色启动方式与本地配置要求 |
-| [任务清单](tasks/tasks.jsonl) / [填写说明](tasks/README.md) | 待执行的方剂、疾病和分析参数 |
+| [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 待执行的方剂、疾病和分析参数 |
 | [执行设置](configs/runtime.json) | Codex CLI、profile 名称、模型和思考强度，不含凭据 |
 
 ## 目录结构
 
 ```text
 agents/         Agent 职责说明
-tasks/          待执行的研究任务（每行一条 JSON）
+tasks/          共享任务模板与说明；个人任务保存在忽略文件
 configs/        可共享的执行设置，不存放研究任务或凭据
 docs/           协作、接口与实施文档
 pharm_demo/     调度、Codex 适配、来源检查和数据处理
@@ -129,7 +129,7 @@ local/          本机运行适配、认证副本和安装材料（不提交）
 
 运行时按需创建 `data/`、`runs/` 和 `reports/`，分别保存原始及处理数据、执行记录和报告；这些目录默认不纳入版本控制。原始数据与完整运行记录不提交到仓库。
 
-研究任务填写在 `tasks/tasks.jsonl`，Codex 执行设置在 `configs/runtime.json`；各成员本机的 `icrc` 服务配置和认证信息不随仓库分发。运行器同时读取任务和执行设置，再启动对应 Agent。
+研究任务仅保存在本机 `tasks/tasks.local.jsonl`（Git 忽略，首次克隆为空），Codex 执行设置在 `configs/runtime.json`；各成员本机的 `icrc` 服务配置和认证信息不随仓库分发。运行器同时读取任务和执行设置，再启动对应 Agent。
 
 ### runs/ 里面保存什么
 
