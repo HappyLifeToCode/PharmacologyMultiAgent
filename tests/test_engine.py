@@ -10,13 +10,15 @@ from pharm_demo.common import write_json
 @pytest.fixture
 def isolated_project(tmp_path, monkeypatch):
     source = engine.ROOT
+    from pharm_demo import sources
     import shutil
     for name in ("configs", "agents", "examples"):
-        shutil.copytree(source / name, tmp_path / name)
+        shutil.copytree(source / name, tmp_path / name, ignore=shutil.ignore_patterns("*.local.json"))
     (tmp_path / "pharm_demo").mkdir()
     shutil.copy2(source / "pharm_demo/engine.py", tmp_path / "pharm_demo/engine.py")
     task = {"task_id": "unit_task", "formula": "SYNTHETIC", "herbs": ["TEST"], "diseases": ["TEST"], "fdr_lt": .05}
     monkeypatch.setattr(engine, "ROOT", tmp_path)
+    monkeypatch.setattr(sources, "ROOT", tmp_path)
     monkeypatch.setattr(engine, "task_list", lambda: [task])
     monkeypatch.setattr(engine, "prepare_home", lambda: tmp_path)
     # Routine DAG tests isolate the remote browser; real Venny runs are separate.

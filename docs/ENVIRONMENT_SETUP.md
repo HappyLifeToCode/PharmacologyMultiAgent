@@ -43,6 +43,20 @@ OMIM 的普通复选框点击曾实际执行，随后仍出现新挑战，未进
 
 结果写入新的 `runs/diagnostics/sites_<日期时间>/`，包含 HTTP 原始响应、浏览器页面、截图和访问时间，不覆盖历史结果。首页核验没有正式查询或导出。
 
+## STRING 12.0 本地数据
+
+正式网络阶段优先读取已配置的 STRING 物种数据，未配置时才调用公开 API。本地目录必须同时包含与任务 `taxon_id`、`string_version` 一致的三个压缩文件：
+
+```text
+9606.protein.aliases.v12.0.txt.gz
+9606.protein.info.v12.0.txt.gz
+9606.protein.links.detailed.v12.0.txt.gz
+```
+
+每位成员复制 `configs/string_data.example.json` 为 Git 忽略的 `configs/string_data.local.json`，再将 `data_dir` 改为本机目录。路径可使用绝对路径，也可使用相对于项目根目录的路径；模板采用 Git 已忽略的 `data/string/v12.0`。也可设置 `PHARM_STRING_DATA_DIR`，环境变量优先于本机配置文件。共享代码、任务清单和文档不写死个人盘符；原始 STRING 文件不放入 `docs/`，也不提交 Git。
+
+运行时核验 gzip 表头、物种前缀、评分范围和文件 SHA-256。`combined_score` 从 0–1000 转为项目使用的 0–1，按任务阈值筛选并将双向重复记录合并为一条无向边。本地模式目前要求 `string_additional_nodes=0`。
+
 ## Venny 与测试依赖
 
 Venny 2.1.0 由 Python Playwright 直接操作官方页面，不通过上述 MCP。新 live/fixture 运行都依赖 Chromium、模型服务和 Venny 访问；Venny 不读取其他 Agent 的登录态或兼容脚本配置。2026-09-13 已验证有交集3及无交集0，真实药理输入仍待上游完整数据。产物与失败规则见 [Venny 接入](VENNY.md)。

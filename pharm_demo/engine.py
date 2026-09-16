@@ -81,6 +81,11 @@ class Runner:
         if role in ("disease_targets", "intersection", "network_analysis", "enrichment_analysis"):
             required = ("genecards_targets", "omim_targets") if role == "disease_targets" else ("herb_targets", "disease_targets")
             inputs["targets"] = {key: digest(self.directory / path) for key, path in self.manifest.get("verified_targets", {}).items() if key in required}
+        if role == "network_analysis" and self.manifest["mode"] == "live":
+            from .sources import string_local_signature
+            local_string = string_local_signature(self.task)
+            if local_string is not None:
+                inputs["string_local_files"] = local_string
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
     def reuse(self, role):
@@ -337,6 +342,8 @@ class Runner:
                 result = analyze_network(net["nodes"], net["edges"])
                 result["method"] = "NetworkX degree"
                 result["evidence_type"] = common["evidence_type"]
+                if self.manifest["mode"] == "live":
+                    result["string_provenance"] = net["provenance"]
                 write_json(directory / "network.json", result)
                 with PLOT_LOCK:
                     write_network(result, directory / "network.png")
@@ -345,6 +352,8 @@ class Runner:
                     writer.writeheader()
                     writer.writerows(result["degree_table"])
                 evidence, files = result, ["network.json", "network.png", "degrees.csv"]
+                if self.manifest["mode"] == "live":
+                    files.extend(["string_mapping_raw.json", "string_network_raw.json", "string_version_raw.json", "string_provenance.json"])
                 self.manifest["metrics"].update(network_nodes=result["node_count"], network_edges=result["edge_count"])
             elif self.manifest["mode"] == "fixture":
                 from scipy.stats import hypergeom

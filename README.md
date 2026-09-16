@@ -108,6 +108,7 @@ Agent 负责执行任务、调用工具及反馈异常；中位数计算、去�
 | [Codex 执行配置](docs/CODEX_RUNTIME.md) | CLI 参数、角色启动方式与本地配置要求 |
 | [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 待执行的方剂、疾病和分析参数 |
 | [执行设置](configs/runtime.json) | Codex CLI、profile 名称、模型和思考强度，不含凭据 |
+| [STRING 本地数据模板](configs/string_data.example.json) | 每台电脑复制为 `string_data.local.json` 并填写自己的数据目录；原始数据不入库 |
 
 ## 目录结构
 

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import gzip
 import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
 
-from .common import now, write_json
+from .common import ROOT, digest, now, read_json, write_json
 
 SOURCES = {
     "batman": "http://bionet.ncpsb.org.cn/batman-tcm",
@@ -46,7 +48,161 @@ def probe_all(directory):
     return {record["source"]: record for record in results}
 
 
-def string_network(genes, task, directory):
+def _string_local_files(task):
+    configured = os.environ.get("PHARM_STRING_DATA_DIR", "").strip()
+    if not configured:
+        local_config = ROOT / "configs/string_data.local.json"
+        if local_config.is_file():
+            value = read_json(local_config).get("data_dir")
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("configs/string_data.local.json 缺少有效 data_dir")
+            configured = value.strip()
+    if not configured:
+        return None
+    root = Path(configured).expanduser()
+    if not root.is_absolute():
+        root = ROOT / root
+    version = str(task.get("string_version", "12.0"))
+    taxon_id = int(task["taxon_id"])
+    names = {
+        "aliases": "%d.protein.aliases.v%s.txt.gz" % (taxon_id, version),
+        "info": "%d.protein.info.v%s.txt.gz" % (taxon_id, version),
+        "links": "%d.protein.links.detailed.v%s.txt.gz" % (taxon_id, version),
+    }
+    files = {name: root / filename for name, filename in names.items()}
+    missing = [str(path) for path in files.values() if not path.is_file()]
+    if missing:
+        raise ValueError("STRING 本地数据文件缺失：" + "; ".join(missing))
+    return files
+
+
+def string_local_signature(task):
+    """Return stable local dataset evidence for run-resume invalidation."""
+    files = _string_local_files(task)
+    if files is None:
+        return None
+    return {name: {"filename": path.name, "sha256": digest(path)} for name, path in files.items()}
+
+
+def _string_network_local(genes, task, directory, files):
+    """Read a versioned, species-specific STRING download without network access."""
+    target = Path(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    taxon_id = int(task["taxon_id"])
+    version = str(task.get("string_version", "12.0"))
+    if int(task.get("string_additional_nodes", 0)) != 0:
+        raise ValueError("STRING 本地数据模式暂不支持 additional_nodes；请保持为 0")
+    threshold = float(task["string_confidence"])
+    if not 0 <= threshold <= 1:
+        raise ValueError("STRING 置信度必须在 0 到 1 之间")
+    required_score = round(threshold * 1000)
+    prefix = str(taxon_id) + ".ENSP"
+    requested = list(dict.fromkeys(genes))
+    requested_upper = {gene.upper(): gene for gene in requested}
+
+    preferred_candidates = {gene: set() for gene in requested}
+    with gzip.open(files["info"], "rt", encoding="utf-8", errors="strict") as stream:
+        header = stream.readline().rstrip("\r\n").split("\t")
+        if header != ["#string_protein_id", "preferred_name", "protein_size", "annotation"]:
+            raise ValueError("STRING protein.info 表头不符合 v%s 格式" % version)
+        for line in stream:
+            fields = line.rstrip("\r\n").split("\t", 3)
+            if len(fields) != 4 or not fields[0].startswith(prefix):
+                raise ValueError("STRING protein.info 包含无效行或物种不一致")
+            original = requested_upper.get(fields[1].upper())
+            if original:
+                preferred_candidates[original].add(fields[0])
+
+    unresolved = {gene.upper(): gene for gene in requested if len(preferred_candidates[gene]) != 1}
+    alias_candidates = {gene: set() for gene in unresolved.values()}
+    if unresolved:
+        with gzip.open(files["aliases"], "rt", encoding="utf-8", errors="strict") as stream:
+            header = stream.readline().rstrip("\r\n").split("\t")
+            if header != ["#string_protein_id", "alias", "source"]:
+                raise ValueError("STRING protein.aliases 表头不符合 v%s 格式" % version)
+            for line in stream:
+                fields = line.rstrip("\r\n").split("\t")
+                if len(fields) != 3 or not fields[0].startswith(prefix):
+                    raise ValueError("STRING protein.aliases 包含无效行或物种不一致")
+                original = unresolved.get(fields[1].upper())
+                if original:
+                    alias_candidates[original].add(fields[0])
+
+    mappings = []
+    id_to_gene = {}
+    ambiguous = {}
+    for gene in requested:
+        preferred = preferred_candidates[gene]
+        candidates = preferred if len(preferred) == 1 else preferred | alias_candidates.get(gene, set())
+        method = "preferred_name" if len(preferred) == 1 else "alias"
+        if len(candidates) == 1:
+            string_id = next(iter(candidates))
+            old = id_to_gene.get(string_id)
+            if old and old != gene:
+                raise ValueError("多个输入基因映射到同一 STRING ID，需复核：%s / %s" % (old, gene))
+            id_to_gene[string_id] = gene
+            mappings.append({"query": gene, "string_id": string_id, "method": method, "status": "mapped"})
+        elif candidates:
+            ambiguous[gene] = sorted(candidates)
+            mappings.append({"query": gene, "candidates": sorted(candidates), "method": method, "status": "ambiguous"})
+        else:
+            mappings.append({"query": gene, "status": "unmapped"})
+    write_json(target / "string_mapping_raw.json", mappings)
+
+    selected = {}
+    channel_names = ["neighborhood", "fusion", "cooccurence", "coexpression", "experimental", "database", "textmining", "combined_score"]
+    if id_to_gene:
+        with gzip.open(files["links"], "rt", encoding="utf-8", errors="strict") as stream:
+            header = stream.readline().strip().split()
+            expected = ["protein1", "protein2"] + channel_names
+            if header != expected:
+                raise ValueError("STRING protein.links.detailed 表头不符合 v%s 格式" % version)
+            for line in stream:
+                fields = line.strip().split()
+                if len(fields) != 10:
+                    raise ValueError("STRING protein.links.detailed 包含列数错误")
+                a, b = fields[:2]
+                if a not in id_to_gene or b not in id_to_gene:
+                    continue
+                try:
+                    scores = [int(value) for value in fields[2:]]
+                except ValueError as exc:
+                    raise ValueError("STRING 网络评分不是整数") from exc
+                if any(value < 0 or value > 1000 for value in scores):
+                    raise ValueError("STRING 网络评分超出 0 到 1000")
+                if scores[-1] < required_score:
+                    continue
+                key = tuple(sorted((a, b)))
+                row = {"protein1": a, "protein2": b, **dict(zip(channel_names, scores))}
+                previous = selected.get(key)
+                if previous is None or row["combined_score"] > previous["combined_score"]:
+                    selected[key] = row
+    network_rows = [selected[key] for key in sorted(selected)]
+    write_json(target / "string_network_raw.json", network_rows)
+
+    edges = [{
+        "source": id_to_gene[key[0]],
+        "target": id_to_gene[key[1]],
+        "score": selected[key]["combined_score"] / 1000.0,
+    } for key in sorted(selected)]
+    mapped = sorted(id_to_gene.values())
+    unmapped = sorted(set(requested) - set(mapped) - set(ambiguous))
+    file_records = {name: {"filename": path.name, "bytes": path.stat().st_size, "sha256": digest(path)} for name, path in files.items()}
+    version_record = {"source": "STRING local download", "version": version, "taxon_id": taxon_id, "files": file_records}
+    write_json(target / "string_version_raw.json", version_record)
+    meta = {
+        **version_record,
+        "accessed_at": now(),
+        "parameters": {"species": taxon_id, "required_score": required_score, "add_nodes": 0},
+        "mapped": mapped,
+        "unmapped": unmapped,
+        "ambiguous": ambiguous,
+    }
+    write_json(target / "string_provenance.json", meta)
+    return {"nodes": mapped, "edges": edges, "provenance": meta}
+
+
+def _string_network_api(genes, task, directory):
     """Use STRING's public API; preserve ID mapping, unmapped genes and raw data."""
     target = Path(directory)
     session = requests.Session()
@@ -116,3 +272,11 @@ def string_network(genes, task, directory):
     meta = {"source": "STRING public API", "accessed_at": now(), "api": api, "version": required_version, "parameters": {"species": common["species"], "required_score": round(float(task["string_confidence"]) * 1000), "add_nodes": int(task["string_additional_nodes"])}, "unmapped": sorted(set(genes) - mapped), "mapped": sorted(mapped)}
     write_json(target / "string_provenance.json", meta)
     return {"nodes": sorted(mapped), "edges": edges, "provenance": meta}
+
+
+def string_network(genes, task, directory):
+    """Prefer configured local STRING files; otherwise use the public API."""
+    files = _string_local_files(task)
+    if files is not None:
+        return _string_network_local(genes, task, directory, files)
+    return _string_network_api(genes, task, directory)
