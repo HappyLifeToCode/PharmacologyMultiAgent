@@ -253,3 +253,33 @@ def test_legacy_run_keeps_legacy_stage_graph(isolated_project):
     assert "disease_targets" in calls
     assert "genecards_targets" not in calls
     assert resumed["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("source", ["api", "local_files"])
+def test_live_network_dispatches_string_source(isolated_project, monkeypatch, source):
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    if source == "local_files":
+        runner.task["string_source"] = "local_files"
+        runner.task["string_local_dir"] = "data/string/v12.0"
+    used = []
+    def fake_api(genes, task, directory):
+        used.append("api")
+        return {"nodes": genes, "edges": [], "provenance": {"unmapped": []}}
+    def fake_local(genes, task, directory):
+        used.append("local_files")
+        assert task.get("string_local_dir") == "data/string/v12.0"
+        return {"nodes": genes, "edges": [], "provenance": {"unmapped": []}}
+    monkeypatch.setattr(engine, "string_network", fake_api)
+    monkeypatch.setattr(engine, "string_local_network", fake_local)
+    def blocked_cytoscape(net, directory, topology):
+        result = {"status": "blocked", "limitation": "test: Cytoscape offline"}
+        write_json(directory / "cytoscape_execution.json", result)
+        return result
+    monkeypatch.setattr(engine, "run_cytoscape", blocked_cytoscape)
+    runner.analysis_stage("network_analysis", {"genes": ["TP53"], "evidence_type": "real_input"})
+    assert used == [source]
+    stage = runner.manifest["stages"]["network_analysis"]
+    assert stage["status"] == "partial"
