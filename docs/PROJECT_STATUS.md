@@ -39,10 +39,10 @@
 
 | 问题             | 现有证据 / 状态                                                       | 接下来需要什么                        |
 |----------------|-----------------------------------------------------------------|--------------------------------|
-| BATMAN 阈值待核对   | 2026-09-17 新入口 `…/batman-tcm/#/home` 实测 200 可达；候选阈值 score > 0.84 有文献先例（juglone 网络药理学研究） | 医院方确认该阈值，并用 BATMAN v2.0 真实导出核对分值尺度（0~1 还是几十分量级）后才标 confirmed；药材/炮制命名同待确认 |
+| BATMAN             | 2026-09-17 新入口 `…/batman-tcm/#/home` 实测 200 可达；阈值 score > 0.84 已由医院方确认（依据《Autophagy-related biological targets and network mechanisms of juglone against bladder cancer》） | 导入时用 v2.0 真实导出核对分值尺度并留记录；药材/炮制命名待确认 |
 | GeneCards 访问要求 | 同日显示 Datacenter / Verify Your Access，要求学校邮箱确认学术访问               | 账号持有人完成注册/登录及邮箱验证，再核验机构与导出权限   |
 | OMIM 人机验证      | 同日 403/Cloudflare；Playwright 普通点击后仍出现新挑战                        | 本人完成验证，再核验账号与下载权限；不能把能点击等同于能通过 |
-| 研究参数部分确认      | 2026-09-17 医院方确认：GeneCards 按疾病分别中位数、DAVID 背景 Homo sapiens + GO DIRECT、拓扑非加权 Degree | BATMAN 候选阈值 score>0.84 待医院确认并核对 v2.0 分值尺度；药材命名待确认；DAVID 的 EASE 与方案“超几何检验”名称需同步 |
+| 研究参数基本确认      | 2026-09-17 医院方确认：GeneCards 按疾病分别中位数、DAVID 背景 Homo sapiens + GO DIRECT、拓扑非加权 Degree、BATMAN 阈值 score>0.84 | 药材/炮制命名待确认；DAVID 的 EASE 与方案“超几何检验”名称需同步；BATMAN v2.0 分值尺度导入时核对 |
 | 方法真实输入未验收      | CytoNCA 桥接与 DAVID 正式导出已实现并通过小样本验证（2026-09-14）          | 用真实共同靶点完成正式运行与人工抽检                    |
 | 演示有外部依赖        | 新合成演练也会调用模型并实际访问 Venny                                          | 会前跑完并准备已导出的 HTML；不能保证现场网络或服务   |
 

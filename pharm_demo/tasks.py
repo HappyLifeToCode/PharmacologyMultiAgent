@@ -42,7 +42,7 @@ def prepare_task(body):
         raise ValueError("研究说明最多 4000 字")
     task = {"formula": formula, "herbs": entries("herbs", "药材"), "diseases": entries("diseases", "疾病关键词"),
             "research_notes": notes.strip(), "organism": "Homo sapiens", "taxon_id": 9606,
-            "batman_threshold": None, "batman_threshold_confirmed": False,
+            "batman_threshold": 0.84, "batman_threshold_confirmed": True,
             "genecards_filter": "relevance_score > median_of_complete_query_results",
             "genecards_median_scope": "per_disease_median", "genecards_median_status": "confirmed",
             "string_confidence": 0.9, "string_additional_nodes": 0,
