@@ -74,3 +74,6 @@ tasks/.tasks.lock
 # Personal workbench tasks, including the retired tracked location
 /tasks/tasks.local.jsonl
 /tasks/tasks.jsonl
+
+# Personal follow-up plan kept local only
+/docs/LOCAL_DISEASE_DISCOVERY_PLAN.md
