@@ -1,0 +1,11 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-SymbolicName: pharm.cytonca.bridge
+Bundle-Name: Pharmacology CytoNCA Bridge
+Bundle-Version: 0.1.0
+Bundle-Activator: pharm.bridge.Activator
+Import-Package: org.osgi.framework,org.cytoscape.model,
+ org.cytoscape.work,org.cytoscape.work.json
+Cytoscape-App-Name: Pharmacology CytoNCA Bridge
+Cytoscape-App-Version: 0.1.0
+Cytoscape-API-Compatibility: 3.10

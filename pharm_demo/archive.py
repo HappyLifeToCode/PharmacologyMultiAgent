@@ -112,7 +112,16 @@ def archive_run(run_directory, archive_root=None):
                     visit(obj)
             record = {'run_id':run_id, 'task_id':manifest['task']['task_id'], 'role':role, 'attempt':attempt, 'stage_status':stage['status'], 'archived_at':now(), 'stage_finished_at':stage.get('finished_at'), 'source_directory':source.relative_to(run).as_posix(), 'task_parameters':manifest['task'], 'metrics_at_archive':manifest.get('metrics',{}), 'source_records':provenance, 'note':'Archive preserves evidence; not a declaration of scientific completion.', 'sha256':hashes}
             write_json(pending / '_archive.json', record)
-            pending.rename(destination)
+            # Windows 上杀毒/索引可能短暂占用目录，重命名稍作重试
+            for rename_attempt in range(10):
+                try:
+                    pending.rename(destination)
+                    break
+                except PermissionError:
+                    if rename_attempt == 9:
+                        raise
+                    import time
+                    time.sleep(0.05 * (rename_attempt + 1))
             with (canonical / '_meta.md').open('a',encoding='utf-8') as f:
                 f.write('\n## ' + run_id + ' / ' + stage_name + ' / attempt_%02d\n\n' % attempt)
                 f.write('归档时间：' + record['archived_at'] + '\n\n状态：' + stage['status'] + '；文件数：' + str(len(files)) + '\n\n')

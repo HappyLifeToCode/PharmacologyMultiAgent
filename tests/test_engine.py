@@ -10,7 +10,7 @@ from pharm_demo.common import write_json
 @pytest.fixture
 def isolated_project(tmp_path, monkeypatch):
     source = engine.ROOT
-    from pharm_demo import sources
+    from pharm_demo import string_local
     import shutil
     for name in ("configs", "agents", "examples"):
         shutil.copytree(source / name, tmp_path / name, ignore=shutil.ignore_patterns("*.local.json"))
@@ -18,7 +18,7 @@ def isolated_project(tmp_path, monkeypatch):
     shutil.copy2(source / "pharm_demo/engine.py", tmp_path / "pharm_demo/engine.py")
     task = {"task_id": "unit_task", "formula": "SYNTHETIC", "herbs": ["TEST"], "diseases": ["TEST"], "fdr_lt": .05}
     monkeypatch.setattr(engine, "ROOT", tmp_path)
-    monkeypatch.setattr(sources, "ROOT", tmp_path)
+    monkeypatch.setattr(string_local, "ROOT", tmp_path)
     monkeypatch.setattr(engine, "task_list", lambda: [task])
     monkeypatch.setattr(engine, "prepare_home", lambda: tmp_path)
     # Routine DAG tests isolate the remote browser; real Venny runs are separate.
@@ -68,6 +68,70 @@ def test_missing_live_data_blocks_science_but_checks_independent_sources(isolate
     assert "network_analysis" in calls and "enrichment_analysis" in calls
     assert result.get("metrics") == {}
     assert not result["scientific_complete"]
+
+
+@pytest.mark.parametrize("outcome", ["succeeded", "blocked", "failed", "review_failed"])
+def test_live_cytoscape_handoff_preserves_evidence_and_partial_status(isolated_project, monkeypatch, outcome):
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    runner.task["network_topology"] = {"metrics": ["Degree"], "weighted": False, "purpose": "engineering_smoke"}
+    monkeypatch.setattr(engine, "string_network", lambda genes, task, directory:
+                        {"nodes": genes, "edges": [], "provenance": {"unmapped": []}})
+    def fake_cytoscape(net, directory, topology):
+        assert net["nodes"] == ["TP53"]
+        assert topology == runner.task["network_topology"]
+        result = {"status": "succeeded" if outcome == "review_failed" else outcome, "method": "CytoNCA test adapter", "limitation": "Research not confirmed",
+                  "degree_table": [{"gene_symbol": "TP53", "degree": 0.0}]}
+        write_json(directory / "cytoscape_execution.json", result)
+        if outcome == "failed":
+            raise ValueError("Plugin table mismatch")
+        return result
+    monkeypatch.setattr(engine, "run_cytoscape", fake_cytoscape)
+    if outcome == "review_failed":
+        def failed_review(*args, **kwargs):
+            return {"status": "failed", "summary": "Evidence rejected", "blockers": ["Review mismatch"], "artifacts": []}, None
+        monkeypatch.setattr(runner, "call_agent", failed_review)
+    runner.analysis_stage("network_analysis", {"genes": ["TP53"], "evidence_type": "real_input"})
+    stage = runner.manifest["stages"]["network_analysis"]
+    assert stage["status"] == ("failed" if outcome in ("failed", "review_failed") else "partial")
+    assert any(p.endswith("cytoscape_execution.json") for p in stage["artifacts"])
+    assert "archive_error" not in runner.manifest
+    if outcome != "failed":
+        network = engine.read_json(runner.directory / stage["directory"] / "network.json")
+        assert network["method"] == ("CytoNCA test adapter" if outcome in ("succeeded", "review_failed") else "NetworkX degree")
+    assert list((root / "data/pharm/SYNTHETIC/04_ppi").rglob("cytoscape_execution.json"))
+
+
+@pytest.mark.parametrize("outcome", ["succeeded", "blocked", "partial", "failed"])
+def test_live_david_uses_same_intersection_and_archives_outputs(isolated_project, monkeypatch, outcome):
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    def fake_david(genes, task, directory):
+        assert genes == ["TP53", "MDM2"]  # full common targets, no network Degree selection
+        result = {"status": outcome, "scientific_complete": False}
+        if outcome != "succeeded": result["limitation"] = "DAVID test limitation"
+        write_json(directory / "david_execution.json", result)
+        if outcome == "failed": raise ValueError("DAVID schema changed")
+        if outcome == "succeeded":
+            result["significant_count"] = 0
+            write_json(directory / "enrichment_david.json", result)
+            (directory / "david_all_terms.csv").write_text("category,term,benjamini\n")
+        return result
+    monkeypatch.setattr(engine, "run_david", fake_david)
+    runner.analysis_stage("enrichment_analysis", {"genes": ["TP53", "MDM2"], "evidence_type": "real_input"})
+    stage = runner.manifest["stages"]["enrichment_analysis"]
+    assert stage["status"] == outcome
+    assert any(p.endswith("david_execution.json") for p in stage["artifacts"])
+    assert list((root / "data/pharm/SYNTHETIC/05_enrich").rglob("david_execution.json"))
+    if outcome == "succeeded":
+        assert runner.manifest["metrics"]["significant_terms"] == 0
+        runner.manifest["metrics"].clear()
+        runner.analysis_stage("enrichment_analysis", {"genes": ["TP53", "MDM2"], "evidence_type": "real_input"})
+        assert runner.manifest["metrics"]["significant_terms"] == 0
 
 
 @pytest.mark.parametrize("error", ["Official Venny unavailable", "Venny results differ from independent Python set verification"])
@@ -191,3 +255,33 @@ def test_legacy_run_keeps_legacy_stage_graph(isolated_project):
     assert "disease_targets" in calls
     assert "genecards_targets" not in calls
     assert resumed["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("source", ["api", "local_files", "auto_local", "auto_api"])
+def test_live_network_dispatches_string_source(isolated_project, monkeypatch, source):
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    if source in ("api", "local_files"):
+        runner.task["string_source"] = source
+    else:
+        monkeypatch.setattr(engine, "string_local_available", lambda task: source == "auto_local")
+    used = []
+    def fake_api(genes, task, directory):
+        used.append("api")
+        return {"nodes": genes, "edges": [], "provenance": {"source": "STRING public API"}}
+    def fake_local(genes, task, directory):
+        used.append("local_files")
+        return {"nodes": genes, "edges": [], "provenance": {"source": "STRING local download"}}
+    monkeypatch.setattr(engine, "string_network", fake_api)
+    monkeypatch.setattr(engine, "string_local_network", fake_local)
+    def blocked_cytoscape(net, directory, topology):
+        result = {"status": "blocked", "limitation": "test: Cytoscape offline"}
+        write_json(directory / "cytoscape_execution.json", result)
+        return result
+    monkeypatch.setattr(engine, "run_cytoscape", blocked_cytoscape)
+    runner.analysis_stage("network_analysis", {"genes": ["TP53"], "evidence_type": "real_input"})
+    assert used == ["local_files" if source in ("local_files", "auto_local") else "api"]
+    stage = runner.manifest["stages"]["network_analysis"]
+    assert stage["status"] == "partial"

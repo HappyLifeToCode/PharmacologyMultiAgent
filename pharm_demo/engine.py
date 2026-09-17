@@ -18,6 +18,9 @@ from .processing import analyze_network, write_network
 from .venny import run_venny
 from .archive import archive_run, import_directory
 from .sources import SOURCES, probe, string_network
+from .string_local import string_local_available, string_local_network, string_local_signature
+from .cytoscape import run_cytoscape
+from .david import run_david
 
 LEGACY_STAGES = ["coordinator_plan", "herb_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
 STAGES = ["coordinator_plan", "herb_targets", "genecards_targets", "omim_targets", "disease_targets", "intersection", "network_analysis", "enrichment_analysis", "coordinator_review"]
@@ -82,8 +85,10 @@ class Runner:
             required = ("genecards_targets", "omim_targets") if role == "disease_targets" else ("herb_targets", "disease_targets")
             inputs["targets"] = {key: digest(self.directory / path) for key, path in self.manifest.get("verified_targets", {}).items() if key in required}
         if role == "network_analysis" and self.manifest["mode"] == "live":
-            from .sources import string_local_signature
-            local_string = string_local_signature(self.task)
+            try:
+                local_string = string_local_signature(self.task)
+            except (ValueError, OSError) as exc:
+                local_string = {"unavailable": str(exc)}
             if local_string is not None:
                 inputs["string_local_files"] = local_string
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -321,6 +326,8 @@ class Runner:
                     self.manifest["metrics"].update(network_nodes=network["node_count"], network_edges=network["edge_count"])
                 elif p.endswith("/enrichment_fixture.json"):
                     self.manifest["metrics"]["significant_terms"] = read_json(self.directory / p)["significant_count"]
+                elif p.endswith("/enrichment_david.json"):
+                    self.manifest["metrics"]["significant_terms"] = read_json(self.directory / p)["significant_count"]
             return
         if common is None:
             name = "string" if role == "network_analysis" else "david"
@@ -328,6 +335,7 @@ class Runner:
             return
         directory = self.begin(role)
         evidence, files, limitation = {}, [], None
+        tool_status = None
         try:
             if not common["genes"]:
                 self.finish(role, {"status": "skipped", "summary": "真实交集为空，按依赖规则跳过分析", "blockers": [], "artifacts": []}, directory)
@@ -337,13 +345,27 @@ class Runner:
                     fixture = read_json(ROOT / "examples/fixture.json")
                     net = {"nodes": common["genes"], "edges": fixture["edges"]}
                 else:
-                    net = string_network(common["genes"], self.task, directory)
-                    limitation = "拓扑度值由 NetworkX 计算；Cytoscape/CytoNCA 尚未接通，不能标为原方案已完成。"
+                    choice = self.task.get("string_source")
+                    if choice not in (None, "api", "local_files"):
+                        raise ValueError("string_source 只支持 api 或 local_files")
+                    if choice == "local_files" or (choice is None and string_local_available(self.task)):
+                        net = string_local_network(common["genes"], self.task, directory)
+                    else:
+                        net = string_network(common["genes"], self.task, directory)
                 result = analyze_network(net["nodes"], net["edges"])
                 result["method"] = "NetworkX degree"
                 result["evidence_type"] = common["evidence_type"]
                 if self.manifest["mode"] == "live":
-                    result["string_provenance"] = net["provenance"]
+                    result["provenance"] = net.get("provenance", {})
+                    net["evidence_type"] = common["evidence_type"]
+                    self.event(role, "tool.started", "将 STRING 节点和边交给 Cytoscape；按显式配置调用 CytoNCA")
+                    cyto = run_cytoscape(net, directory, self.task.get("network_topology"))
+                    result["cytoscape"] = cyto
+                    if cyto["status"] == "succeeded":
+                        result["method"] = cyto["method"]
+                        result["degree_table"] = result["degrees"] = cyto["degree_table"]
+                    limitation = cyto.get("limitation", "研究方法完整性尚待确认")
+                    self.event(role, "tool." + cyto["status"], limitation)
                 write_json(directory / "network.json", result)
                 with PLOT_LOCK:
                     write_network(result, directory / "network.png")
@@ -353,7 +375,7 @@ class Runner:
                     writer.writerows(result["degree_table"])
                 evidence, files = result, ["network.json", "network.png", "degrees.csv"]
                 if self.manifest["mode"] == "live":
-                    files.extend(["string_mapping_raw.json", "string_network_raw.json", "string_version_raw.json", "string_provenance.json"])
+                    files = [p.name for p in directory.iterdir() if p.is_file() and public_artifact(p)]
                 self.manifest["metrics"].update(network_nodes=result["node_count"], network_edges=result["edge_count"])
             elif self.manifest["mode"] == "fixture":
                 from scipy.stats import hypergeom
@@ -388,20 +410,31 @@ class Runner:
                 files = ["enrichment_fixture.json", "enrichment_fixture.png"]
                 self.manifest["metrics"]["significant_terms"] = evidence["significant_count"]
             else:
-                evidence = {"genes": common["genes"], "background": self.task.get("enrichment_background"), "required_test": self.task["enrichment_test_required"]}
-                limitation = "DAVID 导出、背景集及实际统计方法尚待确认，未生成富集结果。"
+                self.event(role, "tool.started", "核对 DAVID 参数，按明确背景提交共同靶点并导出官方结果")
+                evidence = run_david(common["genes"], self.task, directory)
+                tool_status = evidence["status"]
+                limitation = evidence.get("limitation")
+                files = [p.name for p in directory.iterdir() if p.is_file() and public_artifact(p)]
+                if "significant_count" in evidence:
+                    self.manifest["metrics"]["significant_terms"] = evidence["significant_count"]
+                self.event(role, "tool." + tool_status, limitation or "DAVID 官方 GO/KEGG 表已导出并核对")
             instruction = "独立核查收到的分析证据、统计口径与限制，返回角色交接。无需重复计算或读取其他文件。合成数据必须明确写在 summary，不将本地算法标为 DAVID 或 CytoNCA。"
             if self.manifest["mode"] == "fixture":
                 instruction += "本次验收只判断合成输入、计算和交接是否一致。若通过，status=succeeded；真实数据库、CytoNCA、DAVID 尚未完成的限制写入 findings，不是合成工程任务的 blockers。若计算确实错误才返回 failed/partial，并指出具体数值错误。"
             if role == "enrichment_analysis" and self.manifest["mode"] == "live":
-                instruction = "使用浏览器检查 DAVID 提交及导出入口；不要注册账号。背景集未确认时不提交正式分析。记录缺少的条件和截图，不能编造富集表。"
-            result, meta = self.call_agent(role, directory, instruction, evidence, browser=(role == "enrichment_analysis" and self.manifest["mode"] == "live"))
+                instruction = "核查执行器返回的 DAVID 官方结果、识别计数、背景与限制。不要重复提交网络请求。EASE 是修改版 Fisher 检验，不标为普通超几何检验；BH 使用 benjamini，不能改用另一个 fdr 字段。工程样本不代表正式研究完成；blocked/partial 工具结果不得宣称完整成功，零显著结果不算失败。"
+            result, meta = self.call_agent(role, directory, instruction, evidence, browser=False)
             result["artifacts"].extend(files)
             if limitation:
-                result["status"] = "partial" if files else "blocked"
+                if result["status"] not in ("failed", "blocked"):
+                    result["status"] = "partial" if files else "blocked"
                 result["blockers"].append(limitation)
+            if tool_status in ("blocked", "partial") and result["status"] not in ("failed", "blocked"):
+                result["status"] = tool_status
             self.finish(role, result, directory, meta)
         except Exception as exc:
+            files = [p.relative_to(directory).as_posix() for p in directory.rglob("*")
+                     if p.is_file() and public_artifact(p.relative_to(directory))]
             self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": files}, directory)
 
     def run(self):
