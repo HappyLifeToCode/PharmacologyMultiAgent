@@ -23,7 +23,16 @@ def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(str(temporary), str(path))
+    # Windows 上杀毒/索引可能短暂占用目标文件，导致 os.replace 被拒绝；稍作重试
+    for attempt in range(10):
+        try:
+            os.replace(str(temporary), str(path))
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            import time
+            time.sleep(0.05 * (attempt + 1))
 
 
 def digest(path):

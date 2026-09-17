@@ -10,13 +10,15 @@ from pharm_demo.common import write_json
 @pytest.fixture
 def isolated_project(tmp_path, monkeypatch):
     source = engine.ROOT
+    from pharm_demo import string_local
     import shutil
     for name in ("configs", "agents", "examples"):
-        shutil.copytree(source / name, tmp_path / name)
+        shutil.copytree(source / name, tmp_path / name, ignore=shutil.ignore_patterns("*.local.json"))
     (tmp_path / "pharm_demo").mkdir()
     shutil.copy2(source / "pharm_demo/engine.py", tmp_path / "pharm_demo/engine.py")
     task = {"task_id": "unit_task", "formula": "SYNTHETIC", "herbs": ["TEST"], "diseases": ["TEST"], "fdr_lt": .05}
     monkeypatch.setattr(engine, "ROOT", tmp_path)
+    monkeypatch.setattr(string_local, "ROOT", tmp_path)
     monkeypatch.setattr(engine, "task_list", lambda: [task])
     monkeypatch.setattr(engine, "prepare_home", lambda: tmp_path)
     # Routine DAG tests isolate the remote browser; real Venny runs are separate.
@@ -255,23 +257,23 @@ def test_legacy_run_keeps_legacy_stage_graph(isolated_project):
     assert resumed["status"] == "succeeded"
 
 
-@pytest.mark.parametrize("source", ["api", "local_files"])
+@pytest.mark.parametrize("source", ["api", "local_files", "auto_local", "auto_api"])
 def test_live_network_dispatches_string_source(isolated_project, monkeypatch, source):
     root, calls = isolated_project
     run_id = engine.start("unit_task", "fixture", background=False)
     runner = engine.Runner(run_id)
     runner.manifest["mode"] = "live"
-    if source == "local_files":
-        runner.task["string_source"] = "local_files"
-        runner.task["string_local_dir"] = "data/string/v12.0"
+    if source in ("api", "local_files"):
+        runner.task["string_source"] = source
+    else:
+        monkeypatch.setattr(engine, "string_local_available", lambda task: source == "auto_local")
     used = []
     def fake_api(genes, task, directory):
         used.append("api")
-        return {"nodes": genes, "edges": [], "provenance": {"unmapped": []}}
+        return {"nodes": genes, "edges": [], "provenance": {"source": "STRING public API"}}
     def fake_local(genes, task, directory):
         used.append("local_files")
-        assert task.get("string_local_dir") == "data/string/v12.0"
-        return {"nodes": genes, "edges": [], "provenance": {"unmapped": []}}
+        return {"nodes": genes, "edges": [], "provenance": {"source": "STRING local download"}}
     monkeypatch.setattr(engine, "string_network", fake_api)
     monkeypatch.setattr(engine, "string_local_network", fake_local)
     def blocked_cytoscape(net, directory, topology):
@@ -280,6 +282,6 @@ def test_live_network_dispatches_string_source(isolated_project, monkeypatch, so
         return result
     monkeypatch.setattr(engine, "run_cytoscape", blocked_cytoscape)
     runner.analysis_stage("network_analysis", {"genes": ["TP53"], "evidence_type": "real_input"})
-    assert used == [source]
+    assert used == ["local_files" if source in ("local_files", "auto_local") else "api"]
     stage = runner.manifest["stages"]["network_analysis"]
     assert stage["status"] == "partial"

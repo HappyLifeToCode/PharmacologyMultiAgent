@@ -43,7 +43,7 @@ python -m pharm_demo.network_smoke --source string --output local/checks/string-
 python -m pharm_demo.network_smoke --source string-local --output local/checks/string-local-01 --genes TP53 MDM2 EGFR AKT1 ZZZPHARMSMOKETEST --species 9606 --confidence 0.9 --string-version 12.0 --data-dir data/string/v12.0
 ```
 
-本地来源由任务显式配置 `string_source="local_files"` 选择，映射为 preferred_name/aliases 精确匹配，与 API 解析口径不同，歧义与未映射分别记录；`data/string/` 不入库。
+本地来源在配置数据目录后默认优先使用（任务可用 `string_source` 显式指定其一），映射为 preferred_name/aliases 精确匹配，与 API 解析口径不同，歧义与未映射分别记录；`data/string/` 不入库。
 
 ## 调度配置、产物和状态
 

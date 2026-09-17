@@ -41,7 +41,7 @@ CytoNCA 安装测试不代表已完成真实 STRING 网络分析。2026-09-14 �
 
 普通网站账号、API 申请和批量下载授权分别核验；不能将注册成功视为全部访问权限已获得。密码和验证码由账号持有人保管，登录态仅存本机忽略目录。
 
-STRING 离线来源：`data/string/v12.0/`（不入库）存放官方 v12.0 人类数据三件套（`9606.protein.info/aliases/links.detailed`）。任务显式配置 `string_source="local_files"` 时网络阶段离线构建，映射为 preferred_name/aliases 精确匹配（歧义显式记录，不静默选择）；2026-09-14 用 TP53/MDM2/EGFR/AKT1/ZZZPHARMSMOKETEST 样本与在线 API 对拍，映射、边集与 Degree 完全一致。
+STRING 离线来源：`data/string/v12.0/`（不入库）存放官方 v12.0 人类数据三件套（`9606.protein.info/aliases/links.detailed`，`.txt.gz` 或解压后的 `.txt` 均可）。网络阶段默认优先使用已配置的本地文件，未配置时调用在线 API；任务可用 `string_source`（`local_files` / `api`）显式指定其一，实际来源写入 `string_provenance.json`。映射为 preferred_name/aliases 精确匹配（歧义显式记录，不静默选择）；2026-09-14 用 TP53/MDM2/EGFR/AKT1/ZZZPHARMSMOKETEST 样本与在线 API 对拍，映射、边集与 Degree 完全一致。目录配置方式见下文“STRING 12.0 本地数据”。
 
 OMIM 的普通复选框点击曾实际执行，随后仍出现新挑战，未进入主页。这只说明当次环境未通过，不能概括为“Playwright
 永远不能通过”。注册与登录解决的是部分访问条件，尚需取得完整原始导出并接续数据导入。
@@ -53,6 +53,20 @@ OMIM 的普通复选框点击曾实际执行，随后仍出现新挑战，未进
 ```
 
 结果写入新的 `runs/diagnostics/sites_<日期时间>/`，包含 HTTP 原始响应、浏览器页面、截图和访问时间，不覆盖历史结果。首页核验没有正式查询或导出。
+
+## STRING 12.0 本地数据
+
+正式网络阶段优先读取已配置的 STRING 物种数据，未配置时才调用公开 API；任务可用 `string_source`（`local_files` / `api`）显式指定其一，实际来源写入 `string_provenance.json`。本地目录必须同时包含与任务 `taxon_id`、`string_version` 一致的三个文件（官方 `.txt.gz` 压缩包直接读取，已解压的 `.txt` 也可接受，同名时优先 `.txt.gz`）：
+
+```text
+9606.protein.aliases.v12.0.txt.gz
+9606.protein.info.v12.0.txt.gz
+9606.protein.links.detailed.v12.0.txt.gz
+```
+
+每位成员复制 `configs/string_data.example.json` 为 Git 忽略的 `configs/string_data.local.json`，再将 `data_dir` 改为本机目录。路径可使用绝对路径，也可使用相对于项目根目录的路径；模板采用 Git 已忽略的 `data/string/v12.0`。也可设置 `PHARM_STRING_DATA_DIR`，环境变量优先于本机配置文件。共享代码、任务清单和文档不写死个人盘符；原始 STRING 文件不放入 `docs/`，也不提交 Git。
+
+运行时核验 gzip 表头、物种前缀、评分范围和文件 SHA-256。`combined_score` 从 0–1000 转为项目使用的 0–1，按任务阈值筛选并将双向重复记录合并为一条无向边。本地模式目前要求 `string_additional_nodes=0`。
 
 ## Venny 与测试依赖
 

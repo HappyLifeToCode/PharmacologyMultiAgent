@@ -86,7 +86,7 @@ Chrome/124 指纹和关闭浏览器沙箱的参数。遇挑战仍停止。
 完整 BATMAN、GeneCards、OMIM 真实数据获取及阈值/映射复核；DAVID 正式背景集与统计口径确认；真实研究网络的正式运行与拓扑指标确认。CytoNCA
 桥接自动交接（非加权 Degree）与 DAVID 真实导出已接入并通过工程验证，详见 [CytoNCA 接入](CYTOSCAPE_INTEGRATION.md)、[DAVID 接入](DAVID_INTEGRATION.md) 与
 [环境准备](ENVIRONMENT_SETUP.md)。NetworkX 仅作独立核对并明确标注，不冒充 CytoNCA。STRING
-网络也可由本地 v12.0 人类数据离线构建（任务显式配置 `string_source="local_files"`，数据在 `data/string/v12.0/` 且不入库），已与在线 API 对拍一致。
+网络默认优先由本地 v12.0 人类数据离线构建（目录配置见 [环境准备](ENVIRONMENT_SETUP.md)，数据在 `data/string/v12.0/` 且不入库），未配置时调用在线 API；任务可用 `string_source` 显式指定来源，本地结果已与在线 API 对拍一致。
 
 ## 离线报告
 

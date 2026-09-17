@@ -18,7 +18,7 @@ from .processing import analyze_network, write_network
 from .venny import run_venny
 from .archive import archive_run, import_directory
 from .sources import SOURCES, probe, string_network
-from .string_local import string_local_network
+from .string_local import string_local_available, string_local_network, string_local_signature
 from .cytoscape import run_cytoscape
 from .david import run_david
 
@@ -84,6 +84,13 @@ class Runner:
         if role in ("disease_targets", "intersection", "network_analysis", "enrichment_analysis"):
             required = ("genecards_targets", "omim_targets") if role == "disease_targets" else ("herb_targets", "disease_targets")
             inputs["targets"] = {key: digest(self.directory / path) for key, path in self.manifest.get("verified_targets", {}).items() if key in required}
+        if role == "network_analysis" and self.manifest["mode"] == "live":
+            try:
+                local_string = string_local_signature(self.task)
+            except (ValueError, OSError) as exc:
+                local_string = {"unavailable": str(exc)}
+            if local_string is not None:
+                inputs["string_local_files"] = local_string
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
     def reuse(self, role):
@@ -338,7 +345,10 @@ class Runner:
                     fixture = read_json(ROOT / "examples/fixture.json")
                     net = {"nodes": common["genes"], "edges": fixture["edges"]}
                 else:
-                    if self.task.get("string_source", "api") == "local_files":
+                    choice = self.task.get("string_source")
+                    if choice not in (None, "api", "local_files"):
+                        raise ValueError("string_source 只支持 api 或 local_files")
+                    if choice == "local_files" or (choice is None and string_local_available(self.task)):
                         net = string_local_network(common["genes"], self.task, directory)
                     else:
                         net = string_network(common["genes"], self.task, directory)

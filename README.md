@@ -92,7 +92,7 @@ flowchart TD
 
 Agent 负责执行任务、调用工具及反馈异常；中位数计算、去重、标识映射和集合结果核对由确定性程序完成。STRING 与 DAVID 使用同一份共同靶点清单，两个分析分支可在输入通过校验后独立执行。
 
-图中表示运行职责与依赖：网络阶段的 STRING 网络可来自在线 API 或显式配置的本地 v12.0 文件（`string_source="local_files"`），随后经桥接插件调用已装 CytoNCA 计算非加权 Degree，NetworkX 仅作独立核对且明确标注；DAVID 角色经新版工作台接口完成真实提交、背景选择与 GO/KEGG 导出，正式背景与统计口径未确认时保持受限。上游缺少合格导入时只做访问核验并保持受限，注册账号后仍需取得完整原始数据。
+图中表示运行职责与依赖：网络阶段优先使用已配置的 STRING 本地 v12.0 文件、未配置时调用在线 API（任务可用 `string_source` 显式指定），随后经桥接插件调用已装 CytoNCA 计算非加权 Degree，NetworkX 仅作独立核对且明确标注；DAVID 角色经新版工作台接口完成真实提交、背景选择与 GO/KEGG 导出，正式背景与统计口径未确认时保持受限。上游缺少合格导入时只做访问核验并保持受限，注册账号后仍需取得完整原始数据。
 
 ## 文档导航
 
@@ -108,6 +108,7 @@ Agent 负责执行任务、调用工具及反馈异常；中位数计算、去�
 | [Codex 执行配置](docs/CODEX_RUNTIME.md)                 | CLI 参数、角色启动方式与本地配置要求              |
 | [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 待执行的方剂、疾病和分析参数                    |
 | [执行设置](configs/runtime.json)                        | Codex CLI、profile 名称、模型和思考强度，不含凭据 |
+| [STRING 本地数据模板](configs/string_data.example.json)     | 每台电脑复制为 `string_data.local.json` 并填写本机数据目录；原始数据不入库 |
 
 ## 目录结构
 

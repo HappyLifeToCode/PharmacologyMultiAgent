@@ -10,7 +10,7 @@
 | 协调 Agent                 | x     | x         | 固定依赖、独立会话与恢复已验证；动态调度待开发                   | [coordinator](../agents/coordinator.md)                                         |
 | 药材靶点 Agent               | x     | x         | 访问核验与导入已实现；完整自动查询导出待完成                    | [herb_targets](../agents/herb_targets.md)                                       |
 | 疾病靶点模块（GeneCards / OMIM） | x     | x         | 双库独立并行已实现，待真实导出深化                         | [GeneCards](../agents/genecards_targets.md) / [OMIM](../agents/omim_targets.md) |
-| 网络分析 Agent               | x     | x         | STRING API 与 NetworkX 已实现；CytoNCA 桥接自动交接已接入（非加权 Degree），真实研究网络待验收 | [network_analysis](../agents/network_analysis.md)                               |
+| 网络分析 Agent               | x     | x         | STRING 本地文件优先/API 回退与 NetworkX 已实现；CytoNCA 桥接自动交接已接入（非加权 Degree），真实研究网络待验收 | [network_analysis](../agents/network_analysis.md)                               |
 | 富集分析 Agent               | X     | x         | DAVID 真实提交与 GO/KEGG 导出已接入；正式背景与方法确认后做真实运行 | [enrichment_analysis](../agents/enrichment_analysis.md)                         |
 | 共享数据处理与校验                | x     | 两路靶点模块负责人 | 合并、Venny 真实交集与核对已验证；权威映射待深化               | 浏览器及确定性工具，不单独设 Agent                                                            |
 
