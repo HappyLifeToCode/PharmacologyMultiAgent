@@ -9,16 +9,19 @@ from .sources import string_network
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", choices=["synthetic", "string", "probe"], required=True)
+    parser.add_argument("--source", choices=["synthetic", "string", "string-local", "probe"], required=True)
     parser.add_argument("--output", type=Path, required=True, help="New evidence directory")
     parser.add_argument("--genes", nargs="+")
     parser.add_argument("--species", type=int)
     parser.add_argument("--confidence", type=float)
     parser.add_argument("--string-version")
+    parser.add_argument("--data-dir")
     args = parser.parse_args()
-    if args.source == "string" and (not args.genes or args.species is None or
+    if args.source in ("string", "string-local") and (not args.genes or args.species is None or
                                     args.confidence is None or not args.string_version):
         parser.error("STRING smoke requires explicit --genes --species --confidence --string-version")
+    if args.source == "string-local" and not args.data_dir:
+        parser.error("STRING local smoke requires explicit --data-dir")
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(args.output / "smoke_input.json", dict(vars(args), output=str(args.output),
                purpose="engineering_smoke", scientific_complete=False, started_at=now()))
@@ -35,8 +38,15 @@ def main():
             else:
                 task = {"taxon_id": args.species, "string_confidence": args.confidence,
                         "string_additional_nodes": 0, "string_version": args.string_version}
-                net = string_network(args.genes, task, args.output)
-                net["evidence_type"] = "real_api_engineering_smoke"
+                if args.source == "string-local":
+                    from .string_local import string_local_network
+                    task["string_source"] = "local_files"
+                    task["string_local_dir"] = args.data_dir
+                    net = string_local_network(args.genes, task, args.output)
+                    net["evidence_type"] = "local_files_engineering_smoke"
+                else:
+                    net = string_network(args.genes, task, args.output)
+                    net["evidence_type"] = "real_api_engineering_smoke"
             result = run_cytoscape(net, args.output,
                                   {"metrics": ["Degree"], "weighted": False, "purpose": "engineering_smoke"})
         except Exception as exc:

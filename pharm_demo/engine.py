@@ -18,6 +18,7 @@ from .processing import analyze_network, write_network
 from .venny import run_venny
 from .archive import archive_run, import_directory
 from .sources import SOURCES, probe, string_network
+from .string_local import string_local_network
 from .cytoscape import run_cytoscape
 from .david import run_david
 
@@ -337,7 +338,10 @@ class Runner:
                     fixture = read_json(ROOT / "examples/fixture.json")
                     net = {"nodes": common["genes"], "edges": fixture["edges"]}
                 else:
-                    net = string_network(common["genes"], self.task, directory)
+                    if self.task.get("string_source", "api") == "local_files":
+                        net = string_local_network(common["genes"], self.task, directory)
+                    else:
+                        net = string_network(common["genes"], self.task, directory)
                 result = analyze_network(net["nodes"], net["edges"])
                 result["method"] = "NetworkX degree"
                 result["evidence_type"] = common["evidence_type"]

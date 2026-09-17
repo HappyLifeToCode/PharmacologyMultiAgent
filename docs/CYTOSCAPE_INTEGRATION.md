@@ -37,6 +37,14 @@ python -m pharm_demo.network_smoke --source string --output local/checks/string-
 
 `ZZZPHARMSMOKETEST` 是刻意设置的未识别输入。本机验证 5 个输入映射 4 个节点、4 条边；Degree 为 AKT1=2、EGFR=1、MDM2=2、TP53=3。STRING 版本变化时会拒绝自动降级；这些数量是带日期的观察，不是未来查询的硬编码目标。
 
+同一组基因也可用本地 v12.0 文件离线执行（2026-09-14 与上述 API 结果对拍一致：映射 4/5、边 4 条、Degree 相同）：
+
+```powershell
+python -m pharm_demo.network_smoke --source string-local --output local/checks/string-local-01 --genes TP53 MDM2 EGFR AKT1 ZZZPHARMSMOKETEST --species 9606 --confidence 0.9 --string-version 12.0 --data-dir data/string/v12.0
+```
+
+本地来源由任务显式配置 `string_source="local_files"` 选择，映射为 preferred_name/aliases 精确匹配，与 API 解析口径不同，歧义与未映射分别记录；`data/string/` 不入库。
+
 ## 调度配置、产物和状态
 
 已有 Runner.analysis_stage 在 live 网络阶段自动导入 STRING 网络。任务可添加 `network_topology` 对象，目前通过本地任务 JSON 配置；网页输入表单尚未提供此字段。技术验证配置如下：
