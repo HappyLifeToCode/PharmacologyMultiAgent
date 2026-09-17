@@ -54,7 +54,8 @@ def test_save_preserves_existing_tasks_and_deduplicates_retries(tmp_path):
     rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines()]
     assert rows[0] == {"task_id": "existing", "extra": "用户已有字段"}
     assert rows[1]["research_notes"] == body()["research_notes"]
-    assert task["batman_threshold"] is None and task["enrichment_background"] is None
+    assert task["batman_threshold"] == 0.84 and task["batman_threshold_confirmed"] is True
+    assert task["enrichment_background"] is None
     assert not (p.parent / ".tasks.lock").exists()
 
 
