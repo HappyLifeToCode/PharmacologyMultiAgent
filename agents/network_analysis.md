@@ -6,6 +6,6 @@
 
 任务 network_topology 缺失、研究参数未确认或指标不受支持时，仅交接网络并保留 partial；服务不可用须记录 blocked 子状态；导入或数值核对错误为 failed，不能被模型审核提升为成功。engineering_smoke 是技术验证，不代表正式研究方法已确认。详见 docs/CYTOSCAPE_INTEGRATION.md。
 
-fixture 使用固定测试边和本地 Degree，不调用 STRING；缺少有效交集时只核验入口，不提交占位靶点。甲状腺癌独立网络的 Degree Top 50 是尚未实现的另一流程，不能擅自取代主交集或改变 DAVID 输入。
+fixture 使用固定测试边和本地 Degree，不调用 STRING；缺少有效交集时只核验入口，不提交占位靶点。甲状腺癌独立网络的 Degree Top N 属于独立补充流程（docs/THYROID_SUPPLEMENT.md），不能擅自取代主交集或改变 DAVID 输入。
 
 遵守 docs/AGENT_ASSIGNMENTS.md 和 docs/DATA_CONTRACT.md。接收配置与输入文件引用，交付原始证据、处理产物和任务清单；有缺失时反馈具体问题及可继续的独立工作。本角色已接入独立 Codex 会话；真实数据缺失时返回受限状态，合成验证不冒充数据库结果。

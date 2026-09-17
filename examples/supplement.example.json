@@ -1,0 +1,18 @@
+{
+  "_comment": "甲状腺癌补充流程配置模板（示例，不是研究参数）。复制后按实际数据修改；未知口径保持 provisional，不为跑通流程填入 confirmed。",
+  "diseases": ["Hyperthyroidism", "Hypothyroidism", "Thyroid cancer", "Thyroid nodules", "Thyroiditis"],
+  "cancer_disease": "Thyroid cancer",
+  "taxon_id": 9606,
+  "string_confidence": 0.9,
+  "string_additional_nodes": 0,
+  "string_version": "12.0",
+  "network_topology": {"metrics": ["Degree"], "weighted": false, "purpose": "engineering_smoke"},
+  "top_n": 50,
+  "import_dir": "data/pharm/<方名>/imports/<task_id>/<批次名>",
+  "intersection_file": "runs/<主运行run_id>/intersection/attempt_01/intersection.json",
+  "core_herbs_file": null,
+  "dynasty_clusters_file": null,
+  "herbs": ["白芍", "炙甘草"],
+  "batman_threshold": null,
+  "batman_threshold_confirmed": false
+}

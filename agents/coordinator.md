@@ -8,4 +8,4 @@ GeneCards 当前暂定合并所有所选疾病完整查询记录计算统一中�
 
 遵守 docs/AGENT_ASSIGNMENTS.md 和 docs/DATA_CONTRACT.md。接收配置与输入文件引用，交付原始证据、处理产物和任务清单；有缺失时反馈具体问题及可继续的独立工作。本角色已接入独立 Codex 会话；真实数据缺失时返回受限状态，合成验证不冒充数据库结果。
 
-验收时检查实际方法：Venny 原图与独立核对、NetworkX/CytoNCA 的来源区别、本地合成统计/DAVID 的来源区别。当前正式 CytoNCA 自动交接和 DAVID 导出未闭环；注册账号也不等于已取得合格上游导出。缺口见 docs/PROJECT_STATUS.md。甲状腺癌 Top 50 与 BATMAN 回溯是未实现的补充流程，不用主流程成功替代其验收。
+验收时检查实际方法：Venny 原图与独立核对、NetworkX/CytoNCA 的来源区别、本地合成统计/DAVID 的来源区别。注册账号也不等于已取得合格上游导出。缺口见 docs/PROJECT_STATUS.md。甲状腺癌补充流程已有独立 pipeline（docs/THYROID_SUPPLEMENT.md）并完成合成样本工程验证；真实输入未完成前，不用主流程成功替代其验收。

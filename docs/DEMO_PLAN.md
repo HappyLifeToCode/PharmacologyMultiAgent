@@ -56,7 +56,7 @@ nodules、Thyroiditis。
 CLI、icrc、gpt-5.6-luna、medium，接入要求见 [Codex 配置](CODEX_RUNTIME.md)。
 
 首轮选定的芍药甘草汤 × 甲亢是 Demo 案例，不是从原文方法段识别出的药材清单。甲状腺癌补充流程（独立癌症靶点网络 → 度值 Top
-50 → 主要交集外候选靶点 → BATMAN 回溯成分与药材）尚未实现，不能把当前主流程描述为已覆盖这部分研究。
+50 → 主要交集外候选靶点 → BATMAN 回溯成分与药材）已有独立 pipeline 并完成合成样本工程验证，真实输入待补；不能把当前主流程描述为已覆盖这部分研究，详见 [甲状腺癌补充流程](THYROID_SUPPLEMENT.md)。
 
 ## 验收与恢复
 
