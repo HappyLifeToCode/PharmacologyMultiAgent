@@ -87,5 +87,5 @@ traces 仍不通过公开产物接口提供。
 使用。source_counts、genecards_filter、policy 保留筛选流水账。疾病合并没有 agent_session_id。任一路受限则合并
 blocked，已完成来源产物保留。
 
-新任务暂定 pooled_query_rows/provisional：合并所有所选疾病完整记录计算中位数，严格大于再筛选；跨疾病同一基因保留各自分数，筛选后去重。原文没有明确这项口径，报告必须显示待确认。多疾病记录保留
+新任务默认 per_disease_median/confirmed：先对单个疾病完整记录分别计算中位数，严格大于再筛选；跨疾病同一基因保留各自分数，筛选后去重。该口径 2026-09-17 由医院方确认；旧任务保持冻结的 pooled_query_rows/provisional 口径。多疾病记录保留
 disease 字段，详见 IMPORTS.md。

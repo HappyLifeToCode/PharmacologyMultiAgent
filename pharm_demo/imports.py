@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from .processing import _valid_symbol, filter_genecards, normalize_symbols
+from .processing import _valid_symbol, filter_genecards, filter_genecards_per_disease, normalize_symbols
 
 
 def _read_rows(path: Path, required: set[str]) -> list[dict[str, str]]:
@@ -137,16 +137,22 @@ def load_herb(directory: str | Path, task: Mapping[str, Any]) -> dict[str, Any]:
     return {"genes": genes, "relations": relations, "source_counts": {"input_rows": len(rows), "kept_rows": len(relations), "genes": len(genes)}, "provenance": provenance}
 
 
+MEDIAN_SCOPE_NOTES = {
+    "pooled_query_rows": "合并所有所选疾病的完整检索记录后计算中位数；跨疾病同一基因的分数分别保留，筛选后合并去重。",
+    "per_disease_median": "先对单个疾病的完整检索记录分别计算中位数，保留严格大于该疾病中位数的记录，再合并不同疾病靶点去重。2026-09-17 由医院方经同门确认（参考文献：Network pharmacology unveils spleen-fortifying effect of Codonopsis Radix on different gastric diseases）。",
+}
+
+
 def disease_policy(task):
     scope = task.get("genecards_median_scope", "pooled_query_rows")
-    if scope != "pooled_query_rows":
+    if scope not in MEDIAN_SCOPE_NOTES:
         raise ValueError("unsupported GeneCards median scope: " + str(scope))
     status = task.get("genecards_median_status", "provisional")
     if status not in ("provisional", "confirmed"):
         raise ValueError("invalid GeneCards median status")
     return {"scope": scope, "status": status, "operator": ">",
             "row_unit": "disease_query_gene_record", "deduplicate_genes": "after_filter",
-            "note": "合并所有所选疾病的完整检索记录后计算中位数；跨疾病同一基因的分数分别保留，筛选后合并去重。"}
+            "note": MEDIAN_SCOPE_NOTES[scope]}
 
 
 def _disease_source(directory, task, name):
@@ -196,7 +202,8 @@ def load_genecards(directory, task):
             rejected.append(number)
     if rejected:
         raise ValueError("invalid genecards.csv rows: " + repr(rejected))
-    result = filter_genecards(parsed, complete=True)
+    result = filter_genecards_per_disease(parsed, complete=True) if policy["scope"] == "per_disease_median" \
+        else filter_genecards(parsed, complete=True)
     result.update(policy=policy, query_counts={q: sum(r["disease"] == q for r in parsed) for q in diseases})
     genes, _ = normalize_symbols([row["gene_symbol"] for row in result["kept"]])
     return {"genes": genes, "genecards_filter": result, "policy": policy,

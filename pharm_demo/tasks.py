@@ -44,7 +44,7 @@ def prepare_task(body):
             "research_notes": notes.strip(), "organism": "Homo sapiens", "taxon_id": 9606,
             "batman_threshold": None, "batman_threshold_confirmed": False,
             "genecards_filter": "relevance_score > median_of_complete_query_results",
-            "genecards_median_scope": "pooled_query_rows", "genecards_median_status": "provisional",
+            "genecards_median_scope": "per_disease_median", "genecards_median_status": "confirmed",
             "string_confidence": 0.9, "string_additional_nodes": 0,
             "enrichment_input": "herb_disease_intersection", "enrichment_background": None,
             "enrichment_test_required": "hypergeometric", "multiple_testing": "Benjamini-Hochberg", "fdr_lt": 0.05}

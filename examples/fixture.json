@@ -81,6 +81,21 @@
       "gene_symbol": "EGFR",
       "relevance_score": 3,
       "disease": "Hyperthyroidism"
+    },
+    {
+      "gene_symbol": "ZZLOWA",
+      "relevance_score": 1,
+      "disease": "Thyroid cancer"
+    },
+    {
+      "gene_symbol": "ZZLOWB",
+      "relevance_score": 1,
+      "disease": "Thyroid nodules"
+    },
+    {
+      "gene_symbol": "ZZLOWC",
+      "relevance_score": 1,
+      "disease": "Thyroiditis"
     }
   ],
   "omim_genes": [

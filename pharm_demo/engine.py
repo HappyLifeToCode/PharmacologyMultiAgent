@@ -202,10 +202,12 @@ class Runner:
             if self.manifest["mode"] == "fixture":
                 fixture = read_json(ROOT / "examples/fixture.json")
                 if role == "genecards_targets":
-                    from .processing import filter_genecards, normalize_symbols
+                    from .processing import filter_genecards, filter_genecards_per_disease, normalize_symbols
                     from .imports import disease_policy
-                    filtered = filter_genecards(fixture["genecards_rows"], complete=True)
-                    filtered["policy"] = disease_policy(self.task)
+                    policy = disease_policy(self.task)
+                    filtered = filter_genecards_per_disease(fixture["genecards_rows"], complete=True) \
+                        if policy["scope"] == "per_disease_median" else filter_genecards(fixture["genecards_rows"], complete=True)
+                    filtered["policy"] = policy
                     genes, _ = normalize_symbols([r["gene_symbol"] for r in filtered["kept"]])
                     output = {"genes": genes, "genecards_filter": filtered, "policy": filtered["policy"], "source_counts": {"genecards_input": filtered["input_count"], "genecards_kept": len(filtered["kept"]), "genecards_genes": len(genes)}}
                 elif role == "omim_targets":

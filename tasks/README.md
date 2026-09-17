@@ -29,7 +29,7 @@
 | organism / taxon_id | 物种及分类编号 |
 | batman_threshold / batman_threshold_confirmed | BATMAN 阈值及确认状态；未知为 null，不自行猜测 |
 | genecards_filter | 完整查询结果中 relevance score 严格大于中位数 |
-| genecards_median_scope | 默认 pooled_query_rows：合并所选疾病全部查询记录，统一计算中位数 |
+| genecards_median_scope | 默认 per_disease_median：先对单个疾病分别计算中位数再筛选（2026-09-17 医院方确认） |
 | genecards_median_status | 默认 provisional：待医生确认；确认后可配置 confirmed，保留确认依据 |
 | string_confidence / string_additional_nodes | 网络置信度及额外节点数量 |
 | string_version | STRING 要求版本；缺省按 12.0 检查，版本不一致时停止并请求复核 |
@@ -37,7 +37,7 @@
 | enrichment_test_required | 方案要求的统计检验；实际使用的方法写入运行记录 |
 | multiple_testing / fdr_lt | 多重检验校正方法及显著性阈值 |
 
-使用 UTF-8，每个任务占一行，不添加注释或尾逗号。保留数值、布尔值、数组和 null 的 JSON 类型。当前多疾病规则暂定为合并查询记录统一计算中位数，确认状态保持 provisional；医生确认或改变方法后，应另存任务版本并新建运行，不改写历史运行快照。
+使用 UTF-8，每个任务占一行，不添加注释或尾逗号。保留数值、布尔值、数组和 null 的 JSON 类型。当前多疾病规则为按单个疾病分别计算中位数（2026-09-17 医院方确认，confirmed）；改变方法后，应另存任务版本并新建运行，不改写历史运行快照。
 
 
 可选 `import_batch`：显式选择 `data/pharm/<方名>/imports/<task_id>/<import_batch>/` 下的导入批次；未设置继续使用 `data/imports/<task_id>/`。批次名不含路径分隔符。原始文件不覆盖，修订建立新批次。
@@ -47,7 +47,7 @@
 
 “研究任务”选择准备执行的任务；“查看运行”选择某次已执行记录，右侧阶段详情跟随该运行和中间节点。保存不等于启动；同一任务可以有多次 run_id。新版运行将疾病模块拆为 GeneCards、OMIM 两个独立来源阶段和一个程序合并阶段。
 
-页面新任务默认写入 pooled_query_rows/provisional。任务文件可显式设置这两个字段，当前只实现 pooled_query_rows；不支持的中位数口径会拒绝处理，不能仅改字段值就认为新算法已经实现。单疾病旧任务没有这两个字段时，疾病处理默认按统一中位数、待确认规则记录。
+页面新任务默认写入 per_disease_median/confirmed。任务文件可显式设置这两个字段；支持 pooled_query_rows 与 per_disease_median，其他口径会拒绝处理。旧任务没有这两个字段或保持 pooled_query_rows 时，按冻结的统一中位数口径记录。
 
 ## 任务、执行模式与实际能力
 

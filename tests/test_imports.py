@@ -80,3 +80,45 @@ def test_sources_validate_independently_and_require_query_identity(tmp_path):
     (tmp_path / "provenance.json").write_text(json.dumps(provenance))
     with pytest.raises(ValueError, match="disease"):
         load_genecards(tmp_path, task)
+
+
+def test_per_disease_median_filters_within_each_query(tmp_path):
+    """2026-09-17 医院方确认口径：先按单个疾病取中位数以上，再合并去重。"""
+    _fixture(tmp_path)
+    queries = ["Hyperthyroidism", "Hypothyroidism", "Thyroid cancer"]
+    provenance = json.loads((tmp_path / "provenance.json").read_text())
+    for name in ("genecards", "omim"):
+        provenance["sources"][name]["diseases"] = queries
+    (tmp_path / "provenance.json").write_text(json.dumps(provenance))
+    rows = [("Hyperthyroidism", "TP53", 1), ("Hyperthyroidism", "EGFR", 3),
+            ("Hypothyroidism", "IL6", 2), ("Thyroid cancer", "EGFR", 10),
+            ("Thyroid cancer", "AKT1", 1), ("Thyroid cancer", "BRCA1", 30)]
+    (tmp_path / "genecards.csv").write_text(
+        "disease,gene_symbol,relevance_score\n" + "\n".join("%s,%s,%s" % r for r in rows))
+    (tmp_path / "omim.csv").write_text("disease,gene_symbol\nThyroid cancer,BRCA1\n")
+    task = {"diseases": queries, "genecards_median_scope": "per_disease_median",
+            "genecards_median_status": "confirmed"}
+    result = load_disease(tmp_path, task)
+    # Hyperthyroidism 中位数 2 → EGFR(3)；Hypothyroidism 单行不保留；Thyroid cancer 中位数 10 → BRCA1(30)
+    assert result["genecards_filter"]["medians"] == {"Hyperthyroidism": 2.0, "Hypothyroidism": 2.0,
+                                                     "Thyroid cancer": 10.0}
+    assert [(r["disease"], r["gene_symbol"]) for r in result["genecards_filter"]["kept"]] == [
+        ("Hyperthyroidism", "EGFR"), ("Thyroid cancer", "BRCA1")]
+    assert result["genes"] == ["EGFR", "BRCA1"]
+    assert result["policy"]["scope"] == "per_disease_median"
+    assert result["policy"]["status"] == "confirmed"
+    assert "先对单个疾病" in result["policy"]["note"]
+
+
+def test_per_disease_median_requires_disease_field():
+    from pharm_demo.processing import filter_genecards_per_disease
+    with pytest.raises(ValueError, match="disease"):
+        filter_genecards_per_disease([{"gene_symbol": "A", "relevance_score": 1}], complete=True)
+    with pytest.raises(ValueError, match="complete"):
+        filter_genecards_per_disease([], complete=False)
+
+
+def test_unsupported_median_scope_still_rejected():
+    from pharm_demo.imports import disease_policy
+    with pytest.raises(ValueError, match="unsupported"):
+        disease_policy({"genecards_median_scope": "per_disease_max"})

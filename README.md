@@ -74,7 +74,7 @@ python -m venv .venv
 ```mermaid
 flowchart TD
     C[协调 Agent] --> H[药材靶点 Agent / BATMAN-TCM]
-    C --> GC[GeneCards Agent：检索与统一中位数筛选]
+    C --> GC[GeneCards Agent：检索与按疾病中位数筛选]
     C --> OM[OMIM Agent：疾病关联靶点]
     GC --> D[确定性程序：疾病靶点合并去重]
     OM --> D
@@ -88,7 +88,7 @@ flowchart TD
 
 新运行包含六种 Agent 角色、七次独立模型会话及九个阶段。GeneCards 与 OMIM 独立并行，二者通过检查后才合并；任一路受限时，另一支的成功记录可保留并在输入不变时复用。疾病靶点合并由程序执行；交集由 Playwright 操作官方 Venny 2.1.0，再由 Python 独立核对。旧版运行保留原有流程与历史记录。
 
-暂定 GeneCards 规则：合并本任务所有疾病的完整检索记录，统一计算 relevance score 中位数，严格筛选大于中位数的记录，再与 OMIM 合并去重。跨疾病同一基因的原始分数分别参与计算；确认状态为 `provisional`，待医生确认。
+GeneCards 规则（2026-09-17 医院方确认）：先对单个疾病的完整检索记录分别计算 relevance score 中位数，严格筛选大于该疾病中位数的记录，再与 OMIM 合并去重。跨疾病同一基因的原始分数分别保留；旧任务保持冻结的 pooled_query_rows 口径。
 
 Agent 负责执行任务、调用工具及反馈异常；中位数计算、去重、标识映射和集合结果核对由确定性程序完成。STRING 与 DAVID 使用同一份共同靶点清单，两个分析分支可在输入通过校验后独立执行。
 

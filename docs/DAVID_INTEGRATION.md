@@ -82,4 +82,6 @@ python -m pharm_demo.david_smoke --background custom --output local/checks/david
 
 Runner 使用与网络分支相同的完整共同靶点，接入现有阶段详情、哈希归档和恢复指标。Agent 审核执行证据，不再次重复提交。缺参数/无识别结果为 blocked，识别后服务失败为 partial，结构或数据不一致为 failed。技术样本在调度阶段保留 partial 和科学限制；独立小样本入口的 succeeded 仅表示工具链通过。全流程 scientific_complete 仍为 false。
 
-已做真实工具小样本和隔离模型的调度回归；未执行用户正式上游数据或完整真实模型会话。后续需确认正式背景、注释类别与方法，再联调完整案例。未开发独立产物验收平台。
+已做真实工具小样本和隔离模型的调度回归；未执行用户正式上游数据或完整真实模型会话。未开发独立产物验收平台。
+
+2026-09-17 医院方经同门确认：正式背景为 Homo sapiens 物种背景，GO 类别用 DIRECT（BP/CC/MF），KEGG 保留。尚待同步：方案写“超几何检验”，DAVID 实际 P-Value 为 EASE（修改版 Fisher exact test）——需研究方确认接受实际方法后再把任务 enrichment_test_required 同步为实际口径，不可只改名称。

@@ -114,12 +114,12 @@ data/pharm/<方名>/imports/<task_id>/<批次名>/
 GeneCards 与 OMIM 各自校验本库来源台账、原始文件及共同映射依据；缺少 OMIM 文件不会阻止 GeneCards
 独立处理。每支仅快照本库所需文件和元数据，另一数据库的单独更新不会使已成功分支失效。共同映射或任务参数变化仍会重新核验。
 
-多疾病 CSV 必须含 disease 列，与任务关键词完全对应；单疾病旧文件可省略，程序按唯一关键词补齐。GeneCards 合并全部查询行计算一个中位数，再严格保留
-score > median，最后按基因去重并与 OMIM
+多疾病 CSV 必须含 disease 列，与任务关键词完全对应；单疾病旧文件可省略，程序按唯一关键词补齐。GeneCards 先对单个疾病的查询行分别计算中位数，再严格保留
+score > 该疾病中位数，最后按基因去重并与 OMIM
 合并。跨疾病同一基因保留各自分数，不预先取最大值或平均值；同一疾病/基因重复行会拒绝导入，避免重复分页改变中位数。零结果查询也必须包含在完整性台账的疾病范围中；台账不能代替原始查询证据。
 
-`genecards_median_scope=pooled_query_rows`，`genecards_median_status=provisional`
-是当前默认规则。医生确认前保持暂定；若改口径，需要实现相应筛选规则并新建任务或运行，不能改写旧运行结果。分支产物保留中位数、输入/保留行数、每个查询的行数、保留记录及规则状态。
+`genecards_median_scope=per_disease_median`，`genecards_median_status=confirmed`
+是 2026-09-17 医院方确认后的新任务默认规则；旧任务保持冻结的 pooled_query_rows/provisional 口径，不能改写旧运行结果。分支产物保留中位数、输入/保留行数、每个查询的行数、保留记录及规则状态。
 
 新版真实来源证据分别归档在 `02_disease/genecards/run_<id>/attempt_<nn>/` 和 `02_disease/omim/run_<id>/attempt_<nn>/`
 ；合并结果仍在 `02_disease/run_<id>/attempt_<nn>/`。两路原始文件不互相覆盖，旧版归档保持原样。

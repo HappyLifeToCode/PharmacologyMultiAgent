@@ -49,8 +49,7 @@ run_id、task_id 和 attempt，记录实际工具调用及交接事件。浏览�
 ，分别拥有独立会话、状态、来源和产物。两路均通过检查后，由程序合并去重，不额外启动疾病合并 Agent。模块负责人沿用上面的认领表；子模块归属由团队自行确定。
 
 GeneCards
-暂按合并全部所选疾病完整记录后统一计算中位数，保留严格大于中位数的记录；跨疾病同一基因分数保留，筛选后去重。`genecards_median_status=provisional`
-表示待医生确认。OMIM 不使用 GeneCards 分数筛选。
+按单个疾病完整记录分别计算中位数，保留严格大于该疾病中位数的记录；跨疾病同一基因分数保留，筛选后去重。该口径 2026-09-17 由医院方确认（`per_disease_median`/`confirmed`）；旧任务保持冻结口径。OMIM 不使用 GeneCards 分数筛选。
 
 **开发任务：** 分别接入 GeneCards、OMIM；核验完整结果获取能力，提取 GeneCards relevance score 及 OMIM
 疾病—基因关联；调用共享模块筛选、映射、合并并去重。
