@@ -54,6 +54,22 @@ OMIM 的普通复选框点击曾实际执行，随后仍出现新挑战，未进
 
 结果写入新的 `runs/diagnostics/sites_<日期时间>/`，包含 HTTP 原始响应、浏览器页面、截图和访问时间，不覆盖历史结果。首页核验没有正式查询或导出。
 
+## BATMAN-TCM v2.0 本地全量数据
+
+药味侧正式来源为 BATMAN-TCM v2.0 官网下载页的全量数据文件（条目数已与 2.0 官方说明核对：8,404 草药、2,339,061 预测 TTI）。`pharm_demo/batman_local.py` 按任务药材清单从本地文件生成契约导入包（`herb_targets.csv` + `provenance.json`），产物可直接通过 `imports.load_herb` 校验。本地目录必须包含：
+
+```text
+herb_browse.txt                            药材→成分（PubChem CID）
+known_browse_by_ingredients.txt.gz         成分→已知靶点（文献验证，无分数）
+known_browse_by_targets.txt.gz             靶点→成分（Entrez→symbol 映射依据）
+predicted_browse_by_ingredients.txt.gz     成分→预测靶点（0~1 概率，可选）
+predicted__browse_by_targets.txt.gz        预测靶点→成分（可选，部分镜像为单下划线文件名）
+```
+
+每位成员复制 `configs/batman_data.example.json` 为 Git 忽略的 `configs/batman_data.local.json`，再将 `data_dir` 改为本机目录。路径可使用绝对路径，也可使用相对于项目根目录的路径。也可设置 `PHARM_BATMAN_DATA_DIR`，环境变量优先于本机配置文件；任务可用 `batman_local_dir` 显式指定目录。共享代码、任务清单和文档不写死个人盘符；原始数据文件不提交 Git。
+
+known TTI 为文献验证的二值证据，生成的行 `evidence=known` 且 score 留空、不参与阈值过滤；predicted 行仅在任务 `batman_include_predicted=true` 时生成，score 为 v2.0 概率值，由 `load_herb` 按任务阈值（默认 0.84，医院方已确认）过滤。任务必须提供 `batman_accessed_at`（实际下载日期 YYYY-MM-DD），归档时间不可冒充数据库访问时间。运行时核验各文件表头、分隔符与文件 SHA-256（写入 `raw/batman_full_files.manifest.json`）。BATMAN 无在线回退：未配置本地文件时生成分明确失败，见 [分来源数据能力](#分来源数据能力含回退语义)。
+
 ## STRING 12.0 本地数据
 
 正式网络阶段优先读取已配置的 STRING 物种数据，未配置时才调用公开 API；任务可用 `string_source`（`local_files` / `api`）显式指定其一，实际来源写入 `string_provenance.json`。本地目录必须同时包含与任务 `taxon_id`、`string_version` 一致的三个文件（官方 `.txt.gz` 压缩包直接读取，已解压的 `.txt` 也可接受，同名时优先 `.txt.gz`）：
