@@ -90,7 +90,7 @@ def test_run_supplement_full_chain_with_synthetic_data(tmp_path, monkeypatch):
                                  {"gene_symbol": "G3", "degree": 1.0}]}
     monkeypatch.setattr(supplement, "run_cytoscape", fake_cytoscape)
     relations = tmp_path / "relations.csv"
-    relations.write_text("herb,compound_id,gene_symbol,score\n白芍,MOL1,G1,20\n", encoding="utf-8")
+    relations.write_text("herb,compound_id,gene_symbol,score,evidence\n白芍,MOL1,G1,,known\n", encoding="utf-8")
     config = _base_config(tmp_path, genes=("G1", "G2", "G3"))
     config["herb_relations_file"] = str(relations)
     config["top_n"] = 2  # G3 与第 2 名 G2 并列，全部保留
@@ -102,7 +102,7 @@ def test_run_supplement_full_chain_with_synthetic_data(tmp_path, monkeypatch):
     outside = read_json(tmp_path / "out" / "04_outside_intersection" / "outside_intersection.json")
     assert outside["candidates"] == ["G1", "G3"]  # G2 在主交集中被排除
     backtrack = read_json(tmp_path / "out" / "05_batman_backtrack" / "batman_backtrack.json")
-    assert backtrack["rows"] == [{"gene_symbol": "G1", "herb": "白芍", "compound_id": "MOL1", "score": 20.0}]
+    assert backtrack["rows"] == [{"gene_symbol": "G1", "herb": "白芍", "compound_id": "MOL1", "score": None, "evidence": "known"}]
     assert backtrack["unhit_candidates"] == ["G3"]
     assert "BATMAN 网页在线回溯尚未实现" in backtrack["limitation"]
     report = (tmp_path / "out" / "supplement_report.md").read_text(encoding="utf-8")

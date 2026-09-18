@@ -51,7 +51,8 @@ def batman_backtrack(candidates, relations):
     for gene in candidates:
         for rel in sorted(by_gene.get(gene, []), key=lambda r: (r["herb"], r["compound_id"])):
             rows.append({"gene_symbol": gene, "herb": rel["herb"],
-                         "compound_id": rel["compound_id"], "score": rel["score"]})
+                         "compound_id": rel["compound_id"], "score": rel["score"],
+                         "evidence": rel.get("evidence")})
     return {"rows": rows, "unhit_candidates": [g for g in candidates if g not in by_gene]}
 
 
@@ -63,23 +64,34 @@ def _write_csv(path, fields, rows):
 
 
 def _load_herb_relations_file(path):
-    """Engineering-only relations CSV (herb,compound_id,gene_symbol,score); not a BATMAN export."""
+    """Engineering-only relations CSV (herb,compound_id,gene_symbol,score,evidence); not a BATMAN export."""
     relations, rejected = [], []
     with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        if not {"herb", "compound_id", "gene_symbol", "score"}.issubset(reader.fieldnames or []):
-            raise ValueError("herb relations 文件必须包含 herb,compound_id,gene_symbol,score 列")
+        if not {"herb", "compound_id", "gene_symbol", "score", "evidence"}.issubset(reader.fieldnames or []):
+            raise ValueError("herb relations 文件必须包含 herb,compound_id,gene_symbol,score,evidence 列")
         for number, row in enumerate(reader, start=2):
             try:
-                score = float(row["score"])
-                if not math.isfinite(score) or not _valid_symbol(row["gene_symbol"]) \
+                evidence = (row["evidence"] or "").strip()
+                if evidence not in ("known", "predicted"):
+                    raise ValueError
+                raw_score = (row["score"] or "").strip()
+                if evidence == "known":
+                    if raw_score:
+                        raise ValueError
+                    score = None
+                else:
+                    score = float(raw_score)
+                    if not math.isfinite(score):
+                        raise ValueError
+                if not _valid_symbol(row["gene_symbol"]) \
                         or not row["herb"].strip() or not row["compound_id"].strip():
                     raise ValueError
             except (KeyError, TypeError, ValueError):
                 rejected.append(number)
                 continue
             relations.append({"herb": row["herb"].strip(), "compound_id": row["compound_id"].strip(),
-                              "gene_symbol": row["gene_symbol"], "score": score})
+                              "gene_symbol": row["gene_symbol"], "score": score, "evidence": evidence})
     if rejected:
         raise ValueError("herb relations 文件存在无效行：" + repr(rejected))
     return relations

@@ -107,22 +107,34 @@ def load_herb(directory: str | Path, task: Mapping[str, Any]) -> dict[str, Any]:
     threshold = source["threshold"]
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(float(threshold)):
         raise ValueError("provenance.sources.batman threshold must be finite numeric")
-    rows = _read_rows(directory / "herb_targets.csv", {"herb", "compound_id", "gene_symbol", "score"})
+    rows = _read_rows(directory / "herb_targets.csv", {"herb", "compound_id", "gene_symbol", "score", "evidence"})
     rejected = []
     relations = []
     genes = []
     for number, row in enumerate(rows, start=2):
         try:
-            score = float(row["score"])
-            if not math.isfinite(score) or not _valid_symbol(row["gene_symbol"]):
+            evidence = (row["evidence"] or "").strip()
+            if evidence not in ("known", "predicted"):
+                raise ValueError
+            raw_score = (row["score"] or "").strip()
+            if evidence == "known":
+                # known TTI 为文献验证的二值证据，无置信度分数，score 列必须留空
+                if raw_score:
+                    raise ValueError
+                score = None
+            else:
+                score = float(raw_score)
+                if not math.isfinite(score):
+                    raise ValueError
+            if not _valid_symbol(row["gene_symbol"]):
                 raise ValueError
             if not row["herb"].strip() or not row["compound_id"].strip() or row["herb"] not in set(requested_herbs):
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             rejected.append(number)
             continue
-        if score > float(threshold):
-            relation = {"herb": row["herb"], "compound_id": row["compound_id"], "gene_symbol": row["gene_symbol"], "score": score}
+        if evidence == "known" or score > float(threshold):
+            relation = {"herb": row["herb"], "compound_id": row["compound_id"], "gene_symbol": row["gene_symbol"], "score": score, "evidence": evidence}
             relations.append(relation)
             genes.append(row["gene_symbol"])
     if rejected:

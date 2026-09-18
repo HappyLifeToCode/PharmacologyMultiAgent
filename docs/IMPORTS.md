@@ -8,15 +8,17 @@ Agent 自动采集。
 在 `data/imports/<task_id>/` 下保存：
 
 ```text
-herb_targets.csv     herb,compound_id,gene_symbol,score
+herb_targets.csv     herb,compound_id,gene_symbol,score,evidence
 genecards.csv       disease,gene_symbol,relevance_score
 omim.csv            disease,gene_symbol
 provenance.json      来源、完整性、查询范围、阈值与映射记录
 raw/                原始导出与基因映射依据
 ```
 
+`herb_targets.csv` 的 `evidence` 列取 `known` 或 `predicted`：known TTI 为文献验证的二值证据，score 列必须留空、不参与阈值过滤；predicted 行 score 必填且按阈值过滤。
+
 UTF-8 CSV 保留原始分数，不能只导入已筛选的 GeneCards 记录。BATMAN
-阈值 score>0.84 已由医院方于 2026-09-17 确认（依据 juglone 抗膀胱癌研究）；导入时仍须用 v2.0 真实导出核对分值尺度并保留记录。表中药材名称必须对应任务中的药材；炮制形式匹配问题先复核。所有原始文件保留不覆盖。
+阈值 score>0.84 已由医院方于 2026-09-17 确认（依据 juglone 抗膀胱癌研究），仅作用于 predicted 行；导入时仍须用 v2.0 真实导出核对分值尺度并保留记录。表中药材名称必须对应任务中的药材；炮制形式匹配问题先复核。所有原始文件保留不覆盖。
 
 ## 来源台账模板
 
