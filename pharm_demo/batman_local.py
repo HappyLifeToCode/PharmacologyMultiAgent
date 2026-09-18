@@ -172,10 +172,11 @@ def _load_predicted(path, cids):
             raise ValueError("predicted_browse_by_ingredients 表头不符合 v2.0 格式")
         for line in stream:
             fields = line.rstrip("\r\n").split(None, 2)
-            if len(fields) != 3:
-                raise ValueError("predicted_browse_by_ingredients 包含无效行：" + line[:120])
+            if not fields:
+                continue
+            # 成分无 predicted 靶点时名称为空/整行只剩 CID（官方文件如此），不是损坏行
             if fields[0] in cids:
-                predicted[fields[0]] = _PREDICTED_TARGET_RE.findall(fields[2])
+                predicted[fields[0]] = _PREDICTED_TARGET_RE.findall(fields[2]) if len(fields) == 3 else []
     return predicted
 
 

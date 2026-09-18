@@ -97,3 +97,30 @@ def test_generate_import_reports_missing_files(tmp_path):
     (data / "predicted__browse_by_targets.txt.gz").unlink()
     with pytest.raises(ValueError, match="缺失"):
         generate_import(_task(data, batman_include_predicted=True), tmp_path / "out2")
+
+
+def test_predicted_rows_with_empty_target_column_are_not_corruption(tmp_path):
+    """官方 predicted 文件中无靶点的成分行为空列/仅剩 CID（本批真实数据 288 行如此）。"""
+    data = tmp_path / "batman_data"
+    data.mkdir(parents=True)
+    (data / "herb_browse.txt").write_text(
+        "Pinyin.Name\tChinese.Name\tEnglish.Name\tLatin.Name\tIngredients\n"
+        "BAI SHAO\t白芍\tCommon Peony\tPaeonia Albiflora\tcompoundA(1001)|compoundB(1002)\n",
+        encoding="utf-8")
+    _write_gz(data / "known_browse_by_ingredients.txt.gz",
+              "PubChem_CID\tIUPAC_name\tknown_target_proteins\n"
+              "1001\tnameA\tTP53\n")
+    _write_gz(data / "known_browse_by_targets.txt.gz",
+              "entrez_gene_id\tentrez_gene_symbol\tPubChem_CIDs\n"
+              "7157\tTP53\t1001\n")
+    _write_gz(data / "predicted_browse_by_ingredients.txt.gz",
+              "PubChem_CID IUPAC_name predicted_target_proteins\n"
+              "1002 nameB \n"          # CID + 名称、无靶点
+              "1001  \n")              # 仅剩 CID
+    _write_gz(data / "predicted__browse_by_targets.txt.gz",
+              "entrez_gene_id\tentrez_gene_symbol\tPubChem_CIDs\n"
+              "1956\tEGFR\t1002(0.9)\n")
+    task = {"herbs": ["白芍"], "batman_local_dir": str(data),
+            "batman_accessed_at": "2026-09-17", "batman_include_predicted": True}
+    stats = generate_import(task, tmp_path / "import")
+    assert stats["relation_rows"] == 1  # 只有 known 的 TP53；空 predicted 行不产生记录
