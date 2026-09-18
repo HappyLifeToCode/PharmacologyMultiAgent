@@ -89,6 +89,8 @@ RESULT_SCHEMA = {
         "blockers": {"type": "array", "items": {"type": "string"}},
         "findings": {"type": "array", "items": {"type": "string"}},
         "artifacts": {"type": "array", "items": {"type": "string"}},
+        "graph": {"type": "object"},
+        "rework": {"type": "array", "items": {"type": "string"}},
     }, "required": ["status", "summary", "blockers", "findings", "artifacts"],
 }
 

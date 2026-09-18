@@ -285,3 +285,59 @@ def test_live_network_dispatches_string_source(isolated_project, monkeypatch, so
     assert used == ["local_files" if source in ("local_files", "auto_local") else "api"]
     stage = runner.manifest["stages"]["network_analysis"]
     assert stage["status"] == "partial"
+
+
+def test_failed_stage_auto_retried_once(isolated_project, monkeypatch):
+    root, calls = isolated_project
+    attempts = []
+    original = engine.Runner.call_agent
+    def flaky(self, role, directory, instruction, evidence, browser=False):
+        if role == "herb_targets" and not attempts:
+            attempts.append(role)
+            raise RuntimeError("transient tool error")
+        return original(self, role, directory, instruction, evidence, browser)
+    monkeypatch.setattr(engine.Runner, "call_agent", flaky)
+    run_id = engine.start("unit_task", "fixture", background=False)
+    manifest = engine.read_json(root / "runs" / run_id / "manifest.json")
+    assert manifest["status"] == "succeeded"
+    assert manifest["stages"]["herb_targets"]["attempt"] == 2
+    assert manifest["stages"]["herb_targets"]["auto_retries_used"] == 1
+
+
+def test_permanent_failure_retries_once_and_stays_failed(isolated_project, monkeypatch):
+    root, calls = isolated_project
+    original = engine.Runner.call_agent
+    def broken(self, role, directory, instruction, evidence, browser=False):
+        if role == "herb_targets":
+            raise RuntimeError("persistent failure")
+        return original(self, role, directory, instruction, evidence, browser)
+    monkeypatch.setattr(engine.Runner, "call_agent", broken)
+    run_id = engine.start("unit_task", "fixture", background=False)
+    manifest = engine.read_json(root / "runs" / run_id / "manifest.json")
+    stage = manifest["stages"]["herb_targets"]
+    assert stage["status"] == "failed"
+    assert stage["attempt"] == 2  # 初次 + 一次自动重试，没有第三次
+    assert stage["auto_retries_used"] == 1
+    assert manifest["stages"]["intersection"]["status"] == "blocked"
+
+
+def test_review_directed_rework_round(isolated_project, monkeypatch):
+    root, calls = isolated_project
+    original = engine.Runner.call_agent
+    def fake(self, role, directory, instruction, evidence, browser=False):
+        if role == "herb_targets":
+            raise RuntimeError("persistent failure")
+        if role == "coordinator_review":
+            return {"status": "partial", "summary": "验收要求返工", "blockers": [], "findings": [],
+                    "artifacts": [], "rework": ["herb_targets", "intersection", "unknown_stage"]}, {"session_id": "t"}
+        return original(self, role, directory, instruction, evidence, browser)
+    monkeypatch.setattr(engine.Runner, "call_agent", fake)
+    run_id = engine.start("unit_task", "fixture", background=False)
+    manifest = engine.read_json(root / "runs" / run_id / "manifest.json")
+    assert manifest["rework_rounds"] == [{"round": 1, "targets": ["herb_targets"],
+                                          "ignored": ["intersection", "unknown_stage"]}]
+    assert manifest["stages"]["herb_targets"]["attempt"] == 3  # 初次 + 自动重试 + 返工轮
+    assert manifest["stages"]["coordinator_review"]["attempt"] == 2
+    assert manifest["status"] != "succeeded"
+    report = (root / "runs" / run_id / "report.md").read_text(encoding="utf-8")
+    assert "返工第 1 轮" in report and "任务图来源" in report

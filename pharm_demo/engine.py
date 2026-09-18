@@ -447,40 +447,88 @@ class Runner:
         self.manifest["metrics"] = {}
         self.save()
         try:
+            from .scheduler import (dependents_closure, execute_graph, graph_for,
+                                    topo_order, validate_graph)
             self.home = prepare_home()
-            planning = "制定本案例的简短执行安排：药材、GeneCards、OMIM 可独立并行；GeneCards 合并所有所选疾病完整记录后统一计算中位数，严格大于中位数的记录筛选后，与 OMIM 合并去重，再与药材靶点取交集。该中位数口径暂定，待医生确认。交集后网络与富集并行。识别阈值与账号待办。不用工具；只做规划。"
+            planning = "制定本案例的简短执行安排：药材、GeneCards、OMIM 可独立并行；GeneCards 按任务配置的中位数口径筛选（新任务默认按单个疾病分别计算中位数，已由医院方确认）并与 OMIM 合并去重，再与药材靶点取交集。交集后网络与富集并行。识别阈值与账号待办。不用工具；只做规划。"
             if self.manifest.get("workflow_version", 1) < 2:
                 planning = "恢复旧版运行：药材与疾病模块并行，疾病模块仍由一个会话负责两库；两路完成后取交集，再并行网络与富集。保持旧版七阶段，不宣称已拆分双库会话。核验数据与参数限制，不用工具。"
             if self.manifest["mode"] == "fixture":
                 planning += "本轮只规划合成工程验证：输入为 examples/fixture.json 的固定测试集合，网络和富集由本地程序计算，不访问 STRING 或 DAVID。规划正确且明确标注合成时返回 succeeded；真实数据库的账号、阈值和背景缺口属于后续真实运行的限制，放入 findings，不作为本轮规划的 blockers。仅当合成工程规划本身无法完成时返回 partial/blocked。"
             planning += "交集由执行器使用 Playwright 实际操作官方 Venny 2.1.0，再由 Python 独立核对；真实和合成模式均需要 Venny 网站可达。保存原图、结果文本和访问记录，失败不替换成本地图。该工具步骤不另开模型会话。"
-            self.agent_stage("coordinator_plan", planning, {"stage_order": self.stages, "runtime": read_json(ROOT / "configs/runtime.json")})
-            if self.manifest.get("workflow_version", 1) >= 2:
-                def disease_pipeline():
-                    with ThreadPoolExecutor(max_workers=2) as pool:
-                        futures = [pool.submit(self.source_stage, role) for role in ("genecards_targets", "omim_targets")]
-                        for future in futures:
-                            future.result()
-                    self.disease_merge_stage()
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    futures = [pool.submit(self.source_stage, "herb_targets"), pool.submit(disease_pipeline)]
-                    for future in futures:
-                        future.result()
-            else:
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    futures = [pool.submit(self.source_stage, role) for role in ("herb_targets", "disease_targets")]
-                    for future in futures:
-                        future.result()
-            common = self.intersection_stage()
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = [pool.submit(self.analysis_stage, role, common) for role in ["network_analysis", "enrichment_analysis"]]
-                for future in futures:
-                    future.result()
-            review_evidence = {role: {key: stage.get(key) for key in ["status", "summary", "blockers", "agent_session_id"]} for role, stage in self.manifest["stages"].items() if role != "coordinator_review"}
-            review_instruction = "独立验收其他角色交接。区分协作系统已运行与科学分析未完成；列出明天要补的账号、导出、参数。合成验证只能证明工程流程，不能宣称五库真实数据已跑通。不使用工具。"
-            if self.manifest["mode"] == "fixture":
-                review_instruction += "本运行的验收范围仅为合成工程验证。如各工程步骤通过且标注合成，返回 succeeded；真实科学数据缺失是下一阶段限制，写 findings，不作为当前工程验收 blockers。不要因为未做本次范围之外的真实实验而将合成运行判为失败。"
-            self.agent_stage("coordinator_review", review_instruction, review_evidence)
+            planning += "如需调整执行范围，可在交接 JSON 的 graph 字段返回 {\"enabled\": [阶段名, ...]}：只能在已注册阶段内启用/停用，依赖边不可改，停用会连带下游，coordinator_plan 不可停用。建议由程序校验，越界回退默认图；不填则按默认图执行。"
+            plan_result = self.agent_stage("coordinator_plan", planning, {"stage_order": self.stages, "runtime": read_json(ROOT / "configs/runtime.json")})
+            workflow_version = self.manifest.get("workflow_version", 1)
+            proposal = plan_result.get("graph") if isinstance(plan_result, dict) else None
+            enabled, findings = validate_graph(proposal, workflow_version)
+            registry = graph_for(workflow_version)
+            self.manifest["graph"] = {"source": "coordinator_plan" if proposal is not None else "default_fallback",
+                                      "disabled": sorted(set(registry) - enabled), "findings": findings}
+            for name in set(registry) - enabled:
+                self.manifest["stages"][name].update(status="skipped", summary="协调规划停用", finished_at=now())
+            self.save()
+            context = {}
+            def review_call():
+                evidence = {role: {key: stage.get(key) for key in ["status", "summary", "blockers", "agent_session_id"]} for role, stage in self.manifest["stages"].items() if role != "coordinator_review"}
+                instruction = "独立验收其他角色交接。区分协作系统已运行与科学分析未完成；列出明天要补的账号、导出、参数。合成验证只能证明工程流程，不能宣称五库真实数据已跑通。不使用工具。"
+                if self.manifest["mode"] == "fixture":
+                    instruction += "本运行的验收范围仅为合成工程验证。如各工程步骤通过且标注合成，返回 succeeded；真实科学数据缺失是下一阶段限制，写 findings，不作为当前工程验收 blockers。不要因为未做本次范围之外的真实实验而将合成运行判为失败。"
+                instruction += "如确有必要，可在交接 JSON 的 rework 字段列出需要返工的阶段名（仅限 failed/partial 阶段，至多一轮）；没有理由时返回空数组。不得点名 blocked（等待输入）阶段。"
+                return self.agent_stage("coordinator_review", instruction, evidence)
+            stage_map = {
+                "coordinator_plan": lambda: None,
+                "herb_targets": lambda: self.source_stage("herb_targets"),
+                "genecards_targets": lambda: self.source_stage("genecards_targets"),
+                "omim_targets": lambda: self.source_stage("omim_targets"),
+                "disease_targets": self.disease_merge_stage if workflow_version >= 2 else (lambda: self.source_stage("disease_targets")),
+                "intersection": lambda: context.update(common=self.intersection_stage()),
+                "network_analysis": lambda: self.analysis_stage("network_analysis", context.get("common")),
+                "enrichment_analysis": lambda: self.analysis_stage("enrichment_analysis", context.get("common")),
+                "coordinator_review": review_call,
+            }
+            max_retries = int(self.task.get("max_auto_retries", 1) or 0)
+            retry_used = {}
+            def run_stage(name):
+                result = stage_map[name]()
+                used = retry_used.get(name, 0)
+                while (self.manifest["stages"].get(name, {}).get("status") == "failed"
+                       and used < max_retries and name != "coordinator_plan"):
+                    used += 1
+                    retry_used[name] = used
+                    self.event(name, "stage.auto_retry", "失败阶段自动重试（第 %d 次）" % used)
+                    result = stage_map[name]()
+                if used:
+                    with LOCK:
+                        self.manifest["stages"][name]["auto_retries_used"] = used
+                        self.save()
+                return result
+            max_workers = int(self.task.get("max_parallel", 2) or 2)
+            done = execute_graph(enabled, workflow_version, run_stage, max_workers=max_workers)
+            review_result = done.get("coordinator_review")
+            max_rounds = int(self.task.get("max_rework_rounds", 1) or 0)
+            rounds, round_no = [], 0
+            while round_no < max_rounds and isinstance(review_result, dict):
+                directives = review_result.get("rework") or []
+                targets = [n for n in dict.fromkeys(directives)
+                           if n in stage_map and n not in ("coordinator_plan", "coordinator_review")
+                           and self.manifest["stages"].get(n, {}).get("status") in ("failed", "partial")]
+                ignored = sorted({str(n) for n in directives if n not in targets})
+                if not targets:
+                    break
+                round_no += 1
+                downstream = set()
+                for target in targets:
+                    downstream |= dependents_closure(registry, target)
+                self.event("coordinator_review", "rework.started", "验收点名返工第 %d 轮：%s" % (round_no, ", ".join(targets)))
+                for name in topo_order(workflow_version, enabled & (set(targets) | downstream)):
+                    if name == "coordinator_plan":
+                        continue
+                    result = run_stage(name)
+                    if name == "coordinator_review":
+                        review_result = result
+                rounds.append({"round": round_no, "targets": targets, "ignored": ignored})
+            if rounds:
+                self.manifest["rework_rounds"] = rounds
             statuses = [stage["status"] for stage in self.manifest["stages"].values()]
             self.manifest["status"] = "succeeded" if all(s in ("succeeded", "skipped") for s in statuses) else "partial"
             self.manifest["scientific_complete"] = self.manifest["mode"] == "live" and self.manifest["status"] == "succeeded" and self.task.get("genecards_median_status", "provisional") == "confirmed"
@@ -509,7 +557,18 @@ class Runner:
         if self.manifest.get("workflow_version", 1) >= 2:
             from .imports import disease_policy
             policy = disease_policy(self.task)
-            lines.extend(["GeneCards 中位数规则：" + policy["note"], "", "规则确认状态：" + policy["status"] + "（provisional 表示待医生确认）", ""])
+            lines.extend(["GeneCards 中位数规则：" + policy["note"], "", "规则确认状态：" + policy["status"], ""])
+        if self.manifest.get("graph"):
+            graph = self.manifest["graph"]
+            lines.extend(["任务图来源：" + ("协调规划建议" if graph["source"] == "coordinator_plan" else "默认图（无建议或建议被回退）"), ""])
+            if graph.get("disabled"):
+                lines.extend(["停用阶段：" + ", ".join(graph["disabled"]), ""])
+            lines.extend("- " + str(f) for f in graph.get("findings", []))
+            if graph.get("findings"):
+                lines.append("")
+        if self.manifest.get("rework_rounds"):
+            for entry in self.manifest["rework_rounds"]:
+                lines.extend(["返工第 %d 轮：%s（忽略：%s）" % (entry["round"], ", ".join(entry["targets"]), ", ".join(entry["ignored"]) or "无"), ""])
         if self.task.get("research_notes"):
             lines.extend(["## 研究说明", "", self.task["research_notes"], ""])
         for role in self.stages:
