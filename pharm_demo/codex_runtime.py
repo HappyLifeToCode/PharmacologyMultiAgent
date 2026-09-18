@@ -95,7 +95,7 @@ RESULT_SCHEMA = {
 }
 
 
-def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None):
+def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None, resume_session=None):
     runtime = read_json(ROOT / "configs/runtime.json")
     executable = shutil.which("codex.exe") or shutil.which("codex")
     if not executable:
@@ -105,7 +105,10 @@ def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=N
     directory.mkdir(parents=True, exist_ok=True)
     write_json(directory / "response.schema.json", RESULT_SCHEMA)
     (directory / "prompt.txt").write_text(prompt, encoding="utf-8")
-    command = [executable, "exec", "-p", runtime["codex_profile"], "-m", runtime["model"], "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"', "--json", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check", "--output-schema", str(directory / "response.schema.json"), "--output-last-message", str(directory / "response.json"), "-C", str(ROOT)]
+    command = [executable, "exec"]
+    if resume_session:
+        command += ["resume", resume_session]
+    command += ["-p", runtime["codex_profile"], "-m", runtime["model"], "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"', "--json", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check", "--output-schema", str(directory / "response.schema.json"), "--output-last-message", str(directory / "response.json"), "-C", str(ROOT)]
     if browser:
         (directory / "browser").mkdir(exist_ok=True)
         command.extend(browser_overrides(directory / "browser"))

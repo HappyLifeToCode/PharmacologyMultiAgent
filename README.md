@@ -106,6 +106,7 @@ Agent 负责执行任务、调用工具及反馈异常；中位数计算、去�
 | [组会演示手册](docs/MEETING_DEMO.md)                      | 新版双库并行演示、模式解释、离线准备与研究限制           |
 | [数据交接约定](docs/DATA_CONTRACT.md)                     | 产物、状态、来源记录与交接字段                   |
 | [甲状腺癌补充流程](docs/THYROID_SUPPLEMENT.md)                | 独立癌症靶点网络、Top N、交集外筛选与 BATMAN 回溯     |
+| [多 Agent 对照实验](docs/BENCHMARK.md)                      | 独立/共享会话策略的工程指标对比                     |
 | [Codex 执行配置](docs/CODEX_RUNTIME.md)                 | CLI 参数、角色启动方式与本地配置要求              |
 | [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 待执行的方剂、疾病和分析参数                    |
 | [执行设置](configs/runtime.json)                        | Codex CLI、profile 名称、模型和思考强度，不含凭据 |

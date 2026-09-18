@@ -168,7 +168,18 @@ class Runner:
             if kind == "item.completed" and item.get("type") in ("mcp_tool_call", "command_execution"):
                 tool = item.get("tool", "本地工具")
                 self.event(role, "tool.completed", "工具调用：" + tool + " · " + str(item.get("status", "completed")))
-        return execute(prompt, directory, browser=browser, on_event=report_event, timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "360")), home=self.home)
+        strategy = self.manifest.get("agent_strategy", "independent")
+        resume = None
+        if strategy == "shared":
+            resume = getattr(self, "_shared_session", None)
+            if resume:
+                self.event(role, "agent.resumed", "共享会话续接：" + resume)
+        result, meta = execute(prompt, directory, browser=browser, on_event=report_event,
+                               timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "360")),
+                               home=self.home, resume_session=resume)
+        if strategy == "shared" and getattr(self, "_shared_session", None) is None:
+            self._shared_session = meta.get("session_id")
+        return result, meta
 
     def agent_stage(self, role, instruction, evidence, browser=False, force_incomplete=None):
         if role != "coordinator_review" and not force_incomplete and self.reuse(role):
@@ -502,7 +513,8 @@ class Runner:
                         self.manifest["stages"][name]["auto_retries_used"] = used
                         self.save()
                 return result
-            max_workers = int(self.task.get("max_parallel", 2) or 2)
+            max_workers = 1 if self.manifest.get("agent_strategy") == "shared" \
+                else int(self.task.get("max_parallel", 2) or 2)
             done = execute_graph(enabled, workflow_version, run_stage, max_workers=max_workers)
             review_result = done.get("coordinator_review")
             max_rounds = int(self.task.get("max_rework_rounds", 1) or 0)
@@ -553,7 +565,7 @@ class Runner:
 
     def write_report(self):
         title = "药理多 Agent 运行报告"
-        lines = ["# " + title, "", "运行：" + self.run_id, "", "模式：" + ("合成工程验证（不是药理研究结果）" if self.manifest["mode"] == "fixture" else "真实来源核验 / 分析"), "", "案例：" + self.task["formula"] + " × " + ", ".join(self.task["diseases"]), "", "状态：" + self.manifest["status"], ""]
+        lines = ["# " + title, "", "运行：" + self.run_id, "", "模式：" + ("合成工程验证（不是药理研究结果）" if self.manifest["mode"] == "fixture" else "真实来源核验 / 分析"), "", "案例：" + self.task["formula"] + " × " + ", ".join(self.task["diseases"]), "", "状态：" + self.manifest["status"], "", "Agent 会话策略：" + self.manifest.get("agent_strategy", "independent"), ""]
         if self.manifest.get("workflow_version", 1) >= 2:
             from .imports import disease_policy
             policy = disease_policy(self.task)
@@ -598,9 +610,11 @@ def manifests():
     return sorted(out, key=lambda m: m["created_at"], reverse=True)
 
 
-def start(task_id=None, mode="live", resume=None, background=True):
+def start(task_id=None, mode="live", resume=None, background=True, agent_strategy=None):
     if mode not in ("live", "fixture"):
         raise ValueError("不支持的运行模式")
+    if agent_strategy not in (None, "independent", "shared"):
+        raise ValueError("agent_strategy 只支持 independent 或 shared")
     (ROOT / "runs").mkdir(exist_ok=True)
     lockfile = ROOT / "runs/.runner.lock"
     try:
@@ -624,6 +638,8 @@ def start(task_id=None, mode="live", resume=None, background=True):
             directory = ROOT / "runs" / run_id
             directory.mkdir()
             manifest = {"run_id": run_id, "task": task, "mode": mode, "status": "pending", "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"), "scientific_complete": False, "workflow_version": 2, "stages": {role: {"label": LABELS[role], "status": "pending", "summary": "等待调度", "blockers": [], "artifacts": []} for role in STAGES}}
+            if agent_strategy:
+                manifest["agent_strategy"] = agent_strategy
             write_json(directory / "manifest.json", manifest)
         ACTIVE.add(run_id)
         def worker():
