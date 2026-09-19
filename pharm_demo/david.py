@@ -78,8 +78,11 @@ def validate_config(genes, task):
         if bad or valid != bg or not set(genes).issubset(bg):
             raise DavidBlocked("custom 背景需为去重基因符号，且包含所有输入靶点")
     # Conservative engineering bound for the currently validated web adapter.
-    if len(genes) > 400 or (background["mode"] == "custom" and len(background["genes"]) > 400):
-        raise DavidBlocked("当前网页适配器仅验证不超过 400 个标识的列表；较大列表需另行适配")
+    max_list = config.get("max_list_size", 400)
+    if isinstance(max_list, bool) or not isinstance(max_list, int) or max_list < 1 or max_list > 3000:
+        raise DavidBlocked("max_list_size 需为 1—3000 的整数")
+    if len(genes) > max_list or (background["mode"] == "custom" and len(background["genes"]) > max_list):
+        raise DavidBlocked("当前网页适配器仅验证不超过 %d 个标识的列表；较大列表需另行适配" % max_list)
     return config
 
 
