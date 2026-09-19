@@ -176,7 +176,8 @@ class Runner:
                 self.event(role, "agent.resumed", "共享会话续接：" + resume)
         result, meta = execute(prompt, directory, browser=browser, on_event=report_event,
                                timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "360")),
-                               home=self.home, resume_session=resume)
+                               home=self.home, resume_session=resume,
+                               record_session=strategy == "shared")
         if strategy == "shared" and getattr(self, "_shared_session", None) is None:
             self._shared_session = meta.get("session_id")
         return result, meta

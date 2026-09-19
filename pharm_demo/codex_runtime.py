@@ -97,7 +97,7 @@ RESULT_SCHEMA = {
 }
 
 
-def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None, resume_session=None):
+def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None, resume_session=None, record_session=False):
     runtime = read_json(ROOT / "configs/runtime.json")
     executable = shutil.which("codex.exe") or shutil.which("codex")
     if not executable:
@@ -108,16 +108,17 @@ def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=N
     write_json(directory / "response.schema.json", RESULT_SCHEMA)
     (directory / "prompt.txt").write_text(prompt, encoding="utf-8")
     command = [executable, "exec"]
+    ephemeral = [] if record_session else ["--ephemeral"]
     if resume_session:
         # resume 子命令没有 -p/--sandbox 选项；沙箱用 -c 传递，profile 由会话自身携带
         command += ["resume", resume_session, "-m", runtime["model"],
                     "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"',
                     "-c", 'sandbox_mode="workspace-write"',
-                    "--json", "--ephemeral", "--skip-git-repo-check",
+                    "--json", "--skip-git-repo-check"] + ephemeral + [
                     "--output-schema", str(directory / "response.schema.json"),
                     "--output-last-message", str(directory / "response.json")]
     else:
-        command += ["-p", runtime["codex_profile"], "-m", runtime["model"], "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"', "--json", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check", "--output-schema", str(directory / "response.schema.json"), "--output-last-message", str(directory / "response.json"), "-C", str(ROOT)]
+        command += ["-p", runtime["codex_profile"], "-m", runtime["model"], "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"', "--json"] + ephemeral + ["--sandbox", "workspace-write", "--skip-git-repo-check", "--output-schema", str(directory / "response.schema.json"), "--output-last-message", str(directory / "response.json"), "-C", str(ROOT)]
     if browser:
         (directory / "browser").mkdir(exist_ok=True)
         command.extend(browser_overrides(directory / "browser"))
