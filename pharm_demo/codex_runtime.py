@@ -89,9 +89,11 @@ RESULT_SCHEMA = {
         "blockers": {"type": "array", "items": {"type": "string"}},
         "findings": {"type": "array", "items": {"type": "string"}},
         "artifacts": {"type": "array", "items": {"type": "string"}},
-        "graph": {"type": "object"},
-        "rework": {"type": "array", "items": {"type": "string"}},
-    }, "required": ["status", "summary", "blockers", "findings", "artifacts"],
+        "graph": {"type": ["object", "null"], "additionalProperties": False, "properties": {
+            "enabled": {"type": ["array", "null"], "items": {"type": "string"}}},
+            "required": ["enabled"]},
+        "rework": {"type": ["array", "null"], "items": {"type": "string"}},
+    }, "required": ["status", "summary", "blockers", "findings", "artifacts", "graph", "rework"],
 }
 
 
@@ -107,8 +109,15 @@ def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=N
     (directory / "prompt.txt").write_text(prompt, encoding="utf-8")
     command = [executable, "exec"]
     if resume_session:
-        command += ["resume", resume_session]
-    command += ["-p", runtime["codex_profile"], "-m", runtime["model"], "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"', "--json", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check", "--output-schema", str(directory / "response.schema.json"), "--output-last-message", str(directory / "response.json"), "-C", str(ROOT)]
+        # resume 子命令没有 -p/--sandbox 选项；沙箱用 -c 传递，profile 由会话自身携带
+        command += ["resume", resume_session, "-m", runtime["model"],
+                    "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"',
+                    "-c", 'sandbox_mode="workspace-write"',
+                    "--json", "--ephemeral", "--skip-git-repo-check",
+                    "--output-schema", str(directory / "response.schema.json"),
+                    "--output-last-message", str(directory / "response.json")]
+    else:
+        command += ["-p", runtime["codex_profile"], "-m", runtime["model"], "-c", 'model_reasoning_effort="' + runtime["model_reasoning_effort"] + '"', "--json", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check", "--output-schema", str(directory / "response.schema.json"), "--output-last-message", str(directory / "response.json"), "-C", str(ROOT)]
     if browser:
         (directory / "browser").mkdir(exist_ok=True)
         command.extend(browser_overrides(directory / "browser"))
