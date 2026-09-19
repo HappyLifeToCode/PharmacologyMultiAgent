@@ -75,3 +75,41 @@ def test_combine_diseases_builds_contract_csv(tmp_path):
     dup.write_text("disease,gene_symbol,relevance_score\nHyperthyroidism,TP53,9.9\n", encoding="utf-8")
     with pytest.raises(ValueError, match="重复"):
         combine_diseases([a, dup], tmp_path / "genecards2.csv")
+
+
+EXPORT_SAMPLE = """GeneCards - GeneCards - Search results for Hyperthyroidism
+
+Copyright LifeMap Sciences Inc. May not be used for any non-academic research purpose without explicit written permission from LifeMap Sciences.
+
+Symbol,Name,Type,Relevance Score,Knowledge
+TSHR,Thyroid Stimulating Hormone Receptor,Protein Coding,370.401,98
+lnc-TEST-1,some lncRNA,RNA Gene,10.5,20
+EGFR,Epidermal Growth Factor Receptor,Protein Coding,95.8,90
+
+Copyright LifeMap Sciences Inc. May not be used for any non-academic research purpose without explicit written permission from LifeMap Sciences.
+"""
+
+
+def test_convert_official_export_skips_preamble_and_rejects_lnc_symbols(tmp_path):
+    from pharm_demo.genecards_export import convert_official_export
+    path = tmp_path / "export.csv"
+    path.write_text(EXPORT_SAMPLE, encoding="utf-8-sig")
+    record = convert_official_export(path)
+    assert record["disease"] == "Hyperthyroidism"
+    assert [(r["gene_symbol"], r["relevance_score"]) for r in record["rows"]] == [
+        ("TSHR", 370.401), ("EGFR", 95.8)]
+    assert record["rejected"] == [{"disease": "Hyperthyroidism", "gene_symbol": "lnc-TEST-1",
+                                   "relevance_score": 10.5, "reason": "symbol 不符合项目规则，剔除留档"}]
+
+
+def test_combine_official_exports_writes_rejected_file(tmp_path):
+    from pharm_demo.genecards_export import combine_official_exports
+    path = tmp_path / "export.csv"
+    path.write_text(EXPORT_SAMPLE, encoding="utf-8-sig")
+    out = tmp_path / "genecards.csv"
+    records = combine_official_exports([path], out)
+    assert records[0]["row_count"] == 2 and records[0]["rejected_symbols"] == 1
+    rejected = (tmp_path / "genecards_rejected_symbols.csv").read_text(encoding="utf-8-sig")
+    assert "lnc-TEST-1" in rejected
+    content = out.read_text(encoding="utf-8-sig")
+    assert "Hyperthyroidism,TSHR,370.401" in content

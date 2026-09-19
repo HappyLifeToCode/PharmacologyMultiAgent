@@ -14,7 +14,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
 
-from .common import digest, now, write_json
+from .common import ROOT, digest, now, write_json
 from .processing import _valid_symbol
 
 SEARCH_URL = "https://www.genecards.org/search/results?q="
@@ -191,7 +191,13 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800):
     all_rows = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=headless)
-        context = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="en-US")
+        # 登录态仅存本机 gitignore 目录，供下次免登录复用；不含密码
+        state_path = ROOT / "local" / "browser-auth" / "genecards_storage_state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        context_kwargs = {"viewport": {"width": 1440, "height": 1000}, "locale": "en-US"}
+        if state_path.is_file():
+            context_kwargs["storage_state"] = str(state_path)
+        context = browser.new_context(**context_kwargs)
         page = context.new_page()
         page.set_default_timeout(30000)
         site_version = None
@@ -218,12 +224,18 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800):
                         page.screenshot(path=str(directory / "challenge.png"))
                         meta["actions"].append({"action": "await_human_verification",
                                                 "disease": disease, "title": title, "at": now()})
-                        deadline = time.monotonic() + 300
-                        while any(c in page.title() for c in CHALLENGE_TITLES):
+                        deadline = time.monotonic() + 900
+                        while True:
+                            on_wall = any(c in page.title() for c in CHALLENGE_TITLES)
+                            on_auth = "auth.lifemapsc.com" in page.url  # 注册/登录流程中，不打断
+                            if not on_wall and not on_auth:
+                                break
                             if time.monotonic() > deadline:
-                                raise RuntimeError("人机验证 5 分钟内未完成（证据已保留）：" + disease)
+                                raise RuntimeError("人机验证/注册 15 分钟内未完成（证据已保留）：" + disease)
                             page.wait_for_timeout(3000)
-                        page.wait_for_selector("table tbody tr:has(a[href*='/card/'])", timeout=60000)
+                        # 登录流程结束后页面可能不在结果页，主动回到检索 URL
+                        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                        page.wait_for_timeout(2500)
                         meta["actions"].append({"action": "human_verification_completed",
                                                 "disease": disease, "at": now()})
                     dismiss = page.get_by_role("button", name="Dismiss for this session")
@@ -248,6 +260,10 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800):
                                  "relevance_score": r["relevance_score"]} for r in query_rows[0])
                 page.wait_for_timeout(page_delay_ms)
         finally:
+            try:
+                context.storage_state(path=str(state_path))  # 仅本机复用登录态，不入库
+            except Exception:
+                pass
             browser.close()
     meta.update(finished_at=now(), site_version=site_version,
                 total_rows=len(all_rows))

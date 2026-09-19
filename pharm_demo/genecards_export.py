@@ -99,6 +99,81 @@ def combine_diseases(per_disease_csvs, output_csv):
     return len(rows)
 
 
+def convert_official_export(path, disease=None):
+    """Convert a logged-in official CSV export to contract rows.
+
+    格式（2026-09-19 实测）：前 4 行标题/版权/空行，第 5 行表头
+    Symbol,Name,Type,Relevance Score,Knowledge，末尾有空行和版权行。
+    """
+    path = Path(path)
+    lines = path.read_text(encoding="utf-8-sig", errors="strict").splitlines()
+    title = lines[0].strip() if lines else ""
+    if disease is None:
+        match = re.search(r"Search results for (.+)$", title)
+        if not match:
+            raise ValueError("无法从标题行识别疾病关键词，请用 --disease 显式指定：" + path.name)
+        disease = match.group(1).strip()
+    header_index = next((i for i, line in enumerate(lines) if line.startswith("Symbol,")), None)
+    if header_index is None:
+        raise ValueError("未找到 Symbol 表头行（文件不是 GeneCards 官方导出？）：" + path.name)
+    rows, seen, rejected = [], set(), []
+    reader = csv.reader(lines[header_index + 1:])
+    for number, fields in enumerate(reader, start=header_index + 2):
+        if not fields or not fields[0].strip():
+            continue
+        if fields[0].startswith("Copyright"):
+            continue
+        if len(fields) < 4:
+            raise ValueError("%s 第 %d 行列数不足：%r" % (path.name, number, fields))
+        symbol = fields[0].strip()
+        try:
+            score = float(fields[3])
+        except ValueError as exc:
+            raise ValueError("%s 第 %d 行 Relevance Score 无法解析：%r" % (path.name, number, fields[3])) from exc
+        if not _valid_symbol(symbol):
+            # 非 HGNC 式符号（lncRNA 等小写命名，如 lnc-MAP3K7-3）下游 STRING/DAVID
+            # 无法映射，剔除留档而不是让整批失败
+            rejected.append({"disease": disease, "gene_symbol": symbol,
+                             "relevance_score": score, "reason": "symbol 不符合项目规则，剔除留档"})
+            continue
+        if symbol in seen:
+            raise ValueError("%s 内重复基因（疑似重复导出/分页）：%s" % (path.name, symbol))
+        seen.add(symbol)
+        rows.append({"disease": disease, "gene_symbol": symbol, "relevance_score": score})
+    if not rows:
+        raise ValueError("导出文件没有数据行：" + path.name)
+    return {"disease": disease, "rows": rows, "row_count": len(rows),
+            "rejected": rejected, "source_file": path.name, "file_sha256": digest(path),
+            "export_format": "logged_in_official_csv"}
+
+
+def combine_official_exports(paths, output_csv):
+    """Convert logged-in official exports and write the contract genecards.csv."""
+    all_rows, seen, records, rejected = [], set(), [], []
+    for path in paths:
+        record = convert_official_export(path)
+        records.append({k: record[k] for k in ("disease", "row_count", "source_file", "file_sha256")})
+        records[-1]["rejected_symbols"] = len(record["rejected"])
+        rejected.extend(record["rejected"])
+        for row in record["rows"]:
+            key = (row["disease"], row["gene_symbol"])
+            if key in seen:
+                raise ValueError("重复 disease/gene 行：" + repr(key))
+            seen.add(key)
+            all_rows.append(row)
+    with Path(output_csv).open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=["disease", "gene_symbol", "relevance_score"])
+        writer.writeheader()
+        writer.writerows(all_rows)
+    if rejected:
+        rejected_path = Path(output_csv).with_name("genecards_rejected_symbols.csv")
+        with rejected_path.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=["disease", "gene_symbol", "relevance_score", "reason"])
+            writer.writeheader()
+            writer.writerows(rejected)
+    return records
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,11 +184,18 @@ def main():
     combine = sub.add_parser("combine", help="合并各疾病 CSV 为契约 genecards.csv")
     combine.add_argument("--inputs", nargs="+", required=True)
     combine.add_argument("--output", type=Path, required=True)
+    convert = sub.add_parser("convert", help="转换登录后官方导出 CSV 为契约 genecards.csv")
+    convert.add_argument("--files", nargs="+", required=True, help="官方导出 CSV（登录后下载）")
+    convert.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "collect":
         record, out_csv = collect_disease(args.disease, args.pages, args.output)
         print("%s: %d rows (%s) -> %s" % (record["status"], record["parsed_rows"],
               record["disease"], out_csv))
+    elif args.command == "convert":
+        records = combine_official_exports(args.files, args.output)
+        for record in records:
+            print("%s: %d rows <- %s" % (record["disease"], record["row_count"], record["source_file"]))
     else:
         count = combine_diseases(args.inputs, args.output)
         print("combined %d rows -> %s" % (count, args.output))
