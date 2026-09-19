@@ -2,89 +2,29 @@
 
 反爬期间不做自动抓取：人工在浏览器通过验证后保存完整结果页（每页一个文件），
 本工具解析、核对页面声明的总条数与解析行数，不一致即报错——不允许第一页冒充全表。
-解析规则以首次真实页面样本校准为准（当前按 GeneCards 结果页常见结构编写）。
+解析规则与 pharm_demo.genecards_online 共用，已按 2026-09-18 真实页面样本校准
+（GeneCards 6.1：/card/ 链接给 Symbol，第 6 列是 Relevance Score，总数在 dt-info）。
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import re
-from html.parser import HTMLParser
 from pathlib import Path
 
 from .common import digest, now, write_json
+from .genecards_online import parse_declared_total, parse_rows_from_html
 from .processing import _valid_symbol
-
-_GENE_LINK = re.compile(r"/(?:Gene/Display|ShowGeneCard|card)(?:/|\?gene=)([A-Za-z0-9.\-_]+)")
-_TOTAL_PATTERNS = [
-    re.compile(r"of\s+([\d,]+)\s+(?:results|entries)", re.I),
-    re.compile(r"([\d,]+)\s+results", re.I),
-    re.compile(r"results?\s*\(\s*([\d,]+)\s*\)", re.I),
-    re.compile(r"共\s*([\d,]+)\s*条"),
-]
-
-
-class _ResultsTableParser(HTMLParser):
-    """Collect rows that link to a GeneCards gene card and carry a numeric score cell."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.rows = []
-        self._in_tr = False
-        self._cells = []
-        self._cell_text = None
-        self._row_gene = None
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "tr":
-            self._in_tr, self._cells, self._row_gene = True, [], None
-        elif self._in_tr and tag in ("td", "th"):
-            self._cell_text = ""
-        elif self._in_tr and tag == "a":
-            href = dict(attrs).get("href", "")
-            match = _GENE_LINK.search(href)
-            if match:
-                self._row_gene = match.group(1)
-
-    def handle_data(self, data):
-        if self._cell_text is not None:
-            self._cell_text += data
-
-    def handle_endtag(self, tag):
-        if tag in ("td", "th") and self._cell_text is not None:
-            self._cells.append(self._cell_text.strip())
-            self._cell_text = None
-        elif tag == "tr" and self._in_tr:
-            if self._row_gene:
-                self.rows.append((self._row_gene, list(self._cells)))
-            self._in_tr = False
 
 
 def parse_results_html(path):
     """Parse one saved results page -> {rows, total, source_file, file_sha256}."""
     path = Path(path)
     text = path.read_text(encoding="utf-8", errors="replace")
-    parser = _ResultsTableParser()
-    parser.feed(text)
-    rows = []
-    for gene, cells in parser.rows:
-        numbers = []
-        for cell in reversed(cells):  # Score 列在结果表右侧
-            try:
-                numbers.append(float(cell.replace(",", "")))
-                break
-            except ValueError:
-                continue
-        if not numbers:
-            raise ValueError("%s 中基因 %s 所在行没有可解析的 relevance score" % (path.name, gene))
-        rows.append({"gene_symbol": gene, "relevance_score": numbers[0]})
-    total = None
-    for pattern in _TOTAL_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            total = int(match.group(1).replace(",", ""))
-            break
-    return {"rows": rows, "total": total, "source_file": path.name, "file_sha256": digest(path)}
+    rows = [{"gene_symbol": r["gene_symbol"], "relevance_score": r["relevance_score"]}
+            for r in parse_rows_from_html(text)]
+    return {"rows": rows, "total": parse_declared_total(text),
+            "source_file": path.name, "file_sha256": digest(path)}
 
 
 def collect_disease(disease, pages, output_dir):

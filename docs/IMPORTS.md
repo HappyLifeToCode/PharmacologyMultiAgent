@@ -111,6 +111,15 @@ data/pharm/<方名>/imports/<task_id>/<批次名>/
 修改任务的 `import_batch` 后需要从任务创建新运行；`--resume` 使用旧 manifest
 的冻结任务，不会自动读取任务清单中的新批次值。仅在同一冻结导入位置补齐缺失文件时可恢复原运行；已有原始文件仍不得覆盖。
 
+## GeneCards 运行时在线采集
+
+团队决定（2026-09-18）：GeneCards 无批量下载途径，运行时由执行器在线采集完整检索结果（任务 `genecards_online: true`，新任务默认开启）。要点：
+
+- **必须用有窗口的 headed Chromium**——Cloudflare 拦截无头浏览器（实测 headless 403、headed 200）；无显示器的机器不能用此路径。
+- 逐页读取（每页 100 条），每关键词核对解析行数与页面声明总条数，不一致即失败；遇人机验证明确失败并保留截图，不绕过。
+- 采集产物直接生成契约导入包（genecards.csv + provenance.json + 每页原始 HTML），仍经 `load_genecards` 校验，记录实际站点版本（当前 6.1，原方案引用 v5.26.0 已过时）。
+- 匿名无批量导出（下载菜单仅提供登录入口）；人工保存页解析的辅助工具（genecards_export）保留为离线兜底。
+
 ## GeneCards 线上导出辅助
 
 反爬期间不做自动抓取：人工在浏览器通过验证、打开结果页（当前地址形如 `https://www.genecards.org/search/results?q=<关键词>`），把**完整结果页**另存为 HTML（分页时每页一个文件），然后用辅助工具解析：

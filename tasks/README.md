@@ -30,6 +30,7 @@
 | batman_threshold / batman_threshold_confirmed | BATMAN 阈值及确认状态；默认 0.84/confirmed（2026-09-17 医院方确认，依据 juglone 抗膀胱癌研究） |
 | genecards_filter | 完整查询结果中 relevance score 严格大于中位数 |
 | genecards_median_scope | 默认 per_disease_median：先对单个疾病分别计算中位数再筛选（2026-09-17 医院方确认） |
+| genecards_online | 默认 true：无导入批次时运行时在线采集 GeneCards 完整结果（需 headed 浏览器）；false 则仅做访问核验 |
 | genecards_median_status | 默认 provisional：待医生确认；确认后可配置 confirmed，保留确认依据 |
 | string_confidence / string_additional_nodes | 网络置信度及额外节点数量 |
 | string_version | STRING 要求版本；缺省按 12.0 检查，版本不一致时停止并请求复核 |

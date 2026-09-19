@@ -341,3 +341,48 @@ def test_review_directed_rework_round(isolated_project, monkeypatch):
     assert manifest["status"] != "succeeded"
     report = (root / "runs" / run_id / "report.md").read_text(encoding="utf-8")
     assert "返工第 1 轮" in report and "任务图来源" in report
+
+
+def test_genecards_online_collection_path(isolated_project, monkeypatch, tmp_path):
+    from pharm_demo import genecards_online, imports
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    runner.task["genecards_online"] = True
+    runner.task["diseases"] = ["Hyperthyroidism"]
+    def fake_collect(diseases, directory):
+        assert diseases == ["Hyperthyroidism"]
+        directory.mkdir(parents=True, exist_ok=True)
+        return {"site_version": "Version 6.1 Build test", "queries": [{"disease": "Hyperthyroidism", "declared_total": 3, "collected_rows": 3, "pages": 1}]}
+    def fake_load(directory, task):
+        return {"genes": ["TSHR", "TG"], "policy": {"scope": "per_disease_median", "status": "confirmed"}}
+    monkeypatch.setattr(genecards_online, "collect_online", fake_collect)
+    monkeypatch.setattr(imports, "load_genecards", fake_load)
+    monkeypatch.setattr(runner, "call_agent", lambda *a, **k: (
+        {"status": "succeeded", "summary": "ok", "blockers": [], "findings": [], "artifacts": []}, None))
+    runner.source_stage("genecards_targets")
+    stage = runner.manifest["stages"]["genecards_targets"]
+    assert stage["status"] == "succeeded"
+    targets = engine.read_json(root / "runs" / run_id / stage["directory"] / "targets.json")
+    assert targets["collection"]["method"] == "online_search_results"
+    assert targets["collection"]["site_version"] == "Version 6.1 Build test"
+
+
+def test_genecards_online_failure_blocks_with_evidence(isolated_project, monkeypatch):
+    from pharm_demo import genecards_online
+    root, calls = isolated_project
+    run_id = engine.start("unit_task", "fixture", background=False)
+    runner = engine.Runner(run_id)
+    runner.manifest["mode"] = "live"
+    runner.task["genecards_online"] = True
+    def boom(diseases, directory):
+        raise RuntimeError("GeneCards 访问被拦或需人机验证（不绕过）：HTTP 403")
+    monkeypatch.setattr(genecards_online, "collect_online", boom)
+    monkeypatch.setattr(engine, "probe", lambda name, directory: {"source": name, "status": "http_error"})
+    monkeypatch.setattr(runner, "call_agent", lambda *a, **k: (
+        {"status": "blocked", "summary": "访问受限", "blockers": [], "findings": [], "artifacts": []}, None))
+    runner.source_stage("genecards_targets")
+    stage = runner.manifest["stages"]["genecards_targets"]
+    assert stage["status"] == "blocked"
+    assert any("在线采集未完成" in b for b in stage["blockers"])

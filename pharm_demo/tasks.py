@@ -45,6 +45,7 @@ def prepare_task(body):
             "batman_threshold": 0.84, "batman_threshold_confirmed": True,
             "genecards_filter": "relevance_score > median_of_complete_query_results",
             "genecards_median_scope": "per_disease_median", "genecards_median_status": "confirmed",
+            "genecards_online": True,
             "string_confidence": 0.9, "string_additional_nodes": 0,
             "enrichment_input": "herb_disease_intersection", "enrichment_background": None,
             "enrichment_test_required": "hypergeometric", "multiple_testing": "Benjamini-Hochberg", "fdr_lt": 0.05}

@@ -243,6 +243,20 @@ class Runner:
                     shutil.copytree(str(input_dir), str(snapshot))
                 loaders = {"herb_targets": load_herb, "genecards_targets": load_genecards, "omim_targets": load_omim, "disease_targets": load_disease}
                 output = loaders[role](snapshot, self.task)
+            elif (role == "genecards_targets" and self.manifest["mode"] == "live"
+                  and self.task.get("genecards_online") is True):
+                # 团队决定（2026-09-18）：GeneCards 无批量导出，运行时在线采集完整检索结果
+                from .genecards_online import collect_online
+                from .imports import load_genecards
+                online_dir = directory / "online_import"
+                try:
+                    meta = collect_online(self.task["diseases"], online_dir)
+                    output = load_genecards(online_dir, self.task)
+                    output["collection"] = {"method": "online_search_results",
+                                            "site_version": meta.get("site_version"),
+                                            "queries": meta["queries"]}
+                except Exception as exc:  # 证据保留在 online_dir；落入访问核验与 blocked
+                    missing = "GeneCards 在线采集未完成：" + str(exc)
             else:
                 missing = "缺少真实导出及来源台账；请按 docs/IMPORTS.md 补充 " + str(input_dir)
         except (ValueError, KeyError, OSError) as exc:

@@ -5,12 +5,13 @@ from pharm_demo.genecards_export import collect_disease, combine_diseases, parse
 
 
 def _page(rows, total=None):
-    """Synthetic GeneCards-like results page."""
+    """Synthetic page in the real GeneCards 6.1 structure (calibrated 2026-09-18)."""
     body = "".join(
-        '<tr><td><a href="/Gene/Display/%s">%s</a></td><td>desc</td><td>%s</td></tr>'
-        % (gene, gene, score) for gene, score in rows)
-    header = '<div class="counts">Showing results 1-%d of %d entries</div>' % (len(rows), total) if total else ""
-    return "<html><body>%s<table>%s</table></body></html>" % (header, body)
+        '<tr><td></td><td>%d</td><td><a href="/card/%s?search=X">%s</a></td>'
+        '<td>desc</td><td>Protein Coding</td><td>%s</td><td>80</td></tr>'
+        % (index, gene, gene, score) for index, (gene, score) in enumerate(rows, 1))
+    info = '<div class="dt-info">of %s</div>' % format(total, ",") if total else ""
+    return "<html><body>%s<table><tbody>%s</tbody></table></body></html>" % (info, body)
 
 
 def test_parse_results_html_extracts_gene_and_score(tmp_path):
