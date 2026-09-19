@@ -68,12 +68,23 @@ def run_venny(herb, disease, directory, synthetic=False):
                     # Official UI commits list names via its 500 ms focus timer.
                     page.wait_for_timeout(650)
                     name.press("Tab")
-                    area = page.locator("#area%d" % index)
-                    area.fill("\n".join(genes))
-                    area.press("End")
-                    area.press("Enter")
-                    area.press("Tab")
-                    expect(page.locator("#elements%d" % index)).to_have_text(str(len(genes)))
+                    if len(genes) > 500:
+                        # 大名单直接 JS 赋值并触发 change；fill 会被页面 500ms 轮询的
+                        # compareLists 反复阻塞而超时
+                        page.evaluate("""([selector, text]) => {
+                            const el = document.querySelector(selector);
+                            el.value = text;
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                            el.blur();
+                        }""", ["#area%d" % index, "\n".join(genes)])
+                    else:
+                        area = page.locator("#area%d" % index)
+                        area.fill("\n".join(genes))
+                        area.press("End")
+                        area.press("Enter")
+                        area.press("Tab")
+                    expect(page.locator("#elements%d" % index)).to_have_text(str(len(genes)), timeout=120000)
                     metadata["actions"].append({"action": "fill_list_and_blur", "list": index, "label": label, "count": len(genes), "at": now()})
                 results, raw = {}, []
                 for key, selector, region_labels in (("herb_only", "#resultC1000", (labels[0],)), ("disease_only", "#resultC0100", (labels[1],)), ("genes", "#resultC1100", labels)):
