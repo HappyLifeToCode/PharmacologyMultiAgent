@@ -111,6 +111,17 @@ data/pharm/<方名>/imports/<task_id>/<批次名>/
 修改任务的 `import_batch` 后需要从任务创建新运行；`--resume` 使用旧 manifest
 的冻结任务，不会自动读取任务清单中的新批次值。仅在同一冻结导入位置补齐缺失文件时可恢复原运行；已有原始文件仍不得覆盖。
 
+## GeneCards 线上导出辅助
+
+反爬期间不做自动抓取：人工在浏览器通过验证、打开结果页（当前地址形如 `https://www.genecards.org/search/results?q=<关键词>`），把**完整结果页**另存为 HTML（分页时每页一个文件），然后用辅助工具解析：
+
+```powershell
+python -m pharm_demo.genecards_export collect --disease "Hyperthyroidism" --pages page1.html page2.html --output local/gc-collect
+python -m pharm_demo.genecards_export combine --inputs local/gc-collect/genecards_*.csv --output genecards.csv
+```
+
+工具核对页面声明的总条数与解析行数，不一致或重复分页即报错（保留证据），不允许第一页冒充全表；跨疾病同一基因保留各自分数，同一疾病/基因重复行拒绝合并。解析规则按结果页常见结构编写，**首个真实页面样本到达后需校准一次**；结构变化时明确报错，不猜测字段。
+
 ## 双库独立导入与暂定中位数规则
 
 GeneCards 与 OMIM 各自校验本库来源台账、原始文件及共同映射依据；缺少 OMIM 文件不会阻止 GeneCards
