@@ -84,4 +84,4 @@ Runner 使用与网络分支相同的完整共同靶点，接入现有阶段详�
 
 已做真实工具小样本和隔离模型的调度回归；未执行用户正式上游数据或完整真实模型会话。未开发独立产物验收平台。
 
-2026-09-17 医院方经同门确认：正式背景为 Homo sapiens 物种背景，GO 类别用 DIRECT（BP/CC/MF），KEGG 保留。尚待同步：方案写“超几何检验”，DAVID 实际 P-Value 为 EASE（修改版 Fisher exact test）——需研究方确认接受实际方法后再把任务 enrichment_test_required 同步为实际口径，不可只改名称。
+2026-09-17 医院方经同门确认：正式背景为 Homo sapiens 物种背景，GO 类别用 DIRECT（BP/CC/MF），KEGG 保留。2026-09-19 医院方进一步确认：使用 DAVID 原生导出结果（BH 校正用于筛选，绘图用原始 p 值）——即接受 DAVID 实际统计方法 EASE（修改版 Fisher exact test），任务 enrichment_test_required 已同步为 EASE，原始字段标签不变。

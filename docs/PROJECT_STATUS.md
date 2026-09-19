@@ -42,7 +42,7 @@
 | BATMAN             | 2026-09-17 新入口 `…/batman-tcm/#/home` 实测 200 可达；阈值 score > 0.84 已由医院方确认（依据《Autophagy-related biological targets and network mechanisms of juglone against bladder cancer》） | 导入时用 v2.0 真实导出核对分值尺度并留记录；药材/炮制命名待确认 |
 | GeneCards 无批量下载 | 2026-09-18 确认无批量下载途径（匿名下载菜单仅登录入口）；运行时在线采集已实现 | headed Chromium 实测可过 Cloudflare，headless 被 403；遇人机验证明确失败不绕过 |
 | OMIM 数据已到位    | 2026-09-19 同门经 Gene Map 检索导出五病 xlsx（绕过 Cloudflare 人工操作） | 邮件权限可继续等（morbidmap 备用）；当前批次已可用 |
-| 研究参数基本确认      | 2026-09-17 医院方确认：GeneCards 按疾病分别中位数、DAVID 背景 Homo sapiens + GO DIRECT、拓扑非加权 Degree、BATMAN 阈值 score>0.84 | 药材/炮制命名待确认；DAVID 的 EASE 与方案“超几何检验”名称需同步；BATMAN v2.0 分值尺度导入时核对 |
+| 研究参数全部确认      | 2026-09-17/19 医院方确认：GeneCards 按疾病分别中位数、DAVID 背景 Homo sapiens + GO DIRECT、拓扑非加权 Degree、BATMAN 阈值 score>0.84、药材按确定唯一药名（白芍/炙甘草，产地影响忽略）、接受 DAVID 原生 EASE+BH 输出 | 无待确认研究参数；BATMAN v2.0 分值尺度在导入时核对留档 |
 | 方法真实输入未验收      | CytoNCA 桥接与 DAVID 正式导出已实现并通过小样本验证（2026-09-14）          | 用真实共同靶点完成正式运行与人工抽检                    |
 | 演示有外部依赖        | 新合成演练也会调用模型并实际访问 Venny                                          | 会前跑完并准备已导出的 HTML；不能保证现场网络或服务   |
 

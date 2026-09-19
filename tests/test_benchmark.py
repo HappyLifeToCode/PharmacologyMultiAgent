@@ -69,7 +69,7 @@ def isolated_project(tmp_path, monkeypatch):
     from pharm_demo.processing import intersection
     monkeypatch.setattr(engine, "run_venny", lambda herb, disease, directory, synthetic=False: intersection(herb, disease))
     calls = []
-    def fake_execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None, resume_session=None):
+    def fake_execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None, resume_session=None, record_session=False):
         calls.append({"resume_session": resume_session})
         if on_event:
             on_event({"type": "thread.started", "thread_id": "sess_shared"})
