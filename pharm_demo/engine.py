@@ -287,7 +287,7 @@ class Runner:
             write_json(directory / "source_reachability.json", evidence)
         try:
             if output is not None:
-                instruction = "核查当前证据的完整性、角色职责及数量。可用项目 Python 读取当前输出目录内的产物做抽样核对（例如随机抽约 10 行检查字段对应关系）；全量 CSV 不要求逐行阅读，证据中的 source_counts、provenance 与抽查结果一致、来源记录完整即可给 succeeded，不得因未逐行读全量而标 partial。任务仅是本角色审核，不声称数据库采集已发生。"
+                instruction = "核查当前证据的完整性、角色职责及数量。可用项目 Python 读取当前输出目录内的产物做抽样核对（例如随机抽约 10 行检查字段对应关系）；全量 CSV 不要求逐行阅读，证据中的 source_counts、provenance 与抽查结果一致、来源记录完整即可给 succeeded，不得因未逐行读全量而标 partial。全量原始数据文件不要求打开复核：其 SHA-256 与大小已记录在 provenance，复核以哈希、计数和台账抽查一致为准。任务仅是本角色审核，不声称数据库采集已发生。"
                 if self.manifest["mode"] == "fixture":
                     instruction += "本次验收对象是合成测试集合的交接格式，不是药理数据完整性。genes 是显式提供的测试输入，格式与内容无矛盾即可 status=succeeded；把未访问数据库写在 findings，不作为合成工程任务的 blocker。"
                 else:
