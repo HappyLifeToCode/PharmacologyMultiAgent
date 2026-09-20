@@ -44,6 +44,17 @@
 5. **参数只经任务 JSON 配置**，未知值不猜测；confirmed 必须对应真实确认记录。
 6. 直推 `main`（无分支流程），**push 前跑 `pytest tests/ -q`**。
 
+## 6. 验收闭环（2026-09-20 新增）
+
+```powershell
+# 生成运行验收清单（程序核对产物存在性/哈希/计数，输出 audit.json + audit_report.md）
+.\.venv\Scripts\python.exe -m pharm_demo.audit --run <run_id>
+# 清单全部通过后，记录人工复核签字（run 级覆盖记录，阶段状态不回写）
+.\.venv\Scripts\python.exe -m pharm_demo.audit --run <run_id> --signoff 姓名 --note "复核范围与结论"
+```
+
+设计：工程核对（存在性/哈希/计数/交叉验证）由程序完成；人工复核是 run 级覆盖记录（`human_review.json` + manifest + report.md 追加段），阶段执行状态永远不回写。验收 Agent 的证据已含各阶段产物索引（路径+哈希），已登记产物视为已提供，不再要求补交。
+
 ## 6. 常用命令
 
 ```powershell
@@ -69,7 +80,7 @@ local\tools\Cytoscape-3.10.0\Cytoscape.exe
 
 ## 8. 待办（按优先级）
 
-1. **DAVID 正式富集**：用五病任务新建一次 live 运行（配置已确认），产出 GO/KEGG 正式结果
+1. ~~DAVID 正式富集~~（2026-09-20 已完成：659/659 识别，7,558 条，显著 1,232）
 2. 甲状腺癌补充流程真实运行：`python -m pharm_demo.supplement_smoke` 参考，正式输入=五病批次的 Thyroid cancer 子集 + 主交集 659
 3. 原文 995/434 与现结果（13,392/待算癌症子集）的数量级差异：组内/医院讨论（数据版本 5.26→6.1）
 4. OMIM morbidmap（邮件申请中）到位后升级 OMIM 数据

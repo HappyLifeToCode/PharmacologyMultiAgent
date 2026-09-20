@@ -512,8 +512,15 @@ class Runner:
             self.save()
             context = {}
             def review_call():
-                evidence = {role: {key: stage.get(key) for key in ["status", "summary", "blockers", "agent_session_id"]} for role, stage in self.manifest["stages"].items() if role != "coordinator_review"}
-                instruction = "独立验收其他角色交接。区分协作系统已运行与科学分析未完成；列出明天要补的账号、导出、参数。合成验证只能证明工程流程，不能宣称五库真实数据已跑通。不使用工具。"
+                evidence = {"metrics": self.manifest.get("metrics", {})}
+                for role, stage in self.manifest["stages"].items():
+                    if role == "coordinator_review":
+                        continue
+                    evidence[role] = {key: stage.get(key) for key in ["status", "summary", "blockers", "agent_session_id"]}
+                    evidence[role]["artifact_index"] = {
+                        path: (stage.get("artifact_sha256") or {}).get(path)
+                        for path in stage.get("artifacts", [])}
+                instruction = "独立验收其他角色交接。区分协作系统已运行与科学分析未完成。证据含各阶段产物索引（路径与哈希已登记）：已登记的产物视为已提供，不要要求重新提供或补交；产物存在性与哈希由程序另行核对。人工复核事项应限于程序无法核验的科学判断（如结果生物学合理性、参数口径、来源可信度的最终确认），不要把已存在的证据列为待补。列出真正需要人工完成的事项。合成验证只能证明工程流程，不能宣称五库真实数据已跑通。不使用工具。"
                 if self.manifest["mode"] == "fixture":
                     instruction += "本运行的验收范围仅为合成工程验证。如各工程步骤通过且标注合成，返回 succeeded；真实科学数据缺失是下一阶段限制，写 findings，不作为当前工程验收 blockers。不要因为未做本次范围之外的真实实验而将合成运行判为失败。"
                 instruction += "如确有必要，可在交接 JSON 的 rework 字段列出需要返工的阶段名（仅限 failed/partial 阶段，至多一轮）；没有理由时返回空数组。不得点名 blocked（等待输入）阶段。"
