@@ -107,3 +107,22 @@ def test_run_supplement_full_chain_with_synthetic_data(tmp_path, monkeypatch):
     assert "BATMAN 网页在线回溯尚未实现" in backtrack["limitation"]
     report = (tmp_path / "out" / "supplement_report.md").read_text(encoding="utf-8")
     assert "scientific_complete=false" in report
+
+
+def test_full_import_relations_backtracks_beyond_threshold(tmp_path):
+    """回溯用全量关系（含低于阈值的 predicted 与 known），evidence/score 原值保留。"""
+    import csv as csv_module
+    from pharm_demo.supplement import _load_full_import_relations, batman_backtrack
+    path = tmp_path / "herb_targets.csv"
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv_module.writer(stream)
+        writer.writerow(["herb", "compound_id", "gene_symbol", "score", "evidence"])
+        writer.writerow(["白芍", "MOL1", "G1", "0.5", "predicted"])   # 低于 0.84 阈值，过滤口径下不可见
+        writer.writerow(["炙甘草", "MOL2", "G1", "", "known"])
+        writer.writerow(["白芍", "MOL3", "G2", "0.9", "predicted"])
+    relations = _load_full_import_relations(path)
+    assert len(relations) == 3
+    result = batman_backtrack(["G1", "G2", "G3"], relations)
+    assert [(r["gene_symbol"], r["evidence"], r["score"]) for r in result["rows"]] == [
+        ("G1", "known", None), ("G1", "predicted", 0.5), ("G2", "predicted", 0.9)]
+    assert result["unhit_candidates"] == ["G3"]

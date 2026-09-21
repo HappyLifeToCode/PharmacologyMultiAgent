@@ -35,4 +35,5 @@ python -m pharm_demo.supplement_smoke --output local/checks/supplement-01
 - `scientific_complete` 恒为 false；合成输入（`cancer_genes`、`herb_relations_file`）产物标注 `synthetic_engineering`，不冒充数据库结果。
 - 阶段状态语义与主流程一致：缺输入 blocked、数据或校验错误 failed、网络建成但 CytoNCA 未成功为 partial（度值来源如实标 NetworkX）。
 - 2026-09-17 合成样本（9 基因）端到端验证通过：本地 STRING → CytoNCA 桥接度值 → Top 5 → 交集外 3 个 → 回溯 2 行，计数与手工核对一致。
-- 待补：五病真实导入后的癌症子集运行、核心七药/跨朝代聚类输入、BATMAN 在线回溯、并列与筛选口径的医生确认。
+- 2026-09-21 真实运行完成（`local/checks/supplement-real-04/`）：癌症子集 15,427 → 网络 13,301 节点/81,481 边（CytoNCA）→ Top 50 含并列 51 → 交集外候选 46 → **10 个候选经 BATMAN 全量关系回溯命中 133 行**（CTNNB1、EP300、MED1、PRKACA/B/G、RPS19/2/3/6；白芍 119 行、炙甘草 14 行，均 predicted）。回溯口径：全量关系不过滤（原文意图），evidence/score 原值保留供取舍。
+- 待补：核心七药/跨朝代聚类输入、BATMAN 在线回溯、并列口径医生确认、结果人工复核。

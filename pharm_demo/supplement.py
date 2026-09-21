@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .common import ROOT, digest, now, read_json, write_json
 from .cytoscape import run_cytoscape
-from .imports import load_genecards, load_herb, load_omim
+from .imports import load_genecards, load_omim
 from .processing import _valid_symbol, analyze_network, normalize_symbols
 from .sources import string_network
 from .string_local import string_local_available, string_local_network
@@ -94,6 +94,36 @@ def _load_herb_relations_file(path):
                               "gene_symbol": row["gene_symbol"], "score": score, "evidence": evidence})
     if rejected:
         raise ValueError("herb relations 文件存在无效行：" + repr(rejected))
+    return relations
+
+
+def _load_full_import_relations(path):
+    """导入批次 herb_targets.csv 全量关系（含 evidence 与原始 score），不做阈值过滤。
+
+    用于甲状腺癌补充流程的 BATMAN 回溯：原文是在全量关系中回溯，
+    阈值过滤后的关系集必然查不到交集外候选。
+    """
+    relations, rejected = [], []
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if not {"herb", "compound_id", "gene_symbol", "score", "evidence"}.issubset(reader.fieldnames or []):
+            raise ValueError("herb_targets.csv 必须包含 herb,compound_id,gene_symbol,score,evidence 列")
+        for number, row in enumerate(reader, start=2):
+            symbol = row["gene_symbol"].strip()
+            if not row["herb"].strip() or not row["compound_id"].strip() or not _valid_symbol(symbol):
+                rejected.append(number)
+                continue
+            raw_score = (row.get("score") or "").strip()
+            try:
+                score = float(raw_score) if raw_score else None
+            except ValueError:
+                rejected.append(number)
+                continue
+            relations.append({"herb": row["herb"].strip(), "compound_id": row["compound_id"].strip(),
+                              "gene_symbol": symbol, "score": score,
+                              "evidence": (row.get("evidence") or "").strip() or None})
+    if rejected:
+        raise ValueError("herb_targets.csv 存在无效行：" + repr(rejected[:10]))
     return relations
 
 
@@ -268,10 +298,10 @@ def run_supplement(config, directory):
         relations_source = None
         try:
             if config.get("import_dir"):
-                task_view = {"herbs": config.get("herbs", []), "batman_threshold": config.get("batman_threshold"),
-                             "batman_threshold_confirmed": config.get("batman_threshold_confirmed", False)}
-                relations = load_herb(config["import_dir"], task_view)["relations"]
-                relations_source = "import_dir (load_herb, 台账已校验)"
+                # 原文为全量 BATMAN 关系回溯：不做阈值过滤，evidence 与原始 score 保留供取舍
+                relations = _load_full_import_relations(
+                    Path(config["import_dir"]) / "herb_targets.csv")
+                relations_source = "import_dir 全量关系（不过滤；evidence/score 原值保留）"
             elif config.get("herb_relations_file"):
                 relations = _load_herb_relations_file(config["herb_relations_file"])
                 relations_source = "herb_relations_file (工程样本，非 BATMAN 导出)"
@@ -286,7 +316,7 @@ def run_supplement(config, directory):
                               limitation="BATMAN 网页在线回溯尚未实现；本结果基于已提供的关系数据")
                 write_json(back_dir / "batman_backtrack.json", result)
                 _write_csv(back_dir / "batman_backtrack.csv",
-                           ["gene_symbol", "herb", "compound_id", "score"], result["rows"])
+                           ["gene_symbol", "herb", "compound_id", "evidence", "score"], result["rows"])
                 record("batman_backtrack", "succeeded", "回溯命中 %d 行；未命中候选 %d 个"
                        % (len(result["rows"]), len(result["unhit_candidates"])))
         except (ValueError, KeyError, OSError) as exc:
