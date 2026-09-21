@@ -143,10 +143,33 @@ def _map_symbols(genes, task, files):
         if len(candidates) == 1:
             string_id = next(iter(candidates))
             old = id_to_gene.get(string_id)
-            if old and old != gene:
-                raise ValueError("多个输入基因映射到同一 STRING ID，需复核：%s / %s -> %s"
-                                 % (old, gene, string_id))
-            id_to_gene[string_id] = gene
+            if old and old["gene"] != gene:
+                # preferred_name 命中优先于别名命中：别名方记为歧义（其别名指向可能误导），
+                # 双方都未直接命中时两个基因都记歧义，不静默选择
+                if method == "alias" and old["method"] == "preferred_name":
+                    ambiguous.append(gene)
+                    records.append({"query": gene, "status": "ambiguous",
+                                    "candidates": [string_id], "method": method,
+                                    "note": "别名命中与 %s 的 preferred_name 冲突，判为歧义" % old["gene"]})
+                    continue
+                if method == "preferred_name" and old["method"] == "alias":
+                    ambiguous.append(old["gene"])
+                    for record in records:
+                        if record["query"] == old["gene"]:
+                            record.update(status="ambiguous", method="alias",
+                                          note="别名命中被 %s 的 preferred_name 取代" % gene)
+                else:
+                    ambiguous.extend([old["gene"], gene])
+                    records = [r for r in records if r["query"] != old["gene"]]
+                    records.append({"query": old["gene"], "status": "ambiguous",
+                                    "candidates": [string_id], "method": old["method"],
+                                    "note": "与 %s 命中同一 STRING ID，判为歧义" % gene})
+                    records.append({"query": gene, "status": "ambiguous",
+                                    "candidates": [string_id], "method": method,
+                                    "note": "与 %s 命中同一 STRING ID，判为歧义" % old["gene"]})
+                    del id_to_gene[string_id]
+                    continue
+            id_to_gene[string_id] = {"gene": gene, "method": method}
             records.append({"query": gene, "status": "mapped", "string_id": string_id, "method": method})
         elif candidates:
             ambiguous.append(gene)
@@ -155,6 +178,7 @@ def _map_symbols(genes, task, files):
         else:
             unmapped.append(gene)
             records.append({"query": gene, "status": "unmapped"})
+    id_to_gene = {k: v["gene"] for k, v in id_to_gene.items()}
     return id_to_gene, records, ambiguous, unmapped
 
 

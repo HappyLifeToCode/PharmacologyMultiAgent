@@ -89,9 +89,14 @@ def test_preferred_name_wins_without_alias_ambiguity(data_dir, tmp_path):
     assert result["provenance"]["ambiguous"] == []
 
 
-def test_alias_to_same_id_raises(data_dir, tmp_path):
-    with pytest.raises(ValueError, match="同一 STRING ID"):
-        string_local_network(["TP53", "P53"], local_task(data_dir), tmp_path / "out")
+def test_preferred_name_wins_over_alias_collision(data_dir, tmp_path):
+    # TP53 经 preferred_name 命中 9606.ENSP00000000001；P53 只有别名也指向同一蛋白
+    result = string_local_network(["TP53", "P53"], local_task(data_dir), tmp_path / "out")
+    assert result["nodes"] == ["TP53"]  # preferred 方保留，别名方判歧义
+    assert result["provenance"]["ambiguous"] == ["P53"]
+    records = {r["query"]: r for r in read_json(tmp_path / "out" / "string_mapping_raw.json")["records"]}
+    assert records["TP53"]["status"] == "mapped"
+    assert records["P53"]["status"] == "ambiguous" and "冲突" in records["P53"]["note"]
 
 
 @pytest.mark.parametrize("changes", [{"string_confidence": float("nan")}, {"string_confidence": 1.5},
