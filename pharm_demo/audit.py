@@ -108,10 +108,24 @@ def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _local_display(iso):
+    """人读报告用：UTC ISO 时间转本地时间并带时区标注；存储值不变。"""
+    try:
+        parsed = datetime.fromisoformat(iso)
+        local = parsed.astimezone()
+        offset = local.utcoffset()
+        hours, remainder = divmod(int(offset.total_seconds()), 3600)
+        minutes = abs(remainder) // 60
+        return local.strftime("%Y-%m-%d %H:%M") + "（UTC%+d:%02d）" % (hours, minutes)
+    except (TypeError, ValueError):
+        return iso
+
+
 def write_audit_report(result, output):
     lines = ["# 运行验收清单（程序生成）", "",
              "运行：%s ｜ 模式：%s ｜ 运行状态：%s ｜ 核对时间：%s" % (
-                 result["run_id"], result["mode"], result["run_status"], result["audited_at"]), "",
+                 result["run_id"], result["mode"], result["run_status"],
+                 _local_display(result["audited_at"])), "",
              "| 检查项 | 结果 | 说明 |", "|---|---|---|"]
     marks = {"pass": "✅", "fail": "❌", "info": "ℹ️"}
     for item in result["items"]:
@@ -121,7 +135,7 @@ def write_audit_report(result, output):
     if result.get("human_review"):
         review = result["human_review"]
         lines.extend(["", "## 人工复核记录", "",
-                      "复核人：%s ｜ 时间：%s" % (review["reviewer"], review["at"]), "",
+                      "复核人：%s ｜ 时间：%s" % (review["reviewer"], _local_display(review["at"])), "",
                       review.get("note", "")])
     Path(output).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -145,7 +159,7 @@ def signoff(run_dir, reviewer, note):
     if report.is_file():
         with report.open("a", encoding="utf-8") as stream:
             stream.write("\n## 人工复核记录\n\n复核人：%s ｜ 时间：%s\n\n%s\n" % (
-                reviewer, record["at"], note))
+                reviewer, _local_display(record["at"]), note))
     return record
 
 
