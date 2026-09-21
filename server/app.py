@@ -13,6 +13,10 @@ from fastapi.responses import FileResponse
 from pharm_demo.common import ROOT, read_json, safe_name, task_list, public_artifact
 from pharm_demo.engine import manifests, start
 from pharm_demo.tasks import save_task
+from pharm_demo import discovery
+from starlette.concurrency import run_in_threadpool
+from uuid import uuid4
+import sqlite3
 
 app = FastAPI(title="Pharmacology Multi-Agent", docs_url=None, redoc_url=None)
 
@@ -36,7 +40,62 @@ async def local_only(request: Request, call_next):
 
 @app.get("/")
 def index():
+    return FileResponse(ROOT / "server/static/discovery.html")
+
+
+@app.get("/legacy")
+def legacy_index():
     return FileResponse(ROOT / "server/static/index.html")
+
+
+@app.get("/assets/discovery.js")
+def discovery_script():
+    return FileResponse(ROOT / "server/static/discovery.js", media_type="text/javascript")
+
+
+@app.get("/api/discovery/catalog")
+def discovery_catalog():
+    try:
+        return discovery.catalog(discovery.database_path(ROOT))
+    except (ValueError, OSError, sqlite3.Error):
+        raise HTTPException(503, "本地五病索引不可用，请先按照反向查询说明准备索引")
+
+
+def execute_discovery(body):
+    if not isinstance(body, dict) or set(body) - {"herbs", "genes"}:
+        raise ValueError("仅接受 herbs 或 genes 输入，不需要指定疾病")
+    result = discovery.query(discovery.database_path(ROOT), **body)
+    run_id = "lookup_" + uuid4().hex
+    discovery.save_result(result, ROOT / "local/discovery/runs" / run_id)
+    return {"run_id": run_id, "result": result}
+
+
+@app.post("/api/discovery/query")
+async def discovery_query(request: Request):
+    if len(await request.body()) > 100000:
+        raise HTTPException(413, "查询内容过长")
+    try:
+        body = await request.json()
+        return await run_in_threadpool(execute_discovery, body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except (OSError, sqlite3.Error):
+        raise HTTPException(503, "本地查询或归档不可用，请检查索引与目录权限")
+
+
+@app.get("/discovery/artifacts/{run_id}/{filename}")
+def discovery_artifact(run_id: str, filename: str):
+    try:
+        safe_name(run_id)
+    except ValueError:
+        raise HTTPException(404)
+    if filename not in ("result.json", "candidates.csv", "evidence.csv", "report.md", "manifest.json"):
+        raise HTTPException(404)
+    root = (ROOT / "local/discovery/runs").resolve()
+    path = (root / run_id / filename).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, filename=filename, media_type="application/octet-stream")
 
 
 @app.get("/assets/workbench.js")
