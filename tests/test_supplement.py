@@ -102,7 +102,8 @@ def test_run_supplement_full_chain_with_synthetic_data(tmp_path, monkeypatch):
     outside = read_json(tmp_path / "out" / "04_outside_intersection" / "outside_intersection.json")
     assert outside["candidates"] == ["G1", "G3"]  # G2 在主交集中被排除
     backtrack = read_json(tmp_path / "out" / "05_batman_backtrack" / "batman_backtrack.json")
-    assert backtrack["rows"] == [{"gene_symbol": "G1", "herb": "白芍", "compound_id": "MOL1", "score": None, "evidence": "known"}]
+    assert backtrack["rows"] == [{"gene_symbol": "G1", "herb": "白芍", "compound_id": "MOL1",
+                                  "compound_name": None, "score": None, "evidence": "known"}]
     assert backtrack["unhit_candidates"] == ["G3"]
     assert "BATMAN 网页在线回溯尚未实现" in backtrack["limitation"]
     report = (tmp_path / "out" / "supplement_report.md").read_text(encoding="utf-8")

@@ -43,16 +43,42 @@ def outside_intersection(top_genes, intersection_genes):
             "excluded_by_intersection": sorted(g for g in top_genes if g in intersection)}
 
 
-def batman_backtrack(candidates, relations):
+def _compound_names(task):
+    """CID -> IUPAC 名称映射（本地 BATMAN known/predicted 成分表）；不可解析时返回空表。"""
+    from .batman_local import _open_text, batman_local_files
+    try:
+        files = batman_local_files(task)
+    except ValueError:
+        return {}
+    names = {}
+    for kind in ("known_by_ingredients", "predicted_by_ingredients"):
+        path = files.get(kind)
+        if not path:
+            continue
+        with _open_text(path) as stream:
+            header = stream.readline()
+            for line in stream:
+                if kind.startswith("known"):
+                    fields = line.rstrip("\r\n").split("\t")
+                else:
+                    fields = line.rstrip("\r\n").split(None, 2)
+                if len(fields) >= 2 and fields[0] and fields[1]:
+                    names.setdefault(fields[0], fields[1])
+    return names
+
+
+def batman_backtrack(candidates, relations, compound_names=None):
     by_gene = {}
     for rel in relations:
         by_gene.setdefault(rel["gene_symbol"], []).append(rel)
+    compound_names = compound_names or {}
     rows = []
     for gene in candidates:
         for rel in sorted(by_gene.get(gene, []), key=lambda r: (r["herb"], r["compound_id"])):
             rows.append({"gene_symbol": gene, "herb": rel["herb"],
-                         "compound_id": rel["compound_id"], "score": rel["score"],
-                         "evidence": rel.get("evidence")})
+                         "compound_id": rel["compound_id"],
+                         "compound_name": compound_names.get(rel["compound_id"]),
+                         "score": rel["score"], "evidence": rel.get("evidence")})
     return {"rows": rows, "unhit_candidates": [g for g in candidates if g not in by_gene]}
 
 
@@ -311,12 +337,15 @@ def run_supplement(config, directory):
             else:
                 back_dir = directory / "05_batman_backtrack"
                 back_dir.mkdir()
-                result = batman_backtrack(candidates, relations)
+                names = _compound_names({**config, "batman_include_predicted": True})
+                result = batman_backtrack(candidates, relations, names)
                 result.update(relations_source=relations_source, candidate_count=len(candidates),
+                              named_compounds=len(names),
                               limitation="BATMAN 网页在线回溯尚未实现；本结果基于已提供的关系数据")
                 write_json(back_dir / "batman_backtrack.json", result)
                 _write_csv(back_dir / "batman_backtrack.csv",
-                           ["gene_symbol", "herb", "compound_id", "evidence", "score"], result["rows"])
+                           ["gene_symbol", "herb", "compound_name", "compound_id", "evidence", "score"],
+                           result["rows"])
                 record("batman_backtrack", "succeeded", "回溯命中 %d 行；未命中候选 %d 个"
                        % (len(result["rows"]), len(result["unhit_candidates"])))
         except (ValueError, KeyError, OSError) as exc:
