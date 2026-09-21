@@ -362,6 +362,45 @@ def run_supplement(config, directory):
              "疾病范围：" + ", ".join(config["diseases"]), ""]
     for stage in stages:
         lines.extend(["## " + stage["stage"], "", "状态：" + stage["status"], "", stage["summary"], ""])
+    # 报告正文包含实际产出：Top 度值、交集外候选、回溯命中明细
+    top_file = directory / "03_degree_top" / "degree_top.json"
+    if top_file.is_file():
+        top = read_json(top_file)
+        lines.extend(["## Degree Top %d（含并列共 %d 个；度值来源：%s）" % (
+            top["top_n_requested"], len(top["top"]), top["degree_method"]), "",
+                      "| 排名 | 基因 | Degree |", "|---|---|---|"])
+        for rank, row in enumerate(top["top"], 1):
+            lines.append("| %d | %s | %s |" % (rank, row["gene_symbol"], row["degree"]))
+        lines.append("")
+    outside_file = directory / "04_outside_intersection" / "outside_intersection.json"
+    if outside_file.is_file():
+        outside = read_json(outside_file)
+        lines.extend(["## 交集外候选（%d 个；主交集来源：%s）" % (
+            len(outside["candidates"]), outside.get("intersection_source", "")), "",
+                      "、".join(outside["candidates"]), ""])
+    back_file = directory / "05_batman_backtrack" / "batman_backtrack.json"
+    if back_file.is_file():
+        backtrack = read_json(back_file)
+        by_gene = {}
+        for row in backtrack["rows"]:
+            by_gene.setdefault(row["gene_symbol"], []).append(row)
+        lines.extend(["## BATMAN 回溯（%d 个候选命中 %d 行关系）" % (
+            len(by_gene), len(backtrack["rows"])), "",
+                      "| 候选基因 | 命中药材与成分（evidence，score） |", "|---|---|"])
+        for gene in sorted(by_gene):
+            def _short(row):
+                name = row.get("compound_name") or row["compound_id"]
+                if len(name) > 40:
+                    name = name[:40] + "…"
+                return "%s：%s（%s，%s）" % (
+                    row["herb"], name, row.get("evidence") or "-",
+                    row["score"] if row["score"] is not None else "-")
+            parts = sorted({_short(row) for row in by_gene[gene]})
+            shown = "；".join(parts[:8]) + ("；… 共 %d 行" % len(parts) if len(parts) > 8 else "")
+            lines.append("| %s | %s |" % (gene, shown))
+        lines.extend(["", "未命中候选（%d 个）：%s" % (
+            len(backtrack["unhit_candidates"]), "、".join(backtrack["unhit_candidates"]) or "无"), "",
+                      "> 明细见 05_batman_backtrack/batman_backtrack.csv", ""])
     for note in optional_notes:
         lines.append("- 可选输入 %s：%s（%s）" % (note["input"], note["status"], note.get("note", note.get("file"))))
     lines.extend(["", "## 边界", ""] + ["- " + b for b in summary["boundaries"]])
