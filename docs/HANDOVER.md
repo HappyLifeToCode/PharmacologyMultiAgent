@@ -51,6 +51,7 @@
 .\.venv\Scripts\python.exe -m pharm_demo.audit --run <run_id>
 # 清单全部通过后，记录人工复核签字（run 级覆盖记录，阶段状态不回写）
 .\.venv\Scripts\python.exe -m pharm_demo.audit --run <run_id> --signoff 姓名 --note "复核范围与结论"
+# 或在网页工作台“任务与记录”里点“人工复核签字”按钮（同一逻辑，清单不过会拒签）
 ```
 
 设计：工程核对（存在性/哈希/计数/交叉验证）由程序完成；人工复核是 run 级覆盖记录（`human_review.json` + manifest + report.md 追加段），阶段执行状态永远不回写。验收 Agent 的证据已含各阶段产物索引（路径+哈希），已登记产物视为已提供，不再要求补交。

@@ -123,6 +123,24 @@ def run_resume(run_id: str):
         raise HTTPException(409, str(exc))
 
 
+@app.post("/api/runs/{run_id}/signoff")
+async def run_signoff(run_id: str, request: Request):
+    manifest_for(run_id)
+    try:
+        body = await request.json()
+        reviewer = body.get("reviewer", "") if isinstance(body, dict) else ""
+        note = body.get("note", "") if isinstance(body, dict) else ""
+        if not isinstance(reviewer, str) or not 1 <= len(reviewer.strip()) <= 40:
+            raise ValueError("请填写复核人姓名（不超过 40 字）")
+        if not isinstance(note, str) or len(note) > 500:
+            raise ValueError("复核备注最多 500 字")
+        from pharm_demo.audit import signoff
+        record = signoff(ROOT / "runs" / run_id, reviewer.strip(), note)
+        return {"human_review": record}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @app.get("/artifacts/{run_id}/{filename:path}")
 def artifact(run_id: str, filename: str):
     manifest = manifest_for(run_id)
