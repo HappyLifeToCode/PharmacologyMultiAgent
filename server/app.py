@@ -101,6 +101,41 @@ def run_events(run_id: str):
     return {"events": events[-400:]}
 
 
+@app.get("/api/supplement/runs")
+def supplement_runs():
+    """列出甲状腺癌补充流程的运行产物目录（supplement-real-*）。"""
+    runs = []
+    for directory in sorted((ROOT / "local" / "checks").glob("supplement-real-*"), reverse=True):
+        result_file = directory / "supplement_result.json"
+        if not result_file.is_file():
+            continue
+        result = read_json(result_file)
+        artifacts = sorted(p.relative_to(directory).as_posix() for p in directory.rglob("*")
+                           if p.is_file() and p.suffix.lower() in (".csv", ".json", ".md", ".png"))
+        runs.append({"name": directory.name, "status": result.get("status"),
+                     "finished_at": result.get("finished_at"),
+                     "stages": result.get("stages", []), "artifacts": artifacts})
+    return {"runs": runs}
+
+
+@app.get("/api/supplement/runs/{name}/artifacts/{filename:path}")
+def supplement_artifact(name: str, filename: str):
+    safe_name(name)
+    directory = (ROOT / "local" / "checks" / name).resolve()
+    if directory.parent != (ROOT / "local" / "checks").resolve():
+        raise HTTPException(404)
+    path = (directory / filename).resolve()
+    try:
+        path.relative_to(directory)
+    except ValueError:
+        raise HTTPException(404)
+    if not path.is_file() or path.suffix.lower() not in (".csv", ".json", ".md", ".png"):
+        raise HTTPException(404)
+    response = FileResponse(path, media_type="text/plain; charset=utf-8")
+    response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return response
+
+
 @app.post("/api/run")
 async def run_new(request: Request):
     try:
