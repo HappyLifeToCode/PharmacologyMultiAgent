@@ -79,6 +79,12 @@ def test_live_blocked_without_local_data(root):
     assert manifest["stages"]["disease_reverse"]["status"] == "blocked"
     # 没有靶点产物顶替
     assert not (root / "runs" / run_id / "herb_targets/attempt_01/targets.json").exists()
+    # blocked 携带人机协助升级点标记与事件
+    handoff = json.loads((root / "runs" / run_id / "herb_targets/attempt_01/handoff.json").read_text(encoding="utf-8"))
+    assert handoff["assist"]["available"] is True
+    assert "协助会话" in handoff["assist"]["guidance"]
+    events = (root / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
+    assert "assist_requested" in events
     assert manifest["stages"]["review"]["status"] == "succeeded"
     assert (root / "runs" / run_id / "report.md").is_file()
     # live 的 blocked 证据也归档

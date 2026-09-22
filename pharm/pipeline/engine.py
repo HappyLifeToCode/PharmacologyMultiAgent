@@ -32,6 +32,10 @@ BATMAN_GUIDANCE = ("BATMAN 本地数据不可用：请将 v2.0 全量下载放�
                    "configs/batman_data.local.json 配置 data_dir；在线采集升级点尚未实现（后续阶段）")
 INDEX_GUIDANCE = ("本地疾病索引不可用：请用合格导入批次执行 python -m pharm.discovery.query prepare "
                   "建立索引；在线采集升级点尚未实现（后续阶段）")
+BATMAN_ASSIST = ("BATMAN 本地数据未配置。可在工作台启动在线采集协助会话，"
+                 "由您在内嵌浏览器中完成人机验证后继续。")
+INDEX_ASSIST = ("本地疾病索引未准备。可在工作台启动在线采集协助会话，"
+                "由您在内嵌浏览器中完成人机验证后继续。")
 SYNTHETIC = "synthetic_engineering"
 
 FIXTURE_GENES = ["TP53", "EGFR", "AKT1", "TNF", "IL6", "VEGFA"]
@@ -329,9 +333,12 @@ class Runner:
             else:
                 batman = _availability(self.task)["batman"]
                 if not batman["available"]:
+                    self.event(role, "assist_requested", BATMAN_ASSIST)
                     self.finish(role, {"status": "blocked",
                                        "summary": "BATMAN 本地数据不可用，未生成靶点（不以合成数据顶替）",
-                                       "blockers": [batman.get("guidance", BATMAN_GUIDANCE)], "artifacts": []}, directory)
+                                       "blockers": [batman.get("guidance", BATMAN_GUIDANCE)],
+                                       "assist": {"available": True, "guidance": BATMAN_ASSIST},
+                                       "artifacts": []}, directory)
                     return
                 candidates = {herb: resolve_batman_names(herb) for herb in self.task["herbs"]}
                 result = batman_local.query_local_targets(candidates, self.task.get("batman_threshold", 0.84), self.task)
@@ -419,9 +426,12 @@ class Runner:
                 else:
                     index = _availability(self.task)["discovery_index"]
                     if not index["available"]:
+                        self.event(role, "assist_requested", INDEX_ASSIST)
                         self.finish(role, {"status": "blocked",
                                            "summary": "本地疾病索引不可用，未执行反查（不以合成数据顶替）",
-                                           "blockers": [index.get("guidance", INDEX_GUIDANCE)], "artifacts": []}, directory)
+                                           "blockers": [index.get("guidance", INDEX_GUIDANCE)],
+                                           "assist": {"available": True, "guidance": INDEX_ASSIST},
+                                           "artifacts": []}, directory)
                         return
                     database = discovery.database_path(ROOT)
                 result, chunked = _reverse_lookup(database, genes)

@@ -8,17 +8,21 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pharm.core.common import ROOT, read_json, safe_name, task_list, public_artifact
 from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
+from pharm.assist.bridge import AssistManager, AssistUnavailable
 from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
+import asyncio
 import sqlite3
 
 app = FastAPI(title="Pharmacology Multi-Agent", docs_url=None, redoc_url=None)
+
+assist_manager = AssistManager()
 
 
 @app.middleware("http")
@@ -182,6 +186,89 @@ def run_resume(run_id: str):
         raise HTTPException(400, str(exc))
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
+
+
+@app.post("/api/assist/start")
+async def assist_start(request: Request):
+    if len(await request.body()) > 10000:
+        raise HTTPException(413, "请求内容过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求必须是 JSON 对象")
+        url, guidance = body.get("url"), body.get("guidance")
+        if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://") or url.startswith("data:")):
+            raise ValueError("url 必须是 http(s) 或 data: URL")
+        if guidance is not None and (not isinstance(guidance, str) or len(guidance) > 2000):
+            raise ValueError("引导文本最多 2000 字")
+        session = await run_in_threadpool(assist_manager.start, url, guidance)
+        return {"state": session.state, "url": session.url}
+    except AssistUnavailable as exc:
+        raise HTTPException(503, "内嵌浏览器不可用：" + str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.post("/api/assist/stop")
+def assist_stop():
+    session = assist_manager.stop()
+    return {"state": "closed" if session is not None else "idle"}
+
+
+@app.get("/api/assist/status")
+def assist_status():
+    return assist_manager.status()
+
+
+@app.websocket("/ws/assist")
+async def assist_ws(websocket: WebSocket):
+    host = websocket.headers.get("host") or websocket.url.netloc
+    origin = websocket.headers.get("origin")
+    # "testserver" 是 starlette TestClient 的 WS scope 默认主机名
+    hostname = websocket.url.hostname or host.split(":")[0]
+    if hostname not in ("localhost", "127.0.0.1", "testserver") or (origin and urlparse(origin).netloc != host):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept()
+    session = assist_manager.current()
+    if session is None or session.state == "closed":
+        await websocket.send_text(json.dumps({"type": "state", "state": "idle"}))
+        await websocket.close()
+        return
+    subscriber = session.subscribe()
+
+    async def pump():
+        try:
+            while True:
+                item = await run_in_threadpool(subscriber.get)
+                if item is None:
+                    return
+                if item[0] == "frame":
+                    await websocket.send_text(json.dumps({"type": "frame", **item[1]}))
+                    await websocket.send_bytes(item[2])
+                else:
+                    await websocket.send_text(json.dumps(item[1], ensure_ascii=False))
+        except Exception:
+            return
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                event = await websocket.receive_json()
+            except json.JSONDecodeError:
+                continue
+            try:
+                session.handle_input(event)
+            except ValueError as exc:
+                await websocket.send_text(json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        session.unsubscribe(subscriber)
+        task.cancel()
 
 
 @app.get("/artifacts/{run_id}/{filename:path}")
