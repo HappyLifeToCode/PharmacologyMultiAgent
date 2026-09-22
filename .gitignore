@@ -77,3 +77,6 @@ tasks/.tasks.lock
 
 # Personal follow-up plan kept local only
 /docs/LOCAL_DISEASE_DISCOVERY_PLAN.md
+
+# Personal refactor report kept local only
+/docs/REFACTOR_REPORT.md
