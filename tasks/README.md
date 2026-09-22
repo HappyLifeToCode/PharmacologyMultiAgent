@@ -7,7 +7,7 @@
 | 文件或目录 | 内容 |
 |---|---|
 | tasks/tasks.local.jsonl | 做什么：方剂/药材、阈值、运行方式（Git 忽略） |
-| configs/runtime.json | 执行环境快照（预留给在线采集的模型配置）；可共享，不含凭据 |
+| configs/runtime.json | 多 Agent 核验层的模型配置（live 默认启用）；可共享，不含凭据 |
 | runs/<run_id>/ | 实际执行状态、使用参数、产物和事件记录 |
 
 任务定义不保存账号、密钥、运行状态或分析结果。
@@ -22,6 +22,7 @@
 | research_notes | 可选研究说明（最多 4000 字） |
 | batman_threshold | BATMAN predicted 行筛选阈值（严格大于），默认 0.84 |
 | mode | live（本地数据反查）或 fixture（合成工程验证），默认 live |
+| agents | 多 Agent 核验开关：live 默认 true（需 Codex 环境），fixture 强制 false；false 为纯程序调试开关 |
 | composition | 组成来源记录：formula / herbs_override / custom_herbs（由程序写入） |
 
 使用 UTF-8，每个任务占一行，不添加注释或尾逗号。保留数值、布尔值、数组和 null 的 JSON 类型。

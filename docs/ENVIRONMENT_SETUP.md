@@ -19,9 +19,11 @@ Python 依赖：`pip install -r requirements.txt`。不需要 Node.js、Cytoscap
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-## 可选软件（预留给在线采集阶段）
+## 可选软件
 
-- **Codex CLI（icrc profile）**：当前 pipeline 无模型会话，`pharm/agents/runtime.py` 与 `configs/runtime.json` 为在线采集阶段预留，现状不调用、非必需。配置方式见 [Codex 执行配置](CODEX_RUNTIME.md)。
+- **Codex CLI（icrc profile）**：**live 多 Agent 模式必需**（任务 `agents=true`，live 默认）——六个核验会话由此启动；`agents=false` 的纯程序 live 与全部 fixture 不需要。配置方式见 [Codex 执行配置](CODEX_RUNTIME.md)。
+- **Cytoscape 3.10.0 + CytoNCA 2.1.6 + JDK**：机制分析 network 阶段的可选依赖——仅当任务显式配置 `network_topology` 且要求 CytoNCA 度值时需要（否则度值用 NetworkX 并如实标注）。桥接插件用 `scripts/build_cytonca_bridge.py` 针对本机安装构建（源码在 `integrations/cytonca_bridge/`）。首次启动遇旧 JAR 兼容问题（`Invalid CEN header`）时，可在该软件自身 `Cytoscape.vmoptions` 加 `-Djdk.util.zip.disableZip64ExtraFieldValidation=true`（仅影响该应用，历史核验记录见 Git 历史文档）。
+- **STRING v12.0 本地数据**：机制分析 network 阶段的可选数据来源（`configs/string_data.local.json`，模板 `configs/string_data.example.json` 指向 `data/string/v12.0/`，含 `9606.protein.info/aliases/links.detailed` 三件套，`.txt.gz` 或 `.txt`）。未配置时回退 STRING 公开 API（**需要外网**；任务可用 `string_source` 显式指定其一）。
 
 ## BATMAN-TCM v2.0 本地全量数据（live 必需）
 

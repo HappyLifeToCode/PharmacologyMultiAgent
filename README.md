@@ -1,8 +1,8 @@
 # Pharmacology Multi-Agent
 
-中药复方 → BATMAN 本地成分/靶点 → 本地疾病索引反查候选疾病的可追溯研究工具。输入一个方剂（或自由药材组合），程序在本地数据中解析药材—成分—靶点关系，再用本地 SQLite 疾病索引反查"哪些疾病与这些靶点有关联"，输出候选疾病与逐条证据。
+中药复方 → BATMAN 本地成分/靶点 → 本地疾病索引反查候选疾病的可追溯研究工具。输入一个方剂（或自由药材组合），程序在本地数据中解析药材—成分—靶点关系，再用本地 SQLite 疾病索引反查"哪些疾病与这些靶点有关联"，输出候选疾病与逐条证据及透明启发式置信度。对候选疾病可继续做机制分析：共同靶点 → STRING/CytoNCA 网络 → DAVID 富集 → 验收。
 
-核心原则：**能本地化的全部本地化**——主链路是零模型会话的确定性程序；本地数据缺失时明确 blocked 并给出指引，不用合成数据顶替。在线采集（人机协助内嵌浏览器 + Agent）是预留升级方向，尚未实现。
+核心原则：**能本地化的全部本地化**——主链路是确定性程序；本地数据缺失时明确 blocked 并给出指引，不用合成数据顶替。**多 Agent 编排层**：live 运行默认启用六个独立 Codex 会话（协调/药材靶点/疾病发现/网络/富集/验收），程序做全部计算，Agent 只做核验与解释、结论不改程序产物。在线采集（人机协助内嵌浏览器 + Agent 采集编排）是预留升级方向，尚未实现。
 
 ## 快速启动
 
@@ -40,13 +40,15 @@ live 模式需要两项本地数据，缺失时对应阶段 blocked 并给出指
 - **BATMAN-TCM v2.0 全量下载文件**：配置 `configs/batman_data.local.json`（模板 `configs/batman_data.example.json`）指向本机数据目录。
 - **本地疾病索引**：用合格批次执行 `python -m pharm.discovery.query prepare --batch <批次目录>` 建立（批次格式见 [导入说明](docs/IMPORTS.md)）。
 
+live 运行默认启用多 Agent 核验（任务 `agents=true`），需要可用的 Codex CLI 与 profile（见 [Codex 执行配置](docs/CODEX_RUNTIME.md)）；环境不可用时运行会明确失败并提示改用 `agents=false`——纯程序 live 运行不需要模型服务。
+
 ### 5. 测试
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前 119 项通过。测试不需要研究数据或外网（人机协助测试使用 headless Chromium）。
+当前 202 项通过。测试不需要研究数据、真实模型或外网（多 Agent 编排用 mock 会话验证；人机协助测试使用 headless Chromium）。
 
 ## 架构
 
@@ -57,28 +59,44 @@ flowchart LR
     C --> D[review<br/>程序验收与报告]
     E[BATMAN v2.0<br/>本地全量文件] -.-> B
     F[SQLite 疾病索引<br/>只读、可插拔批次] -.-> C
-    G[人机协助会话<br/>内嵌浏览器] -. 升级点 .-> B
-    G -. 升级点 .-> C
+    M[六个 Codex 核验会话<br/>程序计算·Agent 核验] -.-> A
+    M -.-> B
+    M -.-> C
+    M -.-> D
+    C --> N[POST /api/analysis<br/>机制分析链路]
+    N --> S[shared_targets<br/>共同靶点]
+    S --> T[network<br/>STRING/CytoNCA 网络]
+    S --> U[enrichment<br/>DAVID 富集]
+    T --> V[analysis_review<br/>验收与报告]
+    U --> V
+    M -.-> T
+    M -.-> U
+    M -.-> V
 ```
 
-- 四阶段固定 DAG（`pharm/pipeline/scheduler.py`），纯程序执行，manifest.json 是唯一状态源；参数即身份（task_id 为内容哈希）、代码即签名（resume 只复用输入/代码/数据/产物哈希全一致的成功阶段）。
+- 两条流水线（`pharm/pipeline/scheduler.py` 注册 DAG）：discovery（四阶段反向发现）与 analysis（候选疾病的机制分析，经 POST /api/analysis 触发）。manifest.json 是唯一状态源；参数即身份（task_id 为内容哈希）、代码即签名（resume 只复用输入/代码/数据/产物哈希全一致的成功阶段）。
+- **多 Agent 编排**：程序完成计算后启动对应 Codex 会话核验（提示词在 `agents/*.md`，内容哈希参与阶段签名）；Agent 报 failed 只把阶段降为 partial，程序产物不改；会话错误如实记录。
 - 本地数据缺失 → 阶段 blocked + guidance + `assist` 升级标记（工作台可启动人机协助会话）；blocked/failed 也是终态，下游如实记录，不顶替。
 - 人机协助：headed Chromium 画面经 CDP screencast 推到工作台内嵌 canvas，鼠标键盘事件回传——用于未来"Agent 遇人机验证时由用户接管"的在线采集（Agent 采集流程本身尚未实现）。
-- scientific_complete 恒为 false：关键词关联≠疗效，零结果如实保留。
+- scientific_complete 恒为 false：关键词关联≠疗效；置信度是启发式（heuristic_v1）而非统计检验；零结果如实保留。
 
 ## 目录结构
 
 ```text
 pharm/            全部运行时代码
   core/           公共基础（路径/IO、归档、导入校验、符号校验）
-  agents/         模型会话适配器（预留给在线采集，当前未被调用）
+  agents/         Codex 会话适配器（多 Agent 核验层在用；在线采集编排预留）
   batman/         BATMAN 本地数据查询、全药材目录扩展、内置四方剂组成表
   diseases/       GeneCards/OMIM 导出辅助与通用关联批次建库
   discovery/      疾病索引（建库/查询/目录）与反向查询
+  network/        STRING 本地/API 网络、CytoNCA 桥、NetworkX 度值核对
+  enrich/         DAVID 网页接口富集适配
   assist/         人机协助浏览器桥（画面推流、输入回传、引导消息）
-  pipeline/       任务模型、DAG 调度器、四阶段执行引擎
+  pipeline/       任务模型、DAG 调度器（双流水线）、执行引擎
+agents/           六个核验角色提示词（引擎实际使用）与说明
+integrations/     CytoNCA 桥接插件源码（机制分析可选）
 server/           本机 Web 工作台（FastAPI + 静态单页）
-scripts/          任务执行、环境检查、报告导出入口
+scripts/          任务执行、环境检查、桥接构建、报告导出入口
 configs/          可共享执行设置与本机配置模板，不含凭据
 tasks/            任务模板与填写说明；个人任务保存在 Git 忽略文件
 docs/             协作、接口与实施文档
@@ -96,9 +114,9 @@ data/ runs/ reports/ local/   运行生成或本机私有内容，默认不提�
 | [交接说明](docs/HANDOVER.md) | 架构、关键资产、已知坑、待办 |
 | [反向查询与疾病索引](docs/REVERSE_DISCOVERY.md) | 索引口径、建库、查询接口 |
 | [数据导入说明](docs/IMPORTS.md) | 两类批次的格式与校验纪律 |
-| [数据交接约定](docs/DATA_CONTRACT.md) | 四阶段产物、状态语义、归档布局 |
+| [数据交接约定](docs/DATA_CONTRACT.md) | 双流水线产物、状态语义、归档布局 |
 | [环境准备](docs/ENVIRONMENT_SETUP.md) | 软件、浏览器与数据来源准备 |
-| [Codex 执行配置（预留）](docs/CODEX_RUNTIME.md) | 在线采集阶段的模型会话配置 |
+| [Codex 执行配置](docs/CODEX_RUNTIME.md) | 多 Agent 核验层的模型会话配置（live 默认启用） |
 | [Agent 工作分配](docs/AGENT_ASSIGNMENTS.md) | 团队认领表（旧分工待重新认领） |
 | [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 任务字段与示例 |
 

@@ -1,2 +1,2 @@
-{"task_id":"example_wenjingtang_live","formula":"温经汤","herbs":["吴茱萸","当归","芍药","川芎","人参","桂枝","阿胶","牡丹皮","生姜","甘草","半夏","麦冬"],"research_notes":"示例：内置方剂 live 运行（需要本机 BATMAN 数据与疾病索引）","batman_threshold":0.84,"mode":"live","composition":"formula"}
-{"task_id":"example_custom_fixture","formula":null,"herbs":["白芍","甘草"],"research_notes":"示例：自由药材组合 fixture 合成工程验证（无需数据）","batman_threshold":0.84,"mode":"fixture","composition":"custom_herbs"}
+{"task_id":"example_wenjingtang_live","formula":"温经汤","herbs":["吴茱萸","当归","芍药","川芎","人参","桂枝","阿胶","牡丹皮","生姜","甘草","半夏","麦冬"],"research_notes":"示例：内置方剂 live 运行（需要本机 BATMAN 数据与疾病索引；agents=true 还需 Codex 环境）","batman_threshold":0.84,"mode":"live","agents":true,"composition":"formula"}
+{"task_id":"example_custom_fixture","formula":null,"herbs":["白芍","甘草"],"research_notes":"示例：自由药材组合 fixture 合成工程验证（无需数据，不调模型）","batman_threshold":0.84,"mode":"fixture","agents":false,"composition":"custom_herbs"}

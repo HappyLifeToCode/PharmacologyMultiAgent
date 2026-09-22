@@ -11,7 +11,7 @@
 | 数据怎么输入、交接、归档 | [导入说明](IMPORTS.md) → [数据契约](DATA_CONTRACT.md) |
 | 浏览器、软件和数据准备 | [环境准备](ENVIRONMENT_SETUP.md) |
 | 填任务 | [任务说明](../tasks/README.md) |
-| 在线采集（预留）的模型配置 | [Codex 执行配置](CODEX_RUNTIME.md) |
+| 多 Agent 核验层的模型配置 | [Codex 执行配置](CODEX_RUNTIME.md) |
 | 团队分工 | [Agent 工作分配](AGENT_ASSIGNMENTS.md) |
 
 ## 更新范围
