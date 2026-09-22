@@ -60,10 +60,10 @@
     <div id="result-panel" hidden>
       <h2>候选疾病</h2>
       <table id="candidates-table">
-        <thead><tr><th>疾病关键词</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th></tr></thead>
+        <thead><tr><th>疾病关键词</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th><th>操作</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="note">排列为索引固定顺序，不是疗效排名；零匹配如实显示。</p>
+      <p class="note">置信度为启发式（heuristic_v1），非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击置信度数值展开组件明细。</p>
       <div id="evidence-panel" hidden>
         <h3 id="evidence-title"></h3>
         <table id="evidence-table">

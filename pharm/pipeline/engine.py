@@ -1162,7 +1162,7 @@ def _analysis_task(analysis, mode):
     disease = analysis.get("disease")
     if disease not in [c["disease"] for c in result.get("candidates", [])]:
         raise ValueError("疾病不在来源运行的候选清单内：" + str(disease))
-    mode = mode or "live"
+    mode = mode or source_manifest.get("mode") or "live"  # 缺省继承来源运行模式，保持证据类型一致
     if mode not in ("live", "fixture"):
         raise ValueError("不支持的运行模式")
     agents = analysis.get("agents")

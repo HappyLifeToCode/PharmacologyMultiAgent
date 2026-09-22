@@ -1,12 +1,20 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const STAGES = [
-  ["preflight", "本地数据预检"],
-  ["herb_targets", "药材靶点解析"],
-  ["disease_reverse", "疾病反向查询"],
-  ["review", "程序验收与报告"],
-];
+const STAGES = {
+  discovery: [
+    ["preflight", "本地数据预检"],
+    ["herb_targets", "药材靶点解析"],
+    ["disease_reverse", "疾病反向查询"],
+    ["review", "程序验收与报告"],
+  ],
+  analysis: [
+    ["shared_targets", "共同靶点提取"],
+    ["network", "网络分析"],
+    ["enrichment", "富集分析"],
+    ["analysis_review", "验收与报告"],
+  ],
+};
 const state = {
   formulas: [],
   tasks: [],
@@ -143,10 +151,17 @@ async function refreshRuns() {
 }
 
 function visibleRuns() {
-  const runs = state.selectedTask
-    ? state.runs.filter((run) => run.task && run.task.task_id === state.selectedTask)
-    : state.runs;
-  return runs;
+  if (!state.selectedTask) return state.runs;
+  return state.runs.filter((run) => {
+    if (run.task && run.task.task_id === state.selectedTask) return true;
+    // 机制分析运行跟随其来源 discovery 运行的任务
+    const sourceId = (run.analysis || {}).source_run_id;
+    if (sourceId) {
+      const source = state.runs.find((r) => r.run_id === sourceId);
+      return !!(source && source.task && source.task.task_id === state.selectedTask);
+    }
+    return false;
+  });
 }
 
 function renderRunList() {
@@ -159,6 +174,12 @@ function renderRunList() {
     badge.className = "badge " + run.status;
     badge.textContent = run.status;
     item.appendChild(badge);
+    if ((run.pipeline || "discovery") === "analysis") {
+      const pipe = document.createElement("span");
+      pipe.className = "badge analysis";
+      pipe.textContent = "机制分析·" + ((run.analysis || {}).disease || "");
+      item.appendChild(pipe);
+    }
     item.appendChild(document.createTextNode(" " + run.run_id));
     const meta = document.createElement("span");
     meta.className = "meta";
@@ -203,7 +224,8 @@ function renderRun(manifest) {
 function renderStageGraph(manifest) {
   const graph = $("stage-graph");
   graph.innerHTML = "";
-  STAGES.forEach(([role, label], index) => {
+  const stages = STAGES[manifest.pipeline || "discovery"] || STAGES.discovery;
+  stages.forEach(([role, label], index) => {
     if (index) {
       const arrow = document.createElement("span");
       arrow.className = "stage-arrow";
@@ -303,6 +325,9 @@ async function renderStageDetail(manifest) {
     mark.innerHTML = "<span class='assist-mark'>可启动人机协助会话完成在线采集</span>";
     detail.appendChild(mark);
   }
+  if (state.handoff && state.handoff.agent_review) {
+    detail.appendChild(renderAgentReview(state.handoff.agent_review));
+  }
   const findings = stage.findings || [];
   if (findings.length) {
     const list = document.createElement("ul");
@@ -356,13 +381,33 @@ async function renderResults(manifest, stage, role) {
   for (const candidate of result.candidates || []) {
     const row = document.createElement("tr");
     const coverage = (value) => (value == null ? "—" : (value * 100).toFixed(1) + "%");
-    row.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+    const confidence = candidate.confidence || {};
+    row.innerHTML = "<td></td><td class='conf-cell'></td><td></td><td></td><td></td><td></td><td></td>";
     const cells = row.querySelectorAll("td");
     cells[0].textContent = candidate.disease;
-    cells[1].textContent = candidate.matched_count;
-    cells[2].textContent = result.input_count ? coverage(candidate.input_coverage) : "—";
-    cells[3].textContent = coverage(candidate.disease_coverage);
-    cells[4].textContent = (candidate.evidence || []).length;
+    cells[1].textContent = confidence.value == null ? "—" : confidence.value.toFixed(2);
+    cells[1].title = "点击展开置信度组件";
+    cells[2].textContent = candidate.matched_count;
+    cells[3].textContent = result.input_count ? coverage(candidate.input_coverage) : "—";
+    cells[4].textContent = coverage(candidate.disease_coverage);
+    cells[5].textContent = (candidate.evidence || []).length;
+    if (candidate.matched_count > 0) {
+      const button = document.createElement("button");
+      button.className = "analysis-btn";
+      button.textContent = "机制分析";
+      button.title = "对该疾病做机制分析（共同靶点→网络→富集→验收）";
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        startAnalysis(candidate.disease, button);
+      });
+      cells[6].appendChild(button);
+    } else {
+      cells[6].textContent = "—";  // 零匹配：无共同靶点可分析
+    }
+    cells[1].addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleConfidenceDetail(row, candidate);
+    });
     row.addEventListener("click", () => {
       tbody.querySelectorAll("tr").forEach((tr) => tr.classList.remove("selected"));
       row.classList.add("selected");
@@ -383,6 +428,92 @@ async function renderResults(manifest, stage, role) {
   $("unmatched-herbs").textContent = unmatchedHerbs.length
     ? "BATMAN 未收录或未命中药材：" + unmatchedHerbs.join("、")
     : "";
+}
+
+function renderAgentReview(review) {
+  const box = document.createElement("div");
+  box.className = "agent-review";
+  const head = document.createElement("p");
+  const title = document.createElement("strong");
+  title.textContent = "Agent 核验（" + (review.agent_role || "") + "）";
+  head.appendChild(title);
+  box.appendChild(head);
+  if (review.error) {
+    const err = document.createElement("p");
+    err.className = "blocker-list";
+    err.textContent = "Agent 核验未完成：" + review.error + "（阶段状态由程序结果决定）";
+    box.appendChild(err);
+    return box;
+  }
+  const badge = document.createElement("span");
+  badge.className = "badge " + (review.status || "");
+  badge.textContent = review.status || "";
+  head.appendChild(document.createTextNode(" "));
+  head.appendChild(badge);
+  const CONFIDENCE_CN = { high: "高", medium: "中", low: "低" };
+  if (review.confidence) {
+    const conf = document.createElement("span");
+    conf.className = "badge confidence";
+    conf.textContent = "把握：" + (CONFIDENCE_CN[review.confidence] || review.confidence);
+    head.appendChild(document.createTextNode(" "));
+    head.appendChild(conf);
+  }
+  if (review.summary) {
+    const summary = document.createElement("p");
+    summary.textContent = review.summary;
+    box.appendChild(summary);
+  }
+  for (const finding of review.findings || []) {
+    const item = document.createElement("p");
+    item.className = "note";
+    item.textContent = finding;
+    box.appendChild(item);
+  }
+  if (review.session_id) {
+    const session = document.createElement("p");
+    session.className = "note";
+    session.textContent = "会话：" + review.session_id;
+    box.appendChild(session);
+  }
+  return box;
+}
+
+function toggleConfidenceDetail(row, candidate) {  const next = row.nextElementSibling;
+  if (next && next.classList.contains("conf-detail")) {
+    next.remove();
+    return;
+  }
+  const confidence = candidate.confidence || {};
+  const components = confidence.components || {};
+  const detail = document.createElement("tr");
+  detail.className = "conf-detail";
+  const cell = document.createElement("td");
+  cell.colSpan = 7;
+  const names = { match_score: "log 匹配数", input_coverage: "输入覆盖率",
+                  disease_coverage: "疾病覆盖率", evidence_quality: "证据质量" };
+  const parts = Object.keys(names).map((key) => {
+    const value = components[key];
+    return names[key] + "：" + (value == null ? "无数据（不参与加权）" : value.toFixed(4));
+  });
+  cell.textContent = parts.join("；") + "。公式版本 " + (confidence.formula_version || "?")
+    + "：" + (confidence.note || "启发式置信度，非统计检验，仅供排序参考")
+    + "。列表为固定顺序，不是疗效排名。";
+  detail.appendChild(cell);
+  row.after(detail);
+}
+
+async function startAnalysis(disease, button) {
+  if (!confirm("将对疾病「" + disease + "」创建机制分析运行（共同靶点→网络→富集→验收）。继续？")) return;
+  button.disabled = true;
+  try {
+    const started = await postJSON("/api/analysis", { discovery_run_id: state.selectedRun, disease });
+    state.selectedRun = started.run_id;
+    state.selectedStage = null;
+    await refreshRuns();
+  } catch (err) {
+    alert(err.message);
+    button.disabled = false;
+  }
 }
 
 function renderEvidence(candidate) {

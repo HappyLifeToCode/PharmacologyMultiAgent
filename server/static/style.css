@@ -125,3 +125,10 @@ th { background: #eef3f0; }
 .artifact-list { list-style: none; padding: 0; font-size: 13px; }
 .blocker-list { color: #8a4b16; font-size: 13px; }
 .assist-mark { background: #f3dfb2; padding: 0 4px; border-radius: 3px; }
+.badge.analysis { background: #5b4b8a; }
+.badge.confidence { background: #61777f; }
+.conf-cell { cursor: pointer; text-decoration: underline dotted; }
+.conf-detail td { background: #f3efe2; font-size: 12px; color: #41565f; }
+.analysis-btn { padding: 2px 10px; font-size: 12px; }
+.analysis-btn:disabled { opacity: 0.5; cursor: default; }
+.agent-review { border: 1px solid #d8d2c0; border-radius: 4px; padding: 8px 12px; margin: 8px 0; background: #fbfaf5; }

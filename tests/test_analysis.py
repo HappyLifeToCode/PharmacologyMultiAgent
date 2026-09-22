@@ -190,7 +190,7 @@ def test_live_analysis_agent_sequence(root, mock_execute, tmp_path, monkeypatch)
     monkeypatch.setattr(engine.david, "run_david", lambda genes, task, directory, **kw: {
         "status": "succeeded", "significant_count": 2, "mapped_count": 2,
         "method": "DAVID EASE (modified Fisher exact test)"})
-    run_id = engine.start(pipeline="analysis",
+    run_id = engine.start(pipeline="analysis", mode="live",
                           analysis={"discovery_run_id": source_id, "disease": "Hyperthyroidism",
                                     "agents": True, "string_source": "local_files",
                                     "string_local_dir": str(string_dir),
@@ -234,7 +234,7 @@ def test_analysis_archive_layout(root, tmp_path, monkeypatch, calls):
     monkeypatch.setattr(engine.david, "run_david", lambda genes, task, directory, **kw: {
         "status": "succeeded", "significant_count": 0, "mapped_count": 2,
         "method": "DAVID EASE (modified Fisher exact test)"})
-    run_id = engine.start(pipeline="analysis",
+    run_id = engine.start(pipeline="analysis", mode="live",
                           analysis={"discovery_run_id": source_id, "disease": "Hyperthyroidism",
                                     "agents": False, "string_source": "local_files",
                                     "string_local_dir": str(string_dir),
