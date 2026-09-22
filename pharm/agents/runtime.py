@@ -94,7 +94,7 @@ RESULT_SCHEMA = {
             "required": ["enabled"]},
         "rework": {"type": ["array", "null"], "items": {"type": "string"}},
         "confidence": {"type": ["string", "null"], "enum": ["high", "medium", "low", None]},
-    }, "required": ["status", "summary", "blockers", "findings", "artifacts", "graph", "rework"],
+    }, "required": ["status", "summary", "blockers", "findings", "artifacts", "graph", "rework", "confidence"],
 }
 
 

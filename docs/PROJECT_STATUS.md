@@ -4,14 +4,14 @@
 
 ## 当前结论
 
-"方剂→BATMAN 本地靶点→本地疾病索引反查"主链路与"候选疾病→共同靶点→网络→富集"机制分析链路均已实现并通过端到端工程验证（fixture 全链、mock Agent 会话、合成数据 live 路径），自动测试 202 项通过。**真实验证缺口如实保留**：真实 Codex 模型会话冒烟未做（多 Agent 编排目前只经 mock 会话验证）；STRING API/Cytoscape/DAVID 真实可达性未在本轮验证；本机没有研究数据（BATMAN 全量文件与疾病索引批次在团队机器上）。
+"方剂→BATMAN 本地靶点→本地疾病索引反查"主链路与"候选疾病→共同靶点→网络→富集"机制分析链路均已实现并通过端到端工程验证（fixture 全链、mock Agent 会话、合成数据 live 路径），自动测试 202 项通过。**真实验证缺口如实保留**：2026-09-22 完成单次真实 Codex 会话冒烟（gpt-5.6-luna，结构化交接返回正常，证据 runs/diagnostics/model_smoke_20260922.json；冒烟中发现并修复 schema 严格校验缺 confidence 必填的问题），六会话完整 live 运行仍未做（缺研究数据）；STRING API（v12.0，200）与 DAVID 首页（200）2026-09-22 实测可达，正式提交/桥接未验证；本机没有研究数据（BATMAN 全量文件与疾病索引批次在团队机器上）。
 
 ## 已实现及尚缺内容
 
 | 模块 | 已实现 / 已验证 | 尚未完成 |
 |---|---|---|
 | discovery 四阶段 pipeline | preflight→herb_targets→disease_reverse→review；零模型会话纯程序；manifest 单一状态源；attempt 不可变；resume 复用；live 不可变归档；fixture 端到端 | 真实 BATMAN 数据 + 真实索引的完整 live 验收（待数据同步） |
-| 多 Agent 编排层 | 六角色 Codex 会话（协调/药材/疾病/网络/富集/验收，agents/*.md）；程序计算·Agent 核验、结论不改产物（failed→partial、错误记 agent_review.error）；任务 agents 字段（live 默认 true、fixture 强制 false）；环境不可用即 failed 并提示 agents=false；提示词哈希进签名；**mock 会话测试通过** | **真实 Codex 会话冒烟未做**；在线采集编排（预留） |
+| 多 Agent 编排层 | 六角色 Codex 会话（协调/药材/疾病/网络/富集/验收，agents/*.md）；程序计算·Agent 核验、结论不改产物（failed→partial、错误记 agent_review.error）；任务 agents 字段（live 默认 true、fixture 强制 false）；环境不可用即 failed 并提示 agents=false；提示词哈希进签名；mock 会话测试通过 + **2026-09-22 单次真实会话冒烟通过** | 六会话完整 live 运行未做（缺研究数据）；在线采集编排（预留） |
 | 置信度 heuristic_v1 | 候选疾病四维组件（match_score/log 归一、input_coverage、disease_coverage、evidence_quality=known 占比+genecards 归一分值；权重 0.3/0.3/0.2/0.2，null 剔除归一）；固定顺序非排名；手算对拍测试；前端列展示+组件展开 | 公式本身的研究评审（属研究问题） |
 | 机制分析链路（analysis） | shared_targets→network→enrichment→analysis_review（workflow_version=4，v3 resume 拒绝）；POST /api/analysis（校验来源 run 与疾病）；交集空如实；缺省继承来源运行模式；fixture 端到端；归档 05_analysis/；Agent 序列 mock 验证 | STRING API 真实可达性、CytoNCA 真实桥接、DAVID 真实提交——均未在本轮验证（门禁保留：network_topology/david_enrichment 未确认即 blocked/partial） |
 | STRING/CytoNCA/DAVID 模块 | 恢复至 pharm/network/（string_local 本地优先+API 回选路、cytoscape 桥、metrics 度值核对）、pharm/enrich/david；integrations/cytonca_bridge 原样恢复；历史测试原样通过（63 项） | 真实服务/软件冒烟；正式研究参数确认 |
@@ -23,7 +23,7 @@
 
 | 问题 | 现状 | 接下来需要什么 |
 |---|---|---|
-| 多 Agent 核验未过真实模型 | 编排、提示词、降级与签名均有 mock 对拍；真实 Codex 会话一次未跑 | 本机 icrc 环境下一次真实 live 冒烟（agents=true），核对会话产物与降级行为 |
+| 多 Agent 核验未过完整真实运行 | 编排、提示词、降级与签名均有 mock 对拍；2026-09-22 单次真实会话冒烟通过（通道与 schema 验证），六会话完整 live 未跑 | 数据同步后一次完整真实 live 冒烟（agents=true），核对六个会话产物与降级行为 |
 | STRING/CytoNCA/DAVID 真实可达性 | 模块与历史测试恢复；本轮未触真实服务/软件 | 冒烟：STRING API 小样本、CytoNCA 桥三节点、DAVID 小列表提交；结果如实记录 |
 | 在线采集未实现 | blocked 阶段带 assist 升级标记；协助会话画面/输入已通 | 采集编排设计（预留 agents/runtime.py 浏览器路径） |
 | 四方组成出处 | 标准教材通用口径，标注 pending_user_confirmation | 用户确认组成与 canonical→BATMAN 候选名映射 |
@@ -35,4 +35,4 @@
 - 不编造数据、不用合成顶替、空结果如实、scientific_complete 恒 false。
 - 参数即身份（task_id 哈希）、代码即签名（改代码或改 agents/*.md 后 resume 重跑为预期）。
 - 归档不可变（01_preflight..04_review + 05_analysis/*），归档≠验收，fixture 禁止入归档。
-- 完成声明分级：代码存在 / 独立测试通过 / 端到端工程通过 / 真实数据验收通过——多 Agent 编排目前为"mock 测试通过"，机制分析链路为"fixture 端到端通过"，均未达到真实验收。
+- 完成声明分级：代码存在 / 独立测试通过 / 端到端工程通过 / 真实数据验收通过——多 Agent 编排为"mock 测试通过 + 单次真实会话冒烟通过"，机制分析链路为"fixture 端到端通过"，均未达到真实验收。
