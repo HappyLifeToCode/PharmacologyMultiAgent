@@ -1,5 +1,7 @@
 # Agent 工作分配与模块认领
 
+> **说明（2026-09-22）**：项目方向已从"药物×疾病交集分析"转为"方剂→BATMAN靶点→疾病反向发现"，下表的旧分工随方向调整**失效，待团队按新架构重新认领**。负责人字段按项目纪律保留原文，未清空。新架构的模块边界见 [交接说明](HANDOVER.md)（pharm/core·batman·diseases·discovery·assist·pipeline、server、scripts）；下表内容仅作历史参考，Agent 运行时角色已随旧方向删除（见 [agents/README](../agents/README.md)）。
+
 本文面向项目开发者，定义各 Agent 的开发边界、交接对象及验收条件。开发负责人是实现和维护模块的团队成员；Agent
 是运行时执行任务的程序角色。角色数量不等于所需开发人数，一名成员可以承担多个模块。
 
@@ -7,11 +9,11 @@
 
 | 模块                       | 开发负责人 | 协作负责人     | 当前状态                                      | 职责说明                                                                            |
 |--------------------------|-------|-----------|-------------------------------------------|---------------------------------------------------------------------------------|
-| 协调 Agent                 | x     | x         | 固定依赖、独立会话与恢复已验证；护栏内动态任务图与自动返工已接入 | [coordinator](../agents/coordinator.md)                                         |
-| 药材靶点 Agent               | x     | x         | 访问核验与导入已实现；完整自动查询导出待完成                    | [herb_targets](../agents/herb_targets.md)                                       |
-| 疾病靶点模块（GeneCards / OMIM） | x     | x         | 双库独立并行已实现，待真实导出深化                         | [GeneCards](../agents/genecards_targets.md) / [OMIM](../agents/omim_targets.md) |
-| 网络分析 Agent               | x     | x         | STRING 本地文件优先/API 回退与 NetworkX 已实现；CytoNCA 桥接自动交接已接入（非加权 Degree），真实研究网络待验收 | [network_analysis](../agents/network_analysis.md)                               |
-| 富集分析 Agent               | X     | x         | DAVID 真实提交与 GO/KEGG 导出已接入；正式背景与方法确认后做真实运行 | [enrichment_analysis](../agents/enrichment_analysis.md)                         |
+| 协调 Agent                 | x     | x         | 固定依赖、独立会话与恢复已验证；护栏内动态任务图与自动返工已接入 | 角色提示词已删，见 [agents/README](../agents/README.md)                                         |
+| 药材靶点 Agent               | x     | x         | 访问核验与导入已实现；完整自动查询导出待完成                    | 同上                                       |
+| 疾病靶点模块（GeneCards / OMIM） | x     | x         | 双库独立并行已实现，待真实导出深化                         | 同上 |
+| 网络分析 Agent               | x     | x         | STRING 本地文件优先/API 回退与 NetworkX 已实现；CytoNCA 桥接自动交接已接入（非加权 Degree），真实研究网络待验收 | 同上                               |
+| 富集分析 Agent               | X     | x         | DAVID 真实提交与 GO/KEGG 导出已接入；正式背景与方法确认后做真实运行 | 同上                         |
 | 共享数据处理与校验                | x     | 两路靶点模块负责人 | 合并、Venny 真实交集与核对已验证；权威映射待深化               | 浏览器及确定性工具，不单独设 Agent                                                            |
 
 上表按团队开发模块组织，疾病模块内部包含两个运行时角色。新版共六种 Agent 角色、七个模型会话、九个阶段；协调规划与验收各占一个会话，疾病合并由程序完成，交集由程序操作官方
@@ -45,7 +47,7 @@ run_id、task_id 和 attempt，记录实际工具调用及交接事件。浏览�
 
 **输入：** 疾病关键词和筛选配置。
 
-运行时拆分为 [GeneCards Agent](../agents/genecards_targets.md) 与 [OMIM Agent](../agents/omim_targets.md)
+运行时曾拆分为 GeneCards 与 OMIM 两个独立会话（角色提示词已删，见 [agents/README](../agents/README.md)）
 ，分别拥有独立会话、状态、来源和产物。两路均通过检查后，由程序合并去重，不额外启动疾病合并 Agent。模块负责人沿用上面的认领表；子模块归属由团队自行确定。
 
 GeneCards

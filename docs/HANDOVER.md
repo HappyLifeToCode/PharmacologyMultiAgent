@@ -1,89 +1,83 @@
 # 项目交接说明（给下一位协作者 / 大模型）
 
 > 目的：让没有本项目上下文的人（或 AI）能快速接手。阅读顺序：本文件 → docs/PROJECT_STATUS.md → docs/DATA_CONTRACT.md。
-> 更新日期：2026-09-19。项目根目录即本文件所在仓库。
+> 更新日期：2026-09-22（阶段G，与重构后代码严格对齐）。项目根目录即本文件所在仓库。
 
 ## 1. 项目是什么
 
-中药复方网络药理学多 Agent 系统。首轮案例：**芍药甘草汤（白芍、炙甘草）× 五个甲状腺疾病关键词**（Hyperthyroidism、Hypothyroidism、Thyroid cancer、Thyroid nodules、Thyroiditis），复现一篇网络药理学论文的流程：BATMAN 药材靶点 + GeneCards/OMIM 疾病靶点 → 合并 → Venny 交集 → STRING PPI 网络 + CytoNCA 拓扑 → DAVID 富集。另有独立的**甲状腺癌补充流程**（docs/THYROID_SUPPLEMENT.md）。长期方向：经典名方重定位智能体（见桌面《研究方案.docx》，提取件在 local/yanjiu_fangan.txt）。
+中药复方反向疾病发现工具。输入方剂（内置四方：温经汤/半夏白术天麻汤/济川煎/桃核承气汤，或自由药材组合）→ BATMAN-TCM v2.0 本地全量文件解析药材—成分—靶点 → 本地 SQLite 疾病索引反查候选疾病关联 → 程序验收并出报告。
 
-## 2. 当前状态（2026-09-19 里程碑）
+主链路是**零模型会话的确定性程序**（四阶段 DAG）。旧方向（药物×疾病交集：Venny/STRING/CytoNCA/DAVID/甲状腺补充流程/多Agent九阶段）已于 2026-09-22 重构废弃，实现与真实数据记录见 Git 历史（commit `6779567` 之前）。
 
-**五库数据全部到位，研究参数经医院方全部确认，首个真实数据运行已完成大部分：**
+## 2. 当前状态
 
-- 793 药材靶点（BATMAN 本地全量，阈值 score>0.84）
-- 13,392 疾病靶点（GeneCards 五病按"单疾病分别中位数"筛选 13,381 + OMIM 176）
-- Venny 2.1.0 实际执行交集 **659 个共同靶点**（Python 独立核对通过）
-- STRING 本地网络 651 节点 / 2,350 边，**CytoNCA 2.1.6 经自研桥接算出真实 Degree**（NetworkX 独立核对一致）
-- 待做：DAVID 正式富集（任务已配好 EASE+BH 确认配置，需**新建一次运行**——旧运行的任务快照冻结在确认前）
+- 四阶段 pipeline（preflight→herb_targets→disease_reverse→review，workflow_version=3）已完成并经端到端验证（fixture 合成与带合成数据的 live 路径）。
+- 疾病索引已泛化为可插拔批次（GeneCards+OMIM 三源 / 通用 associations.csv，自动识别；疾病集合来自批次实际值，上限 500）。
+- 人机协助桥已完成：/api/assist/* + WS /ws/assist，headed Chromium 画面推流 + 输入回传，工作台内嵌 canvas。
+- Web 单页三栏工作台已完成，真实浏览器验证通过。
+- `pytest tests/ -q`：**119 passed, 1 skipped**。
+- **未实现**：Agent 在线采集流程（预留 `pharm/agents/runtime.py` 与 blocked 阶段的 assist 升级标记）；四方组成出处待用户确认；疾病库覆盖范围取决于批次；本机无研究数据，真实数据验证待数据同步。
 
 ## 3. 关键资产位置
 
 | 内容 | 位置 |
 |---|---|
-| 五病任务 | `tasks/tasks.local.jsonl` 中 `web_ddc19c70894f4140`（含 network_topology、david_enrichment 已确认配置） |
-| 导入批次 | `data/pharm/芍药甘草汤/imports/web_ddc19c70894f4140/20260918_01/`（三库 CSV + provenance.json + raw/） |
-| STRING 数据 | `data/string/v12.0/`（1.1GB，不入库；配置见 `configs/string_data.example.json`） |
-| BATMAN 数据 | `data/batman/v2.0/`（不入库；配置 `configs/batman_data.example.json`） |
-| 运行记录 | `runs/<run_id>/manifest.json`；最新真实运行 `runs/2026-09-19T110300_0000_121e66` |
-| 研究归档 | `data/pharm/芍药甘草汤/`（live 运行自动归档） |
+| 四阶段引擎 | `pharm/pipeline/engine.py`（Runner：begin/signature/reuse/finish/四阶段/review/run） |
+| DAG 调度 | `pharm/pipeline/scheduler.py`（注册表即依赖图，拓扑序，依赖终态放行） |
+| 任务模型 | `pharm/pipeline/tasks.py`（formula/herbs/research_notes/batman_threshold/mode） |
+| 四方组成 | `pharm/batman/formulas.py`（canonical + BATMAN 候选名，source 待确认） |
+| BATMAN 本地查询 | `pharm/batman/local.py`（`query_local_targets`，未命中药材记 unmatched 不报错） |
+| 疾病索引 | `pharm/discovery/query.py`（build/prepare/query/catalog）、`pharm/diseases/associations.py`（通用批次） |
+| 人机协助 | `pharm/assist/bridge.py`（AssistSession/AssistManager，WS 协议见模块文档字符串） |
+| Web 工作台 | `server/app.py` + `server/static/{index.html,app.js,style.css}` |
+| BATMAN 数据（本机无） | 团队机器 `data/batman/v2.0/`；配置 `configs/batman_data.local.json` |
+| 疾病索引（本机无） | 默认 `local/discovery/disease_index.sqlite`；配置 `configs/discovery_data.local.json` |
 
-## 4. 架构速览
-
-- `pharm_demo/engine.py`：Runner。DAG 调度（`scheduler.py`，依赖边在代码注册表），九阶段、六角色、七个 Codex 会话（`codex_runtime.py`，`codex exec`，独立会话或 shared resume）。
-- 数据流：`imports.py` 契约校验（provenance 台账必须 complete/confirmed 才放行）→ `processing.py` 确定性计算 → `sources.py`/`string_local.py`（STRING 优先本地、API 回退）→ `venny.py`（官方 Venny 浏览器执行）→ `cytoscape.py`（CyREST + CytoNCA 桥接 `integrations/cytonca_bridge/`）→ `david.py`（DAVID 工作台 JSON 接口）。
-- 工具：`batman_local.py`（BATMAN 全量→导入包）、`genecards_online.py`/`genecards_export.py`（在线采集/导出转换）、`omim_export.py`（Gene Map 转换）、`supplement.py`（甲状腺癌流程）、`benchmark.py`（对照实验）。
-- 网页工作台：`server/app.py`（FastAPI）。测试：`pytest tests/`（170 项，约 20 秒）。
-
-## 5. 硬性约定（违反会被程序拦截或评审打回）
-
-1. **不编造、不顶替**：缺数据 = blocked + 证据保留；禁止用合成数据、本地绘图、旧结果冒充。
-2. **完整性**：GeneCards 行数必须与页面声明总数一致；分页不完整不得宣称完成。
-3. **来源留痕**：文件哈希、下载日期、版本必填；`accessed_at` 用真实下载日期。
-4. **非标准符号**（lncRNA 等小写命名）剔除但**留档**；零关联/零显著结果如实保留。
-5. **参数只经任务 JSON 配置**，未知值不猜测；confirmed 必须对应真实确认记录。
-6. 直推 `main`（无分支流程），**push 前跑 `pytest tests/ -q`**。
-
-## 6. 验收闭环（2026-09-20 新增）
-
-```powershell
-# 生成运行验收清单（程序核对产物存在性/哈希/计数，输出 audit.json + audit_report.md）
-.\.venv\Scripts\python.exe -m pharm_demo.audit --run <run_id>
-# 清单全部通过后，记录人工复核签字（run 级覆盖记录，阶段状态不回写）
-.\.venv\Scripts\python.exe -m pharm_demo.audit --run <run_id> --signoff 姓名 --note "复核范围与结论"
-# 或在网页工作台“任务与记录”里点“人工复核签字”按钮（同一逻辑，清单不过会拒签）
-```
-
-设计：工程核对（存在性/哈希/计数/交叉验证）由程序完成；人工复核是 run 级覆盖记录（`human_review.json` + manifest + report.md 追加段），阶段执行状态永远不回写。验收 Agent 的证据已含各阶段产物索引（路径+哈希），已登记产物视为已提供，不再要求补交。
-
-## 6. 常用命令
+## 4. 常用命令
 
 ```powershell
 # 测试（必过再提交）
 .\.venv\Scripts\python.exe -m pytest tests/ -q
-# 新建真实运行（五病任务）
-.\.venv\Scripts\python.exe scripts/run_tasks.py --task web_ddc19c70894f4140 --mode live
-# 断点续跑（成功阶段复用，失败/未完成阶段重跑）
+# 启动工作台（默认 127.0.0.1:8766）
+.\.venv\Scripts\python.exe server/app.py --port 8766
+# 命令行运行 / 断点续跑
+.\.venv\Scripts\python.exe scripts/run_tasks.py --task <task_id>
 .\.venv\Scripts\python.exe scripts/run_tasks.py --resume <run_id>
-# 启动 Cytoscape（网络阶段需要 CyREST 在 127.0.0.1:1234）
-local\tools\Cytoscape-3.10.0\Cytoscape.exe
+# 建疾病索引（自动识别批次类型；--db 在子命令之前）
+.\.venv\Scripts\python.exe -m pharm.discovery.query --db local/discovery/disease_index.sqlite prepare --batch <批次目录>
+# 全药材目录扩展（从 v1 索引生成 v2）
+.\.venv\Scripts\python.exe -m pharm.discovery.query --db <v1.sqlite> expand-batman --data-dir <BATMAN目录> --manifest <批次清单.json> --output <新索引.sqlite>
+# 直接反查（不经过 pipeline）
+.\.venv\Scripts\python.exe -m pharm.discovery.query query --genes TP53 EGFR --output local/discovery/my-lookup
+# 离线 HTML 报告
+.\.venv\Scripts\python.exe scripts/export_report.py --run <run_id>
+# 环境检查（依赖/浏览器/profile 存在性，不验证权限）
+.\.venv\Scripts\python.exe scripts/doctor.py
 ```
 
-## 7. 已知坑（都踩过，别再踩）
+## 5. 硬性约定（违反会被程序拦截或评审打回）
 
-- **Cloudflare 拦无头浏览器**（GeneCards headless 403；OMIM 连环人机验证）：在线采集必须 headed 有窗口；人机验证留人工窗口，不绕过。
-- **Agent 会话输入上限 1MB**：大结果集不能整个塞进 prompt——引擎已有 `_bounded_evidence` 裁剪（计数+样例）。
-- **API 严格 schema**：结构化输出所有字段必须 required（可选语义用 `["type","null"]`）。
-- **`codex exec resume`**：无 `-p`/`--sandbox` 参数；首会话不能用 `--ephemeral`（否则无档可续）。
-- **Venny 大名单**：>500 基因用 JS 赋值（`fill()` 会被页面轮询阻塞）。
-- **任务快照冻结**：`--resume` 用创建时的任务内容；改配置要新建运行。
+1. **不编造、不顶替**：缺数据 = blocked + guidance + 证据保留；禁止合成数据冒充（fixture 除外且全程标注 synthetic_engineering、不进归档）。
+2. **参数即身份**：task_id = 内容哈希；**代码即签名**：input_signature 含任务、runtime、`pharm/**/*.py` 哈希与数据文件哈希——改代码后 resume 会重跑全部阶段，这是特性不是 bug。
+3. **manifest.json 是唯一状态源**；attempt_NN 不可变；归档（`data/pharm/<名>/01_preflight..04_review/`）拒绝覆盖，archive 不等于验收。
+4. **scientific_complete 恒 false**；空交集/零匹配/未命中药材如实保留。
+5. 直推 `main`，**push 前跑 `pytest tests/ -q`**。
+6. 不绕过站点人机验证；账号、密码、验证码不进任务、不进仓库。
+
+## 6. 已知坑（都踩过，别再踩）
+
+- **sync Playwright 不允许跨线程**：AssistSession 的全部 Playwright 操作收敛在专属浏览器线程，外部经任务队列交互；CDP screencast 事件在 Playwright 内部线程回调，只做 ack + 线程安全分发。跨线程调用会报 `greenlet.error`。
+- **screencast 只在重绘时出帧**：DOM evaluate 不一定出帧，真实输入（Tab 焦点切换、点击聚焦后光标闪烁） reliably 出帧；首帧可能是预绘黑帧。每帧必须回 `Page.screencastFrameAck`，否则流停。
+- **裸 CDP Input.dispatchKeyEvent 不带 windowsVirtualKeyCode 不可靠**：输入回传用 Playwright 的 page.mouse/page.keyboard（内部即 CDP 输入管线且自动映射键码）。
+- **starlette TestClient 的 WS scope 主机名恒为 testserver**：/ws/assist 的本机校验白名单含此值（代码有注释）。
+- **headless 测试环境 headed 起不来**：AssistSession 的 headless=True 仅限测试；生产路径 headed 失败抛 AssistUnavailable，不静默降级。
+- **herb_browse.txt 表头/格式变更会建库失败**：BATMAN 文件核验严格按 v2.0 表头；predicted 文件名部分镜像是双下划线（`predicted__browse_by_targets.txt.gz`），代码兼容两种。
 - Windows 下杀毒可能造成文件占用：写 JSON/归档已带重试。
 
-## 8. 待办（按优先级）
+## 7. 待办（按优先级）
 
-1. ~~DAVID 正式富集~~（2026-09-20 已完成：659/659 识别，7,558 条，显著 1,232）
-2. ~~甲状腺癌补充流程真实运行~~（2026-09-21 已完成：子集 15,427 → Top 51 → 交集外 46 → 10 候选回溯命中 133 行，见 docs/THYROID_SUPPLEMENT.md）
-3. 原文 995/434 与现结果（13,392/待算癌症子集）的数量级差异：组内/医院讨论（数据版本 5.26→6.1）
-4. OMIM morbidmap（邮件申请中）到位后升级 OMIM 数据
-5. 核心七药/跨朝代聚类输入（补充流程可选输入）
-6. 组会汇报：桌面《项目进展汇报-2026-09-19.md》
+1. **在线采集接入**：用 agents/runtime.py + assist 桥实现"Agent 采集遇人机验证 → 用户内嵌接管 → 继续"的完整编排（当前只有 blocked + assist 标记，无人在环等待）。
+2. **四方组成确认**：formulas.py 的组成与 canonical→候选名映射标注 `standard_reference_pending_user_confirmation`，待用户/文献确认；阿胶、芒硝等动物/矿物药 BATMAN 可能无记录（如实 unmatched）。
+3. **疾病库来源**：当前索引覆盖取决于批次；需要宽覆盖疾病-基因关联批次（通用 associations.csv 通道已就绪）。
+4. **数据同步**：BATMAN v2.0 全量文件与疾病索引批次在团队机器上，本机同步后再做真实数据验证。
+5. push 到远程前全量 pytest。
