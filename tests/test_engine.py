@@ -51,7 +51,7 @@ def test_fixture_end_to_end(root):
     run_id, manifest = run_task(root, {"formula": "桃核承气汤", "mode": "fixture"})
     assert manifest["status"] == "succeeded"
     assert manifest["scientific_complete"] is False
-    for role in engine.STAGES:
+    for role in engine.scheduler.stages_for("discovery"):
         assert manifest["stages"][role]["status"] == "succeeded"
     assert manifest["metrics"]["unique_targets"] == 6
     assert manifest["metrics"]["candidate_diseases"] == 5

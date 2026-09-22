@@ -7,6 +7,7 @@ manifest.json 是唯一状态源；attempt_NN 不可变；resume 只复用签名
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import os
@@ -22,11 +23,21 @@ from ..core.archive import archive_run
 from ..batman import local as batman_local
 from ..batman.formulas import resolve_batman_names
 from ..discovery import query as discovery
+from ..network import cytoscape, metrics as network_metrics, string_local
+from ..enrich import david
 from ..agents import runtime
-from .scheduler import STAGES, execute_graph
+from . import scheduler
+from .scheduler import execute_graph
 
-WORKFLOW_VERSION = 3
-LABELS = dict(zip(STAGES, ["本地数据预检", "药材靶点解析", "疾病反向查询", "程序验收与报告"]))
+WORKFLOW_VERSION = 4
+PIPELINE_LABELS = {
+    "discovery": {"preflight": "本地数据预检", "herb_targets": "药材靶点解析",
+                  "disease_reverse": "疾病反向查询", "review": "程序验收与报告"},
+    "analysis": {"shared_targets": "共同靶点提取", "network": "网络分析",
+                 "enrichment": "富集分析", "analysis_review": "验收与报告"},
+}
+# 兼容引用：discovery 流水线标签
+LABELS = PIPELINE_LABELS["discovery"]
 LOCK = threading.RLock()
 ACTIVE = set()
 
@@ -43,10 +54,15 @@ SYNTHETIC = "synthetic_engineering"
 # live + agents=true 时，程序计算完成后由对应 Agent 会话核验（结论不改变程序产物）。
 # 角色提示词在 agents/<角色>.md，内容哈希参与阶段 input_signature。
 AGENT_ROLES = {"herb_targets": "batman_targets", "disease_reverse": "disease_discovery", "review": "review"}
+ANALYSIS_AGENT_ROLES = {"network": "network_analysis", "enrichment": "enrichment_analysis",
+                        "analysis_review": "review"}
 AGENT_INSTRUCTIONS = {
     "herb_targets": "核验 herb_targets 阶段的药材靶点产物（计数一致性、未命中药材、known/predicted 分布、provenance 完整性），按角色文件清单逐项核对。",
     "disease_reverse": "核验 disease_reverse 阶段的疾病反查产物（候选计数、置信度组件方向、零匹配如实性），并在 findings 中用中文写一段面向研究者的结果解释。",
     "review": "程序验收已通过为前提，核对全链证据完整性并写验收结论与遗留事项。",
+    "network": "核验 network 阶段的网络产物：映射/未映射/歧义记录、孤立节点、边表分值范围、度值方法来源（NetworkX 或 CytoNCA 桥）是否如实标注。",
+    "enrichment": "核验 enrichment 阶段的富集产物：识别率、背景选择依据、注释类别齐备、显著条目可回查；EASE 不得改标为普通超几何检验，零显著如实。",
+    "analysis_review": "程序验收已通过为前提，核对机制分析链路证据完整性（共同靶点、网络、富集）并写验收结论与遗留事项。",
 }
 
 
@@ -214,6 +230,10 @@ class Runner:
         self.task = self.manifest["task"]
         self.home = None
         self._agents = self.manifest["mode"] == "live" and self.task.get("agents") is True
+        self.pipeline = self.manifest.get("pipeline", "discovery")
+        self.stages = scheduler.stages_for(self.pipeline)
+        self.labels = PIPELINE_LABELS[self.pipeline]
+        self.agent_roles = ANALYSIS_AGENT_ROLES if self.pipeline == "analysis" else AGENT_ROLES
 
     def save(self):
         with LOCK:
@@ -231,7 +251,7 @@ class Runner:
             attempt = int(old.get("attempt", 0)) + 1
             directory = self.directory / role / ("attempt_%02d" % attempt)
             directory.mkdir(parents=True, exist_ok=False)
-            self.manifest["stages"][role] = {"status": "running", "label": LABELS[role], "summary": "正在执行", "blockers": [], "artifacts": [], "attempt": attempt, "input_signature": self.signature(role), "started_at": now(), "directory": str(directory.relative_to(self.directory)).replace("\\", "/")}
+            self.manifest["stages"][role] = {"status": "running", "label": self.labels[role], "summary": "正在执行", "blockers": [], "artifacts": [], "attempt": attempt, "input_signature": self.signature(role), "started_at": now(), "directory": str(directory.relative_to(self.directory)).replace("\\", "/")}
             self.save()
         self.event(role, "stage.started", "开始第 %d 次尝试" % attempt)
         return directory
@@ -242,6 +262,14 @@ class Runner:
                   "code": {p.relative_to(ROOT).as_posix(): digest(p) for p in sorted((ROOT / "pharm").rglob("*.py"))}}
         if self.manifest["mode"] == "fixture":
             inputs["fixture"] = SYNTHETIC
+        elif self.pipeline == "analysis":
+            if role == "shared_targets":
+                inputs["source"] = self._source_signature()
+            if role == "network":
+                try:
+                    inputs["string_local_files"] = string_local.string_local_signature(self.task)
+                except (ValueError, OSError) as exc:
+                    inputs["string_local_files"] = {"unavailable": str(exc)}
         else:
             if role in ("preflight", "herb_targets"):
                 inputs["batman_data"] = self._batman_signature()
@@ -251,14 +279,29 @@ class Runner:
                     inputs["discovery_db"] = digest(database) if database.is_file() else None
                 except ValueError as exc:
                     inputs["discovery_db"] = {"unavailable": str(exc)}
-        upstream = {"disease_reverse": ["herb_targets"], "review": ["herb_targets", "disease_reverse"]}.get(role, [])
+        upstream = {"discovery": {"disease_reverse": ["herb_targets"], "review": ["herb_targets", "disease_reverse"]},
+                    "analysis": {"network": ["shared_targets"], "enrichment": ["shared_targets"],
+                                 "analysis_review": ["network", "enrichment"]}}[self.pipeline].get(role, [])
         inputs["upstream"] = {key: digest(self.directory / path)
                               for key, path in self.manifest.get("verified_targets", {}).items()
                               if key in upstream and (self.directory / path).is_file()}
-        if self._agents and role in AGENT_ROLES:
-            prompt = ROOT / "agents" / (AGENT_ROLES[role] + ".md")
+        if self._agents and role in self.agent_roles:
+            prompt = ROOT / "agents" / (self.agent_roles[role] + ".md")
             inputs["agent_prompt"] = digest(prompt) if prompt.is_file() else None
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    def _source_signature(self):
+        """analysis 流水线的来源运行与疾病索引快照（签名用）。"""
+        try:
+            info = self.manifest.get("analysis", {})
+            source_dir = ROOT / "runs" / info["source_run_id"]
+            out = {"manifest": digest(source_dir / "manifest.json")}
+            rel = read_json(source_dir / "manifest.json").get("verified_targets", {}).get("disease_reverse")
+            database = read_json(source_dir / rel).get("database") if rel else None
+            out["discovery_db"] = digest(database) if database and Path(database).is_file() else None
+            return out
+        except (OSError, ValueError, KeyError) as exc:
+            return {"unavailable": str(exc)}
 
     def _batman_signature(self):
         try:
@@ -347,9 +390,9 @@ class Runner:
 
     def _maybe_agent_review(self, role, result, directory, evidence):
         """程序计算完成且成功后由对应 Agent 核验；Agent 结论不改变程序产物。"""
-        if not self._agents or result.get("status") != "succeeded" or role not in AGENT_ROLES:
+        if not self._agents or result.get("status") != "succeeded" or role not in self.agent_roles:
             return result
-        agent_role = AGENT_ROLES[role]
+        agent_role = self.agent_roles[role]
         self.event(role, "agent.started", "启动 " + agent_role + " 核验会话")
         try:
             agent_result, meta = self._agent_session(agent_role, directory / "agent",
@@ -551,6 +594,7 @@ class Runner:
                     database = discovery.database_path(ROOT)
                 result, chunked = _reverse_lookup(database, genes)
                 result["evidence_type"] = targets["evidence_type"]
+                result["database"] = str(database)
                 if chunked.get("chunked"):
                     result["chunking"] = chunked
             discovery.save_result(result, directory / "reverse")
@@ -589,6 +633,320 @@ class Runner:
             evidence_rows=sum(len(candidate["evidence"]) for candidate in result["candidates"]),
             max_confidence=max((candidate.get("confidence", {}).get("value", 0.0)
                                 for candidate in result["candidates"]), default=0.0))
+
+    # ---- analysis 流水线：shared_targets → network → enrichment → analysis_review ----
+
+    def _shared_genes(self):
+        return read_json(self.directory / self.manifest["verified_targets"]["shared_targets"])
+
+    def shared_targets_stage(self):
+        """从来源 discovery 运行的靶点集与疾病索引求交集；空交集如实保留。"""
+        role = "shared_targets"
+        if self.reuse(role):
+            with LOCK:
+                stage = self.manifest["stages"][role]
+                path = next(p for p in stage["artifacts"] if p.endswith("/shared_targets.json"))
+                self.manifest.setdefault("verified_targets", {})[role] = path
+                output = read_json(self.directory / path)
+                self.manifest["metrics"].update(shared_targets=len(output["genes"]))
+                self.save()
+            return
+        directory = self.begin(role)
+        try:
+            info = self.manifest["analysis"]
+            source_dir = ROOT / "runs" / info["source_run_id"]
+            source_manifest = read_json(source_dir / "manifest.json")
+            source_refs = source_manifest.get("verified_targets", {})
+            source_targets_rel = source_refs["herb_targets"]
+            source_targets = read_json(source_dir / source_targets_rel)
+            reverse_rel = source_refs["disease_reverse"]
+            source_result = read_json(source_dir / reverse_rel)
+            genes = source_targets["genes"]
+            database, disease_genes = None, []
+            if genes:
+                database = source_result.get("database")
+                recorded_hash = source_result.get("database_sha256")
+                if not database or not Path(database).is_file():
+                    # 来源未记录索引路径（旧运行）或文件已移动：回退当前配置解析
+                    database = str(discovery.database_path(ROOT))
+                    recorded_hash = None
+                if recorded_hash and digest(database) != recorded_hash:
+                    raise ValueError("来源运行记录的疾病索引哈希与当前文件不一致，请核对索引版本")
+                with closing(discovery._connect(database)) as connection:
+                    discovery._metadata(connection)
+                    disease_genes = sorted(row[0] for row in connection.execute(
+                        "SELECT DISTINCT gene FROM associations WHERE disease=?", (info["disease"],)))
+            shared = sorted(set(genes) & set(disease_genes))
+            output = {
+                "evidence_type": source_targets.get("evidence_type"),
+                "disease": info["disease"],
+                "genes": shared,
+                "counts": {"input_targets": len(genes), "disease_targets": len(disease_genes),
+                           "shared": len(shared)},
+                "source": {"run_id": info["source_run_id"],
+                           "targets": source_targets_rel,
+                           "targets_sha256": digest(source_dir / source_targets_rel),
+                           "database": database,
+                           "database_sha256": digest(database) if database else None},
+            }
+            write_json(directory / "shared_targets.json", output)
+            with LOCK:
+                self.manifest.setdefault("verified_targets", {})[role] = str((directory / "shared_targets.json").relative_to(self.directory)).replace("\\", "/")
+                self.manifest["metrics"].update(shared_targets=len(shared))
+                self.save()
+            self.event(role, "tool.succeeded", "共同靶点 %d 个" % len(shared))
+            self.finish(role, {"status": "succeeded",
+                               "summary": "来源 %d 个靶点 ∩ 疾病「%s」的 %d 个关联基因 = %d 个共同靶点%s" % (
+                                   len(genes), info["disease"], len(disease_genes), len(shared),
+                                   "（合成验证）" if self.manifest["mode"] == "fixture" else ""),
+                               "blockers": [], "findings": [], "artifacts": ["shared_targets.json"]}, directory)
+        except Exception as exc:
+            self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": []}, directory)
+
+    def network_stage(self):
+        role = "network"
+        if self.reuse(role):
+            with LOCK:
+                stage = self.manifest["stages"][role]
+                path = next(p for p in stage["artifacts"] if p.endswith("/network.json"))
+                self.manifest.setdefault("verified_targets", {})[role] = path
+                network = read_json(self.directory / path)
+                self.manifest["metrics"].update(network_nodes=network["node_count"],
+                                                network_edges=network["edge_count"])
+                self.save()
+            return
+        directory = self.begin(role)
+        try:
+            shared = self._shared_genes()
+            genes = shared["genes"]
+            if not genes:
+                self.finish(role, {"status": "blocked", "summary": "共同靶点为空，未进行网络分析",
+                                   "blockers": ["shared_targets 为空交集（如实记录），无网络输入"], "artifacts": []}, directory)
+                return
+            if self.manifest["mode"] == "fixture":
+                net = {"nodes": list(genes),
+                       "edges": [{"source": genes[i], "target": genes[i + 1], "score": 0.9}
+                                 for i in range(len(genes) - 1)],
+                       "provenance": {"synthetic": True, "note": "固定合成网络，非 STRING 查询"}}
+            else:
+                net = string_local.string_network_auto(genes, self.task, directory)
+            result = network_metrics.analyze_network(net["nodes"], net["edges"])
+            result["evidence_type"] = shared["evidence_type"]
+            result["provenance"] = net.get("provenance", {})
+            result["method"] = "NetworkX degree"
+            limitation = None
+            topology = self.task.get("network_topology")
+            if self.manifest["mode"] == "live" and topology:
+                try:
+                    cyto = cytoscape.run_cytoscape(net, directory / "cytoscape", topology)
+                    result["cytoscape"] = cyto
+                    if cyto["status"] == "succeeded":
+                        result["method"] = cyto["method"]
+                        result["degree_table"] = result["degrees"] = cyto["degree_table"]
+                    limitation = cyto.get("limitation")
+                except Exception as exc:
+                    limitation = "CytoNCA 桥未成功：" + str(exc)
+                if limitation:
+                    result["method"] = "NetworkX degree（CytoNCA 未完成，见 limitation）"
+            write_json(directory / "network.json", result)
+            with (directory / "degrees.csv").open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=["gene_symbol", "degree"])
+                writer.writeheader()
+                writer.writerows(result["degree_table"])
+            with LOCK:
+                self.manifest.setdefault("verified_targets", {})[role] = str((directory / "network.json").relative_to(self.directory)).replace("\\", "/")
+                self.manifest["metrics"].update(network_nodes=result["node_count"], network_edges=result["edge_count"])
+                self.save()
+            findings = []
+            if self.manifest["mode"] == "fixture":
+                findings.append("合成工程验证网络，非 STRING 查询结果")
+            elif not topology:
+                findings.append("任务未配置 network_topology；仅 NetworkX degree，未经 CytoNCA")
+            self.event(role, "tool.succeeded", "网络 %d 节点 %d 边（%s）" % (result["node_count"], result["edge_count"], result["method"]))
+            stage_result = {"status": "succeeded",
+                            "summary": "网络 %d 节点 %d 边，度值方法：%s%s" % (
+                                result["node_count"], result["edge_count"], result["method"],
+                                "（合成验证）" if self.manifest["mode"] == "fixture" else ""),
+                            "blockers": [], "findings": findings,
+                            "artifacts": ["network.json", "degrees.csv",
+                                          "cytoscape/cytoscape_execution.json", "cytoscape/cytonca_topology.csv"]}
+            if limitation:
+                stage_result["status"] = "partial"
+                stage_result["blockers"] = [limitation]
+            stage_result = self._maybe_agent_review(role, stage_result, directory, {
+                "node_count": result["node_count"], "edge_count": result["edge_count"],
+                "method": result["method"],
+                "degree_top10": result["degree_table"][-10:],
+                "unmapped": result["provenance"].get("unmapped"),
+                "isolated": result["provenance"].get("isolated"),
+                "limitation": limitation})
+            self.finish(role, stage_result, directory)
+        except Exception as exc:
+            self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)],
+                               "artifacts": ["network.json"] if (directory / "network.json").is_file() else []}, directory)
+
+    def enrichment_stage(self):
+        role = "enrichment"
+        if self.reuse(role):
+            with LOCK:
+                stage = self.manifest["stages"][role]
+                for path in stage["artifacts"]:
+                    if path.endswith("/enrichment_fixture.json"):
+                        self.manifest["metrics"]["significant_terms"] = read_json(self.directory / path)["significant_count"]
+                    elif path.endswith("/david/enrichment_david.json"):
+                        self.manifest["metrics"]["significant_terms"] = read_json(self.directory / path)["significant_count"]
+                self.save()
+            return
+        directory = self.begin(role)
+        try:
+            shared = self._shared_genes()
+            genes = shared["genes"]
+            if not genes:
+                self.finish(role, {"status": "blocked", "summary": "共同靶点为空，未进行富集分析",
+                                   "blockers": ["shared_targets 为空交集（如实记录），无富集输入"], "artifacts": []}, directory)
+                return
+            if self.manifest["mode"] == "fixture":
+                fdr = 0.05
+                rows = [{"term": "SYNTHETIC_TERM_A（合成）", "overlap": min(2, len(genes)), "p_value": 0.01, "fdr_bh": 0.02},
+                        {"term": "SYNTHETIC_TERM_B（合成）", "overlap": 1, "p_value": 0.4, "fdr_bh": 0.5}]
+                execution = {"evidence_type": SYNTHETIC, "method": "固定合成富集结果，非 DAVID",
+                             "fdr_lt": fdr, "rows": rows,
+                             "significant_count": sum(r["fdr_bh"] < fdr for r in rows)}
+                write_json(directory / "enrichment_fixture.json", execution)
+                status, limitation = "succeeded", None
+                artifacts = ["enrichment_fixture.json"]
+                method_note = "固定合成富集结果，非 DAVID"
+            else:
+                execution = david.run_david(genes, self.task, directory / "david")
+                status = execution["status"]
+                limitation = execution.get("limitation")
+                if "significant_count" in execution:
+                    with LOCK:
+                        self.manifest["metrics"]["significant_terms"] = execution["significant_count"]
+                        self.save()
+                artifacts = ["david/david_execution.json", "david/david_all_terms.csv",
+                             "david/david_significant_terms.csv", "david/enrichment_david.json",
+                             "david/david_input.json", "david/david_artifacts.json"]
+                method_note = execution.get("method", "DAVID")
+            if self.manifest["mode"] == "fixture":
+                with LOCK:
+                    self.manifest["metrics"]["significant_terms"] = execution["significant_count"]
+                    self.save()
+            summary = ("富集显著 %d 条（%s）" % (execution.get("significant_count", 0), method_note)
+                       if status == "succeeded" else "富集未完成：" + str(limitation or status))
+            stage_result = {"status": status, "summary": summary, "blockers": [limitation] if limitation else [],
+                            "findings": ["合成工程验证富集，非 DAVID 结果"] if self.manifest["mode"] == "fixture" else [],
+                            "artifacts": artifacts}
+            stage_result = self._maybe_agent_review(role, stage_result, directory, {
+                "genes_total": len(genes), "method": method_note, "status": status,
+                "significant_count": execution.get("significant_count"),
+                "mapped_count": execution.get("mapped_count"),
+                "limitation": limitation})
+            self.finish(role, stage_result, directory)
+        except Exception as exc:
+            self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": []}, directory)
+
+    def analysis_review_stage(self):
+        role = "analysis_review"
+        directory = self.begin(role)
+        problems = self._verify_analysis()
+        write_json(directory / "verification.json", {"checks": "artifacts_sha256_and_count_consistency", "problems": problems})
+        self._write_analysis_report(problems)
+        if problems:
+            result = {"status": "failed", "summary": "验收发现 %d 个问题" % len(problems),
+                      "blockers": problems, "artifacts": ["verification.json"]}
+        else:
+            result = {"status": "succeeded", "summary": "机制分析链路产物核对通过",
+                      "blockers": [], "artifacts": ["verification.json"]}
+        result = self._maybe_agent_review(role, result, directory, {
+            "problems": problems,
+            "metrics": self.manifest.get("metrics", {}),
+            "stages": {name: {"status": stage.get("status"), "summary": stage.get("summary")}
+                       for name, stage in self.manifest["stages"].items() if name != role},
+            "artifact_index": {path: (stage.get("artifact_sha256") or {}).get(path)
+                               for name, stage in self.manifest["stages"].items() if name != role
+                               for path in stage.get("artifacts", [])}})
+        self.finish(role, result, directory)
+
+    def _verify_analysis(self):
+        problems = []
+        stages = self.manifest["stages"]
+        for role in ("shared_targets", "network", "enrichment"):
+            stage = stages.get(role, {})
+            if stage.get("status") != "succeeded":
+                continue
+            for relative, expected in (stage.get("artifact_sha256") or {}).items():
+                path = self.directory / relative
+                if not path.is_file():
+                    problems.append("%s 产物缺失：%s" % (role, relative))
+                elif digest(path) != expected:
+                    problems.append("%s 产物哈希不一致：%s" % (role, relative))
+        metrics = self.manifest.get("metrics", {})
+        shared_stage = stages.get("shared_targets", {})
+        if shared_stage.get("status") == "succeeded":
+            shared = self._shared_genes()
+            if metrics.get("shared_targets") != len(shared["genes"]):
+                problems.append("共同靶点计数不一致：metrics=%s shared_targets.json=%d"
+                                % (metrics.get("shared_targets"), len(shared["genes"])))
+            if self.manifest["mode"] == "fixture" and shared.get("evidence_type") != SYNTHETIC:
+                problems.append("fixture 运行共同靶点未标注 synthetic_engineering")
+        if stages.get("network", {}).get("status") in ("succeeded", "partial"):
+            network = read_json(self.directory / self.manifest["verified_targets"]["network"])
+            if metrics.get("network_nodes") != network["node_count"]:
+                problems.append("网络节点计数不一致：metrics=%s network.json=%d"
+                                % (metrics.get("network_nodes"), network["node_count"]))
+            if self.manifest["mode"] == "fixture" and network.get("evidence_type") != SYNTHETIC:
+                problems.append("fixture 运行网络未标注 synthetic_engineering")
+        if stages.get("enrichment", {}).get("status") == "succeeded" and self.manifest["mode"] == "fixture":
+            fixture = read_json(self.directory / "enrichment" / ("attempt_%02d" % stages["enrichment"]["attempt"]) / "enrichment_fixture.json")
+            if metrics.get("significant_terms") != fixture["significant_count"]:
+                problems.append("显著条目计数不一致：metrics=%s enrichment_fixture.json=%d"
+                                % (metrics.get("significant_terms"), fixture["significant_count"]))
+        return problems
+
+    def _write_analysis_report(self, problems):
+        task, manifest = self.task, self.manifest
+        info = manifest.get("analysis", {})
+        fixture = manifest["mode"] == "fixture"
+        metrics = manifest.get("metrics", {})
+        lines = ["# 机制分析运行报告", "",
+                 "运行：" + self.run_id, "",
+                 "来源运行：" + str(info.get("source_run_id")) + "；疾病关键词：" + str(info.get("disease")), "",
+                 "模式：" + ("fixture（合成工程验证，不是药理研究结果）" if fixture else "live（本地数据分析）"), "",
+                 "状态：" + manifest["status"], "",
+                 "scientific_complete：false（关联、网络与富集均不构成机制结论）", "",
+                 "案例：" + (task.get("formula") or "（自由药材组合）") + "（" + "、".join(task.get("herbs", [])) + "）", "",
+                 "## 阶段概览", "", "| 阶段 | 状态 | 摘要 |", "| --- | --- | --- |"]
+        for role in self.stages:
+            stage = manifest["stages"][role]
+            lines.append("| %s | %s | %s |" % (self.labels[role], stage["status"], stage.get("summary", "")))
+        lines.append("")
+        lines.extend(["## 结果概览", "",
+                      "共同靶点：%d" % metrics.get("shared_targets", 0), ""])
+        if metrics.get("network_nodes") is not None:
+            lines.append("网络：%d 节点 / %d 边" % (metrics.get("network_nodes", 0), metrics.get("network_edges", 0)))
+            network_path = manifest.get("verified_targets", {}).get("network")
+            if network_path and (self.directory / network_path).is_file():
+                network = read_json(self.directory / network_path)
+                lines.append("度值方法：" + network.get("method", ""))
+                top = sorted(network["degree_table"], key=lambda r: (-r["degree"], r["gene_symbol"]))[:10]
+                if top:
+                    lines.extend(["", "Degree Top：", ""])
+                    lines.extend("- %s：%d" % (row["gene_symbol"], row["degree"]) for row in top)
+                lines.append("")
+        if metrics.get("significant_terms") is not None:
+            lines.extend(["富集显著条目：%d" % metrics["significant_terms"], ""])
+        if problems:
+            lines.extend(["## 验收问题", ""])
+            lines.extend("- " + problem for problem in problems)
+            lines.append("")
+        lines.extend(["## 局限声明", "",
+                      "疾病关联、网络拓扑与富集结果均不构成机制或疗效结论；scientific_complete 恒为 false。"
+                      + ("本运行为合成工程验证，全部数据为固定测试集合。" if fixture else "")])
+        (self.directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with LOCK:
+            self.manifest["report"] = "report.md"
+            self.save()
 
     def review_stage(self):
         role = "review"
@@ -672,9 +1030,9 @@ class Runner:
             else:
                 lines.extend(["多 Agent 核验：未启用（agents=false），本运行为纯程序流水线，无 Agent 核验", ""])
         lines.extend(["## 阶段概览", "", "| 阶段 | 状态 | 摘要 |", "| --- | --- | --- |"])
-        for role in STAGES:
+        for role in self.stages:
             stage = manifest["stages"][role]
-            lines.append("| %s | %s | %s |" % (LABELS[role], stage["status"], stage.get("summary", "")))
+            lines.append("| %s | %s | %s |" % (self.labels[role], stage["status"], stage.get("summary", "")))
         lines.append("")
         reverse_path = manifest.get("verified_targets", {}).get("disease_reverse")
         if reverse_path and (self.directory / reverse_path).is_file():
@@ -726,11 +1084,17 @@ class Runner:
                         stage.update(status="skipped", summary="多 Agent 环境不可用，未执行", finished_at=now())
                     self.write_report([self.manifest["fatal_error"]])
                     return
-            stage_map = {"preflight": self.preflight_stage,
-                         "herb_targets": self._herb_stage_with_opening,
-                         "disease_reverse": self.disease_reverse_stage,
-                         "review": self.review_stage}
-            execute_graph(lambda name: stage_map[name](), max_workers=1)
+            if self.pipeline == "analysis":
+                stage_map = {"shared_targets": self.shared_targets_stage,
+                             "network": self.network_stage,
+                             "enrichment": self.enrichment_stage,
+                             "analysis_review": self.analysis_review_stage}
+            else:
+                stage_map = {"preflight": self.preflight_stage,
+                             "herb_targets": self._herb_stage_with_opening,
+                             "disease_reverse": self.disease_reverse_stage,
+                             "review": self.review_stage}
+            execute_graph(lambda name: stage_map[name](), max_workers=1, pipeline=self.pipeline)
             statuses = [stage["status"] for stage in self.manifest["stages"].values()]
             if any(status == "failed" for status in statuses):
                 self.manifest["status"] = "failed"
@@ -772,9 +1136,72 @@ def manifests():
     return sorted(out, key=lambda m: m["created_at"], reverse=True)
 
 
-def start(task_id=None, mode=None, resume=None, background=True):
+def _analysis_task(analysis, mode):
+    """从来源 discovery 运行合成 analysis 任务快照；校验来源与疾病合法性。"""
+    if not isinstance(analysis, dict):
+        raise ValueError("analysis 请求必须是 JSON 对象")
+    allowed = {"discovery_run_id", "disease", "research_notes", "agents",
+               "string_source", "string_local_dir", "network_topology", "david_enrichment"}
+    if set(analysis) - allowed:
+        raise ValueError("包含不支持的 analysis 字段：" + ", ".join(sorted(set(analysis) - allowed)))
+    run_id = safe_name(str(analysis.get("discovery_run_id") or ""))
+    source_dir = ROOT / "runs" / run_id
+    try:
+        source_manifest = read_json(source_dir / "manifest.json")
+    except (OSError, ValueError):
+        raise ValueError("来源运行不存在：" + run_id) from None
+    if source_manifest.get("pipeline", "discovery") != "discovery":
+        raise ValueError("来源运行不是 discovery 流水线")
+    stage = source_manifest.get("stages", {}).get("disease_reverse", {})
+    if stage.get("status") != "succeeded":
+        raise ValueError("来源运行的疾病反查未成功，不能开展机制分析")
+    rel = source_manifest.get("verified_targets", {}).get("disease_reverse")
+    if not rel:
+        raise ValueError("来源运行缺少反查产物索引")
+    result = read_json(source_dir / rel)
+    disease = analysis.get("disease")
+    if disease not in [c["disease"] for c in result.get("candidates", [])]:
+        raise ValueError("疾病不在来源运行的候选清单内：" + str(disease))
+    mode = mode or "live"
+    if mode not in ("live", "fixture"):
+        raise ValueError("不支持的运行模式")
+    agents = analysis.get("agents")
+    if agents is None:
+        agents = mode == "live"
+    if not isinstance(agents, bool):
+        raise ValueError("agents 须为布尔值")
+    if mode == "fixture":
+        agents = False
+    if "string_source" in analysis and analysis["string_source"] not in ("api", "local_files"):
+        raise ValueError("string_source 只支持 api 或 local_files")
+    for key in ("network_topology", "david_enrichment"):
+        if key in analysis and not isinstance(analysis[key], dict):
+            raise ValueError(key + " 须为对象")
+    source_task = source_manifest.get("task", {})
+    task = {
+        "formula": source_task.get("formula"), "herbs": source_task.get("herbs", []),
+        "research_notes": str(analysis.get("research_notes") or ""),
+        "batman_threshold": source_task.get("batman_threshold", 0.84),
+        "mode": mode, "composition": source_task.get("composition", "custom_herbs"),
+        "agents": agents,
+        # STRING/DAVID 的默认研究参数：物种人、0.9 置信度、无额外节点、v12.0
+        "taxon_id": 9606, "string_confidence": 0.9, "string_additional_nodes": 0,
+        "string_version": "12.0",
+        "analysis": {"source_run_id": run_id, "disease": disease},
+    }
+    for key in ("string_source", "string_local_dir", "network_topology", "david_enrichment"):
+        if key in analysis:
+            task[key] = analysis[key]
+    task["task_id"] = "analysis_" + hashlib.sha256(
+        json.dumps(task, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return task
+
+
+def start(task_id=None, mode=None, resume=None, background=True, pipeline="discovery", analysis=None):
     if mode not in (None, "live", "fixture"):
         raise ValueError("不支持的运行模式")
+    if pipeline not in scheduler.GRAPHS:
+        raise ValueError("未注册的流水线：" + str(pipeline))
     (ROOT / "runs").mkdir(exist_ok=True)
     lockfile = ROOT / "runs/.runner.lock"
     try:
@@ -791,16 +1218,23 @@ def start(task_id=None, mode=None, resume=None, background=True):
                 raise ValueError("旧结构运行不能由新流水线恢复，请新建运行")
             # Successful verified stages can be reused; all other stages get new attempts.
         else:
-            tasks = task_list()
-            task = next((task for task in tasks if task["task_id"] == task_id), None)
-            if task is None:
-                raise ValueError("未知 task_id")
-            mode = mode or task.get("mode", "live")
+            if pipeline == "analysis":
+                task = _analysis_task(analysis, mode)
+                mode = task["mode"]
+            else:
+                tasks = task_list()
+                task = next((task for task in tasks if task["task_id"] == task_id), None)
+                if task is None:
+                    raise ValueError("未知 task_id")
+                mode = mode or task.get("mode", "live")
+            labels = PIPELINE_LABELS[pipeline]
             run_id = now().replace(":", "").replace("+", "_") + "_" + uuid.uuid4().hex[:6]
             run_id = run_id.replace(".", "_")
             directory = ROOT / "runs" / run_id
             directory.mkdir()
-            manifest = {"run_id": run_id, "task": task, "mode": mode, "status": "pending", "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"), "scientific_complete": False, "workflow_version": WORKFLOW_VERSION, "stages": {role: {"label": LABELS[role], "status": "pending", "summary": "等待调度", "blockers": [], "artifacts": []} for role in STAGES}}
+            manifest = {"run_id": run_id, "task": task, "mode": mode, "pipeline": pipeline, "status": "pending", "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"), "scientific_complete": False, "workflow_version": WORKFLOW_VERSION, "stages": {role: {"label": labels[role], "status": "pending", "summary": "等待调度", "blockers": [], "artifacts": []} for role in scheduler.stages_for(pipeline)}}
+            if pipeline == "analysis":
+                manifest["analysis"] = task["analysis"]
             write_json(directory / "manifest.json", manifest)
         ACTIVE.add(run_id)
         def worker():

@@ -192,6 +192,21 @@ def run_resume(run_id: str):
         raise HTTPException(409, str(exc))
 
 
+@app.post("/api/analysis")
+async def analysis_new(request: Request):
+    if len(await request.body()) > 20000:
+        raise HTTPException(413, "请求内容过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求必须是 JSON 对象")
+        return {"run_id": start(pipeline="analysis", analysis=body)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
 @app.post("/api/assist/start")
 async def assist_start(request: Request):
     if len(await request.body()) > 10000:

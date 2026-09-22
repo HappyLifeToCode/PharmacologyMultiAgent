@@ -45,3 +45,34 @@ def test_index_static_assets_and_formulas_catalog():
         assert wenjing["source"] == "standard_reference_pending_user_confirmation"
         assert any(herb["canonical"] == "甘草" and herb["candidates"] == ["甘草", "炙甘草"]
                    for herb in wenjing["herbs"])
+
+
+def test_analysis_endpoint_and_pipeline_field(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "ROOT", tmp_path)
+    from pharm.pipeline import engine as engine_module
+    monkeypatch.setattr(engine_module, "ROOT", tmp_path)
+    write_json(tmp_path / "runs" / "ana_run" / "manifest.json",
+               {"run_id": "ana_run", "pipeline": "analysis", "created_at": "2026-09-22T00:00:00+00:00",
+                "stages": {}})
+    calls = []
+
+    def fake_start(*args, **kwargs):
+        calls.append((args, kwargs))
+        if kwargs.get("analysis", {}).get("discovery_run_id") == "missing":
+            raise ValueError("来源运行不存在：missing")
+        return "ana_run"
+
+    monkeypatch.setattr(backend, "start", fake_start)
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        assert client.post("/api/analysis", json=[]).status_code == 400
+        assert client.post("/api/analysis", json={"discovery_run_id": "missing", "disease": "X"}).status_code == 400
+        response = client.post("/api/analysis",
+                               json={"discovery_run_id": "r1", "disease": "Hyperthyroidism",
+                                     "research_notes": "机制分析"})
+        assert response.status_code == 200 and response.json()["run_id"] == "ana_run"
+        assert calls[-1][1]["pipeline"] == "analysis"
+        assert calls[-1][1]["analysis"]["disease"] == "Hyperthyroidism"
+        runs = client.get("/api/runs").json()["runs"]
+        assert runs[0]["pipeline"] == "analysis"
+        assert client.post("/api/analysis", json={"discovery_run_id": "r1", "disease": "X"},
+                           headers={"Origin": "https://other.example"}).status_code == 403
