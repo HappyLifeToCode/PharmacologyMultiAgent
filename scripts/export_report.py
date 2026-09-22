@@ -26,7 +26,7 @@ def export(run_id):
                 encoded = base64.b64encode(path.read_bytes()).decode("ascii")
                 images.append('<figure><img src="data:image/png;base64,' + encoded + '"><figcaption>' + escape(path.name) + '</figcaption></figure>')
         sections.append('<section><div class="section-head"><h2>' + escape(stage.get("label", role)) + '</h2><span>' + escape(stage["status"]) + '</span></div><p>' + escape(stage.get("summary", "")) + '</p><small>独立会话：' + escape(stage.get("agent_session_id") or "确定性程序") + '</small>' + ('<h3>待确认或限制</h3><ul>' + blockers + '</ul>' if blockers else '') + ('<h3>核查记录</h3><ul>' + findings + '</ul>' if findings else '') + ''.join(images) + '</section>')
-    labels = {"unique_targets": "唯一靶点", "herb_relations": "药材关系行", "unmatched_herbs": "未命中药材", "matched_targets": "命中靶点", "candidate_diseases": "候选疾病", "evidence_rows": "证据行", "herb_count": "药材靶点", "disease_count": "疾病靶点", "intersection_count": "共同靶点", "network_nodes": "网络节点", "network_edges": "网络连边", "significant_terms": "显著测试术语" if synthetic else "显著条目"}
+    labels = {"unique_targets": "唯一靶点", "herb_relations": "药材关系行", "unmatched_herbs": "未命中药材", "matched_targets": "命中靶点", "candidate_diseases": "候选疾病", "evidence_rows": "证据行", "max_confidence": "最高置信度（启发式）", "herb_count": "药材靶点", "disease_count": "疾病靶点", "intersection_count": "共同靶点", "network_nodes": "网络节点", "network_edges": "网络连边", "significant_terms": "显著测试术语" if synthetic else "显著条目"}
     metrics = ''.join('<div><strong>' + escape(value) + '</strong><span>' + escape(labels.get(key, key)) + '</span></div>' for key, value in manifest.get("metrics", {}).items())
     task = manifest["task"]
     case = (task.get("formula") or "自由药材组合") + "（" + "、".join(task.get("herbs", [])) + "）"

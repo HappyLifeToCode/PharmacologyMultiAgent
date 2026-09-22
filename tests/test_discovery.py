@@ -447,3 +447,86 @@ def test_prepare_batch_auto_detects_and_rejects_mixed(assoc_batch, batch, tmp_pa
     empty.mkdir()
     with pytest.raises(ValueError, match="缺少"):
         discovery.prepare_batch(empty, tmp_path / "d.sqlite")
+
+
+# ---- 启发式置信度（heuristic_v1） ----
+
+def test_confidence_present_with_components_and_version(database):
+    result = discovery.query(database, genes=["TP53", "EGFR", "ZZZTEST"])
+    for candidate in result["candidates"]:
+        confidence = candidate["confidence"]
+        assert 0.0 <= confidence["value"] <= 1.0
+        assert set(confidence["components"]) == {"match_score", "input_coverage",
+                                                 "disease_coverage", "evidence_quality"}
+        assert confidence["formula_version"] == "heuristic_v1"
+        assert "启发式" in confidence["note"]
+
+
+def test_confidence_matches_hand_calculated_values(database):
+    """对拍：手工按 heuristic_v1 公式计算的预期值。
+
+    索引：Hyperthyroidism 有 TP53(100)+EGFR(1)（genecards）与 TP53×2（omim），
+    Hypothyroidism 有 TP53(2)，Thyroid cancer 有 AKT1(3)；索引 BATMAN 表内
+    TP53=known、EGFR=predicted；genecards 最大分值 100。输入 TP53,EGFR。
+    """
+    import math
+    result = discovery.query(database, genes=["TP53", "EGFR"])
+    hyper, hypo, cancer = result["candidates"]
+    # Hyper：match=ln3/ln3=1，input_cov=1，disease_cov=2/2=1，
+    # quality=(known占比 1/2 + 分值均值 (100+1)/2/100) / 2 = 0.5025
+    assert hyper["confidence"]["components"]["match_score"] == pytest.approx(1.0)
+    assert hyper["confidence"]["components"]["evidence_quality"] == pytest.approx(0.5025)
+    assert hyper["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 + 0.2 * 0.5025, abs=2e-4)
+    # Hypo：match=ln2/ln3，input_cov=0.5，disease_cov=1，quality=(1.0 + 2/100)/2=0.51
+    expected = (0.3 * math.log1p(1) / math.log1p(2) + 0.3 * 0.5 + 0.2 * 1.0 + 0.2 * 0.51)
+    assert hypo["confidence"]["value"] == pytest.approx(expected, abs=2e-4)
+    # 零匹配：value=0.0，组件如实（quality 无数据为 None）
+    assert cancer["matched_count"] == 0
+    assert cancer["confidence"]["value"] == 0.0
+    assert cancer["confidence"]["components"]["evidence_quality"] is None
+
+
+def test_confidence_excludes_null_disease_coverage():
+    candidate = {"matched_genes": ["TP53"], "matched_count": 1, "input_coverage": 0.5,
+                 "disease_coverage": None, "evidence": []}
+    confidence = discovery._confidence(candidate, 2, {"TP53"}, set(), None)
+    assert confidence["components"]["disease_coverage"] is None
+    # 剔除后按剩余权重归一：0.3*ln2/ln3 + 0.3*0.5 + 0.2*1.0（known 占比）除以 0.8
+    import math
+    expected = (0.3 * math.log1p(1) / math.log1p(2) + 0.15 + 0.2) / 0.8
+    assert confidence["value"] == pytest.approx(expected, abs=2e-4)
+    assert 0.0 <= confidence["value"] <= 1.0
+
+
+def test_confidence_known_evidence_outranks_predicted():
+    base = {"matched_count": 1, "input_coverage": 0.5, "disease_coverage": 0.5, "evidence": []}
+    known = discovery._confidence({**base, "matched_genes": ["AAA"]}, 2, {"AAA"}, set(), None)
+    predicted = discovery._confidence({**base, "matched_genes": ["AAA"]}, 2, set(), {"AAA"}, None)
+    assert known["components"]["evidence_quality"] == 1.0
+    assert predicted["components"]["evidence_quality"] == 0.0
+    assert known["value"] > predicted["value"]
+
+
+def test_confidence_in_csv_and_report(database, tmp_path):
+    result = discovery.query(database, genes=["TP53"])
+    output = tmp_path / "run"
+    discovery.save_result(result, output)
+    header = (output / "candidates.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+    assert "confidence" in header.split(",")
+    report = (output / "report.md").read_text(encoding="utf-8")
+    assert "置信度" in report and "heuristic_v1" in report
+    assert "非统计检验" in report
+
+
+def test_confidence_on_generic_associations_index(assoc_batch, tmp_path):
+    """通用批次无 BATMAN 表：known 组件剔除，relevance 组件用 genecards 分值。"""
+    from pharm.diseases.associations import build_associations_database
+    path = tmp_path / "generic.sqlite"
+    build_associations_database(assoc_batch, path)
+    result = discovery.query(path, genes=["TP53"])
+    alpha, beta = result["candidates"]
+    # 单输入：match=1、input_cov=1；Alpha disease_cov=1/2，quality=12.5/12.5=1.0
+    assert alpha["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 * 0.5 + 0.2 * 1.0, abs=2e-4)
+    # Beta：disease_cov=1/1=1.0，quality=3/12.5=0.24
+    assert beta["confidence"]["components"]["evidence_quality"] == pytest.approx(0.24)
+    assert beta["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 + 0.2 * 0.24, abs=2e-4)

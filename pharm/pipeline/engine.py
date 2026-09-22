@@ -162,6 +162,7 @@ def _reverse_lookup(database, genes, chunk_size=3000):
             "evidence": rows,
         })
     all_matched = {gene for candidate in candidates for gene in candidate["matched_genes"]}
+    discovery.apply_confidence(database, candidates, len(genes))
     merged = dict(parts[0])
     merged.update({
         "input": {"herbs": None, "genes": genes}, "input_count": len(genes),
@@ -462,7 +463,9 @@ class Runner:
         self.manifest["metrics"].update(
             matched_targets=result["matched_input_count"],
             candidate_diseases=sum(bool(candidate["matched_count"]) for candidate in result["candidates"]),
-            evidence_rows=sum(len(candidate["evidence"]) for candidate in result["candidates"]))
+            evidence_rows=sum(len(candidate["evidence"]) for candidate in result["candidates"]),
+            max_confidence=max((candidate.get("confidence", {}).get("value", 0.0)
+                                for candidate in result["candidates"]), default=0.0))
 
     def review_stage(self):
         role = "review"
@@ -539,11 +542,16 @@ class Runner:
             result = read_json(self.directory / reverse_path)
             if result.get("candidates"):
                 lines.extend(["## 候选疾病（关键词关联，不是疗效排名）", "",
-                              "| 疾病关键词 | 匹配靶点数 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: |"])
+                              "| 疾病关键词 | 置信度 | 匹配靶点数 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: | ---: |"])
                 for candidate in result["candidates"]:
                     coverage = ("%.2f%%" % (candidate["input_coverage"] * 100)) if result["input_count"] else "—"
-                    lines.append("| %s | %d | %s | %d |" % (candidate["disease"], candidate["matched_count"], coverage, candidate["indexed_target_count"]))
-                lines.extend(["", "未匹配靶点：" + (", ".join(result["unmatched_genes"]) or "无"), ""])
+                    confidence = candidate.get("confidence", {}).get("value")
+                    lines.append("| %s | %s | %d | %s | %d |" % (
+                        candidate["disease"],
+                        confidence if confidence is not None else "—",
+                        candidate["matched_count"], coverage, candidate["indexed_target_count"]))
+                lines.extend(["", "置信度为程序计算的透明启发式（" + discovery.CONFIDENCE_VERSION + "），非统计检验，仅供排序参考；组件明细见 reverse/result.json。",
+                              "", "未匹配靶点：" + (", ".join(result["unmatched_genes"]) or "无"), ""])
         herb_path = manifest.get("verified_targets", {}).get("herb_targets")
         if herb_path and (self.directory / herb_path).is_file():
             targets = read_json(self.directory / herb_path)

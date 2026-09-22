@@ -59,7 +59,12 @@ def test_fixture_end_to_end(root):
     result = json.loads((run / manifest["verified_targets"]["disease_reverse"]).read_text(encoding="utf-8"))
     assert result["evidence_type"] == "synthetic_engineering"
     assert result["matched_input_count"] == 6 and result["input_count"] == 6
+    for candidate in result["candidates"]:
+        assert candidate["confidence"]["formula_version"] == "heuristic_v1"
+        assert 0.0 <= candidate["confidence"]["value"] <= 1.0
+    assert 0.0 < manifest["metrics"]["max_confidence"] <= 1.0
     report = (run / "report.md").read_text(encoding="utf-8")
+    assert "置信度" in report and "heuristic_v1" in report
     assert "scientific_complete：false" in report and "关联≠疗效" in report or "局限" in report
     assert manifest["report"] == "report.md"
     # fixture 不进归档
@@ -143,6 +148,9 @@ def test_reverse_lookup_chunks_over_query_limit(root, tmp_path):
     assert merged["matched_input_count"] == 0
     assert len(merged["unmatched_genes"]) == 6500
     assert len(merged["candidates"]) == 5
+    # 分块合并后按合并结果重算置信度
+    assert all("confidence" in candidate for candidate in merged["candidates"])
+    assert all(candidate["confidence"]["value"] == 0.0 for candidate in merged["candidates"])
     result, chunking = engine._reverse_lookup(database, ["TP53"])
     assert chunking == {"chunked": False}
     assert result["matched_input_count"] == 1

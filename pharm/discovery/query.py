@@ -30,7 +30,25 @@ LIMITATION = (
     "本地索引仅收录批次导入的疾病-基因关联；关键词检索关联不等于确诊疾病的因果或治疗证据。"
     "使用全部合格导出记录，不新增疗效筛选阈值。"
     "匹配数和覆盖比例仅作描述，不代表治疗能力、显著性或疾病优先级；未命中不代表无关联。"
+    "候选疾病的 confidence 为程序计算的透明启发式（heuristic_v1），不是统计检验、疗效概率或疾病优先级。"
 )
+
+# 启发式置信度 heuristic_v1（程序计算，模型不碰数字；全部组件公开在此）：
+#   match_score       log1p(matched_count)/log1p(输入唯一靶点数)——按本次查询自身
+#                     规模归一，不做跨疾病相对比较，避免被误读为排名；
+#   input_coverage    现有字段（matched/输入靶点总数）；
+#   disease_coverage  现有字段（matched/该病索引靶点数），分母为 0 时组件为 null
+#                     并从加权中剔除（剩余权重归一）；
+#   evidence_quality  两个疾病级聚合的均值（各自无数据则剔除）：
+#                     known 占比——该病匹配靶点中在索引 BATMAN 表内有 known
+#                     （文献验证）证据的比例，分母为有任何 BATMAN 记录的匹配靶点；
+#                     relevance 归一均值——该病 genecards 证据行 score 的均值 /
+#                     全索引最大 score（其他来源分值口径不明，不参与）。
+# 全部组件不可用（零匹配）时 value=0.0。
+CONFIDENCE_WEIGHTS = {"match_score": 0.3, "input_coverage": 0.3,
+                      "disease_coverage": 0.2, "evidence_quality": 0.2}
+CONFIDENCE_VERSION = "heuristic_v1"
+CONFIDENCE_NOTE = "启发式置信度，非统计检验，仅供排序参考"
 
 
 def database_path(root=ROOT):
@@ -194,6 +212,56 @@ def catalog(database):
             "created_at": metadata["created_at"], "selection": metadata["selection"], "limitation": LIMITATION}
 
 
+def _evidence_maps(connection):
+    """索引级证据质量参照：BATMAN known/predicted 基因集合 + genecards 最大分值。"""
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    known, predicted = set(), set()
+    for table in ("herb_relations", "compound_targets"):
+        if table in tables:
+            for gene, evidence in connection.execute(f"SELECT DISTINCT gene, evidence FROM {table}"):
+                (known if evidence == "known" else predicted).add(gene)
+    predicted -= known  # 同一基因有 known 即按文献证据计
+    row = connection.execute("SELECT MAX(score) FROM associations").fetchone()
+    max_score = row[0] if row and row[0] else None
+    return known, predicted, max_score
+
+
+def _confidence(candidate, input_count, known, predicted, max_score):
+    matched = candidate["matched_genes"]
+    components = {
+        "match_score": (math.log1p(candidate["matched_count"]) / math.log1p(input_count)) if input_count else None,
+        "input_coverage": candidate["input_coverage"] if input_count else None,
+        "disease_coverage": candidate["disease_coverage"],
+    }
+    parts = []
+    with_batman = [gene for gene in matched if gene in known or gene in predicted]
+    if with_batman:
+        parts.append(sum(gene in known for gene in with_batman) / len(with_batman))
+    scores = [row["relevance_score"] for row in candidate["evidence"]
+              if row["source"] == "genecards" and row["relevance_score"] is not None]
+    if scores and max_score:
+        parts.append(min(1.0, (sum(scores) / len(scores)) / max_score))
+    components["evidence_quality"] = sum(parts) / len(parts) if parts else None
+    total_weight, accrued = 0.0, 0.0
+    for name, weight in CONFIDENCE_WEIGHTS.items():
+        value = components[name]
+        if value is None:
+            continue
+        total_weight += weight
+        accrued += weight * value
+    return {"value": round(accrued / total_weight, 4) if total_weight else 0.0,
+            "components": components, "formula_version": CONFIDENCE_VERSION, "note": CONFIDENCE_NOTE}
+
+
+def apply_confidence(database, candidates, input_count):
+    """为合并后的候选列表（如分块反查）补算置信度；query() 内部不走这里。"""
+    with closing(_connect(database)) as connection:
+        known, predicted, max_score = _evidence_maps(connection)
+    for candidate in candidates:
+        candidate["confidence"] = _confidence(candidate, input_count, known, predicted, max_score)
+    return candidates
+
+
 def query(database, *, herbs=None, genes=None):
     if (herbs is None) == (genes is None):
         raise ValueError("请选择药材或输入靶点，两种输入方式只能选一种")
@@ -240,6 +308,7 @@ def query(database, *, herbs=None, genes=None):
             for row in connection.execute(
                 f"SELECT gene,disease,source,source_row,score,record FROM associations WHERE gene IN ({placeholders}) ORDER BY disease,gene,source,source_row", symbols)
         ]
+        known, predicted, max_score = _evidence_maps(connection)
     candidates, all_matched = [], set()
     for disease in metadata["diseases"]:
         rows = [row for row in evidence if row["disease"] == disease]
@@ -258,6 +327,8 @@ def query(database, *, herbs=None, genes=None):
         })
     if "herb_catalog" in metadata:
         metadata["herb_catalog"] = [row for row in metadata["herb_catalog"] if row["herb"] in (herbs or [])]
+    for candidate in candidates:
+        candidate["confidence"] = _confidence(candidate, len(symbols), known, predicted, max_score)
     return {
         "workflow": "five_disease_reverse_lookup_v1", "status": "succeeded", "scientific_complete": False,
         "created_at": now(), "limitation": LIMITATION, "input": {"herbs": herbs, "genes": symbols},
@@ -276,11 +347,12 @@ def save_result(result, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / "result.json", result)
-    columns = ["disease", "matched_count", "indexed_target_count", "input_coverage", "disease_coverage"]
+    columns = ["disease", "matched_count", "indexed_target_count", "input_coverage", "disease_coverage", "confidence"]
     with (output / "candidates.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(result["candidates"])
+        for candidate in result["candidates"]:
+            writer.writerow({**candidate, "confidence": candidate.get("confidence", {}).get("value")})
     columns = ["disease", "gene_symbol", "source", "source_file", "source_row", "relevance_score"]
     with (output / "evidence.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")
@@ -288,10 +360,12 @@ def save_result(result, output):
         writer.writerows(row for candidate in result["candidates"] for row in candidate["evidence"])
     lines = ["# 本地疾病索引反向查询", "", result["limitation"], "",
              f"输入靶点 {result['input_count']} 个，至少命中一个关键词的靶点 {result['matched_input_count']} 个。",
-             "", "| 疾病关键词 | 匹配靶点 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: |"]
+             "", "| 疾病关键词 | 匹配置信度 | 匹配靶点 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: | ---: |"]
     for candidate in result["candidates"]:
-        lines.append(f"| {candidate['disease']} | {candidate['matched_count']} | {candidate['input_coverage']:.2%} | {candidate['indexed_target_count']} |")
+        confidence = candidate.get("confidence", {}).get("value")
+        lines.append(f"| {candidate['disease']} | {confidence if confidence is not None else '—'} | {candidate['matched_count']} | {candidate['input_coverage']:.2%} | {candidate['indexed_target_count']} |")
     lines.extend(["", "排列遵循固定疾病名称顺序，不是疗效排名。输入覆盖率分母为本次全部唯一输入靶点；疾病覆盖率分母为该疾病关键词在索引中的唯一靶点数。",
+                  "置信度为程序计算的透明启发式（" + CONFIDENCE_VERSION + "：log 匹配数、输入/疾病覆盖率、证据质量的加权和），非统计检验，仅供排序参考；组件明细见 result.json。",
                   "", "未匹配靶点：" + (", ".join(result["unmatched_genes"]) or "无"),
                   "", "完整来源、文件哈希、逐条匹配及药材成分关系见 result.json。未执行新的模型会话或科学人工审核。"])
     (output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
