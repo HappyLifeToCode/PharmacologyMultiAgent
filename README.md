@@ -1,5 +1,7 @@
 # Pharmacology Multi-Agent
 
+> **反向查询开发分支（2026-09-21）**：`codex/reverse-disease-discovery` 首页提供五病范围的本地反查，输入药材或靶点即可查看逐疾病关联证据，无需预先输入疾病。准备本地索引、启动和验证结果见 [反向查询说明](docs/REVERSE_DISCOVERY.md)。`main` 保留原研究方案流程；本分支的原工作台位于 `/legacy`。以下原流程介绍保留作背景。
+
 面向药理研究的多 Agent 协作项目，连接 BATMAN-TCM、GeneCards、OMIM、STRING 与 DAVID，构建从药材成分与靶点获取、疾病靶点整合，到蛋白质相互作用网络及功能富集分析的可追溯流程。
 
 项目通过任务分工、数据接口和执行记录，支持不同开发者独立实现模块，并逐步扩展至多方剂、多疾病分析。
