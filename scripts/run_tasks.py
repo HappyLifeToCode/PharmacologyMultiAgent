@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pharm_demo.common import task_list
-from pharm_demo.engine import start
+from pharm.core.common import task_list
+from pharm.pipeline.engine import start
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

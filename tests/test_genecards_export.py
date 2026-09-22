@@ -1,7 +1,7 @@
 import pytest
 
-from pharm_demo.common import read_json
-from pharm_demo.genecards_export import collect_disease, combine_diseases, parse_results_html
+from pharm.core.common import read_json
+from pharm.diseases.genecards_export import collect_disease, combine_diseases, parse_results_html
 
 
 def _page(rows, total=None):
@@ -91,7 +91,7 @@ Copyright LifeMap Sciences Inc. May not be used for any non-academic research pu
 
 
 def test_convert_official_export_skips_preamble_and_rejects_lnc_symbols(tmp_path):
-    from pharm_demo.genecards_export import convert_official_export
+    from pharm.diseases.genecards_export import convert_official_export
     path = tmp_path / "export.csv"
     path.write_text(EXPORT_SAMPLE, encoding="utf-8-sig")
     record = convert_official_export(path)
@@ -103,7 +103,7 @@ def test_convert_official_export_skips_preamble_and_rejects_lnc_symbols(tmp_path
 
 
 def test_combine_official_exports_writes_rejected_file(tmp_path):
-    from pharm_demo.genecards_export import combine_official_exports
+    from pharm.diseases.genecards_export import combine_official_exports
     path = tmp_path / "export.csv"
     path.write_text(EXPORT_SAMPLE, encoding="utf-8-sig")
     out = tmp_path / "genecards.csv"

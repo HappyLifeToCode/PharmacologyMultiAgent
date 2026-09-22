@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pharm_demo.codex_runtime import execute
-from pharm_demo.common import ROOT
+from pharm.agents.runtime import execute
+from pharm.core.common import ROOT
 from datetime import datetime
 
 if __name__ == "__main__":

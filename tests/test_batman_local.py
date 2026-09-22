@@ -2,8 +2,8 @@ import gzip
 
 import pytest
 
-from pharm_demo.batman_local import generate_import
-from pharm_demo.imports import load_herb
+from pharm.batman.local import generate_import
+from pharm.core.imports import load_herb
 
 
 def _write_gz(path, text):

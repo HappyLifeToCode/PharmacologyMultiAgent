@@ -1,8 +1,8 @@
 import pytest
 
-from pharm_demo.omim_export import combine_gene_map_exports, convert_gene_map_export
+from pharm.diseases.omim_export import combine_gene_map_exports, convert_gene_map_export
 
-from pharm_demo.common import digest
+from pharm.core.common import digest
 import io
 import zipfile
 
@@ -20,7 +20,7 @@ def _make_xlsx(path, title, header, data_rows):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("xl/worksheets/sheet1.xml", sheet)
 
-from pharm_demo.omim_export import EXPECTED_HEADER
+from pharm.diseases.omim_export import EXPECTED_HEADER
 
 
 def _row(symbol, phenotype="Hyperthyroidism, familial", mim="603373", key="3"):

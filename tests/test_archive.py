@@ -1,6 +1,6 @@
 import json
 import pytest
-from pharm_demo.archive import archive_run, import_directory
+from pharm.core.archive import archive_run, import_directory
 
 
 def make_run(tmp_path, mode='live'):

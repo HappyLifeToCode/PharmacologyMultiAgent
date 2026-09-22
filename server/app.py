@@ -10,10 +10,10 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
-from pharm_demo.common import ROOT, read_json, safe_name, task_list, public_artifact
-from pharm_demo.engine import manifests, start
-from pharm_demo.tasks import save_task
-from pharm_demo import discovery
+from pharm.core.common import ROOT, read_json, safe_name, task_list, public_artifact
+from pharm.pipeline.engine import manifests, start
+from pharm.pipeline.tasks import save_task
+from pharm.discovery import query as discovery
 from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
 import sqlite3
@@ -160,41 +160,6 @@ def run_events(run_id: str):
     return {"events": events[-400:]}
 
 
-@app.get("/api/supplement/runs")
-def supplement_runs():
-    """列出甲状腺癌补充流程的运行产物目录（supplement-real-*）。"""
-    runs = []
-    for directory in sorted((ROOT / "local" / "checks").glob("supplement-real-*"), reverse=True):
-        result_file = directory / "supplement_result.json"
-        if not result_file.is_file():
-            continue
-        result = read_json(result_file)
-        artifacts = sorted(p.relative_to(directory).as_posix() for p in directory.rglob("*")
-                           if p.is_file() and p.suffix.lower() in (".csv", ".json", ".md", ".png"))
-        runs.append({"name": directory.name, "status": result.get("status"),
-                     "finished_at": result.get("finished_at"),
-                     "stages": result.get("stages", []), "artifacts": artifacts})
-    return {"runs": runs}
-
-
-@app.get("/api/supplement/runs/{name}/artifacts/{filename:path}")
-def supplement_artifact(name: str, filename: str):
-    safe_name(name)
-    directory = (ROOT / "local" / "checks" / name).resolve()
-    if directory.parent != (ROOT / "local" / "checks").resolve():
-        raise HTTPException(404)
-    path = (directory / filename).resolve()
-    try:
-        path.relative_to(directory)
-    except ValueError:
-        raise HTTPException(404)
-    if not path.is_file() or path.suffix.lower() not in (".csv", ".json", ".md", ".png"):
-        raise HTTPException(404)
-    response = FileResponse(path, media_type="text/plain; charset=utf-8")
-    response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-    return response
-
-
 @app.post("/api/run")
 async def run_new(request: Request):
     try:
@@ -215,24 +180,6 @@ def run_resume(run_id: str):
         return {"run_id": start(resume=run_id)}
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
-
-
-@app.post("/api/runs/{run_id}/signoff")
-async def run_signoff(run_id: str, request: Request):
-    manifest_for(run_id)
-    try:
-        body = await request.json()
-        reviewer = body.get("reviewer", "") if isinstance(body, dict) else ""
-        note = body.get("note", "") if isinstance(body, dict) else ""
-        if not isinstance(reviewer, str) or not 1 <= len(reviewer.strip()) <= 40:
-            raise ValueError("请填写复核人姓名（不超过 40 字）")
-        if not isinstance(note, str) or len(note) > 500:
-            raise ValueError("复核备注最多 500 字")
-        from pharm_demo.audit import signoff
-        record = signoff(ROOT / "runs" / run_id, reviewer.strip(), note)
-        return {"human_review": record}
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
 
 
 @app.get("/artifacts/{run_id}/{filename:path}")

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pharm_demo.common import ROOT, read_json, write_json
+from pharm.core.common import ROOT, read_json, write_json
 
 if __name__ == "__main__":
     libraries = ["fastapi", "uvicorn", "playwright", "requests", "scipy", "networkx", "matplotlib", "toml"]

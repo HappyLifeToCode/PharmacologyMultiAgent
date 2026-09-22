@@ -1,6 +1,6 @@
 import json
 import pytest
-from pharm_demo.tasks import save_task, prepare_task
+from pharm.pipeline.tasks import save_task, prepare_task
 
 
 def body():
@@ -8,7 +8,7 @@ def body():
 
 
 def test_fresh_checkout_ignores_shared_and_legacy_tasks(tmp_path, monkeypatch):
-    from pharm_demo import common
+    from pharm.core import common
     monkeypatch.setattr(common, "ROOT", tmp_path)
     assert common.task_list() == []
     directory = tmp_path / "tasks"
@@ -27,7 +27,8 @@ def test_cli_empty_tasks_and_resume_without_task_list(tmp_path, monkeypatch, cap
     import runpy
     import sys
     from pathlib import Path
-    from pharm_demo import common, engine
+    from pharm.core import common
+    from pharm.pipeline import engine
     script = Path(__file__).resolve().parents[1] / "scripts/run_tasks.py"
     monkeypatch.setattr(common, "ROOT", tmp_path)
     calls = []

@@ -1,6 +1,6 @@
 import pytest
 
-from pharm_demo.genecards_online import (parse_declared_total, parse_rows_from_html,
+from pharm.diseases.genecards_online import (parse_declared_total, parse_rows_from_html,
                                          parse_site_version)
 
 # 按 2026-09-18 真实页面（local/gc_page_sample.html，GeneCards 6.1）校准的结构

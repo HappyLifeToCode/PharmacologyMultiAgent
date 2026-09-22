@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from pharm_demo.imports import load_disease, load_herb, load_genecards, load_omim
+from pharm.core.imports import load_herb, load_genecards, load_omim
 
 
 def _fixture(tmp_path):
@@ -19,9 +19,8 @@ def test_loaders_validate_and_process(tmp_path):
     task = {"task_id": "demo", "herbs": ["白芍"], "diseases": ["Hyperthyroidism"], "batman_threshold": None, "batman_threshold_confirmed": False}
     herb = load_herb(tmp_path, task)
     assert herb["genes"] == ["TP53"] and len(herb["relations"]) == 1
-    disease = load_disease(tmp_path, task)
-    assert disease["genes"] == ["EGFR", "BRCA1"]
-    assert disease["gene_sources"] == {"EGFR": ["genecards"], "BRCA1": ["omim"]}
+    assert load_genecards(tmp_path, task)["genes"] == ["EGFR"]
+    assert load_omim(tmp_path, task)["genes"] == ["BRCA1"]
 
 
 def test_loader_rejects_unconfirmed_mapping(tmp_path):
@@ -37,7 +36,7 @@ def test_loader_rejects_missing_source_file(tmp_path):
     _fixture(tmp_path)
     (tmp_path / "omim.csv").unlink()
     with pytest.raises(ValueError, match="missing"):
-        load_disease(tmp_path, {"diseases": ["Hyperthyroidism"]})
+        load_omim(tmp_path, {"diseases": ["Hyperthyroidism"]})
 
 
 def test_loader_rejects_scope_or_confirmed_threshold_mismatch(tmp_path):
@@ -71,25 +70,6 @@ def test_herb_evidence_rules(tmp_path):
     assert [(r["gene_symbol"], r["score"], r["evidence"]) for r in herb["relations"]] == [("TP53", 0.9, "predicted")]
 
 
-def test_pooled_five_queries_preserves_cross_disease_scores(tmp_path):
-    _fixture(tmp_path)
-    queries = ["Hyperthyroidism", "Hypothyroidism", "Thyroid cancer", "Thyroid nodules", "Thyroiditis"]
-    provenance = json.loads((tmp_path / "provenance.json").read_text())
-    for name in ("genecards", "omim"):
-        provenance["sources"][name]["diseases"] = queries
-    (tmp_path / "provenance.json").write_text(json.dumps(provenance))
-    rows = [(queries[0], "TP53", 1), (queries[1], "EGFR", 2), (queries[2], "AKT1", 3), (queries[3], "TP53", 101), (queries[4], "TNF", 1000)]
-    (tmp_path / "genecards.csv").write_text("disease,gene_symbol,relevance_score\n" + "\n".join("%s,%s,%s" % r for r in rows))
-    (tmp_path / "omim.csv").write_text("disease,gene_symbol\nThyroiditis,TP53\nThyroiditis,BRCA1\n")
-    result = load_disease(tmp_path, {"diseases": queries})
-    assert result["genecards_filter"]["median"] == 3
-    assert result["genecards_filter"]["input_count"] == 5
-    assert [r["gene_symbol"] for r in result["genecards_filter"]["kept"]] == ["TP53", "TNF"]
-    assert result["genes"] == ["TP53", "TNF", "BRCA1"]
-    assert result["gene_sources"]["TP53"] == ["genecards", "omim"]
-    assert result["policy"]["status"] == "provisional"
-
-
 def test_sources_validate_independently_and_require_query_identity(tmp_path):
     _fixture(tmp_path)
     task = {"diseases": ["Hyperthyroidism"]}
@@ -121,7 +101,7 @@ def test_per_disease_median_filters_within_each_query(tmp_path):
     (tmp_path / "omim.csv").write_text("disease,gene_symbol\nThyroid cancer,BRCA1\n")
     task = {"diseases": queries, "genecards_median_scope": "per_disease_median",
             "genecards_median_status": "confirmed"}
-    result = load_disease(tmp_path, task)
+    result = load_genecards(tmp_path, task)
     # Hyperthyroidism 中位数 2 → EGFR(3)；Hypothyroidism 单行不保留；Thyroid cancer 中位数 10 → BRCA1(30)
     assert result["genecards_filter"]["medians"] == {"Hyperthyroidism": 2.0, "Hypothyroidism": 2.0,
                                                      "Thyroid cancer": 10.0}
@@ -134,7 +114,7 @@ def test_per_disease_median_filters_within_each_query(tmp_path):
 
 
 def test_per_disease_median_requires_disease_field():
-    from pharm_demo.processing import filter_genecards_per_disease
+    from pharm.core.symbols import filter_genecards_per_disease
     with pytest.raises(ValueError, match="disease"):
         filter_genecards_per_disease([{"gene_symbol": "A", "relevance_score": 1}], complete=True)
     with pytest.raises(ValueError, match="complete"):
@@ -142,6 +122,6 @@ def test_per_disease_median_requires_disease_field():
 
 
 def test_unsupported_median_scope_still_rejected():
-    from pharm_demo.imports import disease_policy
+    from pharm.core.imports import disease_policy
     with pytest.raises(ValueError, match="unsupported"):
         disease_policy({"genecards_median_scope": "per_disease_max"})

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pharm_demo.common import ROOT, read_json, safe_name, public_artifact
+from pharm.core.common import ROOT, read_json, safe_name, public_artifact
 
 def export(run_id):
     directory = ROOT / "runs" / safe_name(run_id)

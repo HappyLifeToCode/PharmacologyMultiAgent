@@ -6,8 +6,8 @@ import gzip
 import pytest
 from fastapi.testclient import TestClient
 
-from pharm_demo import discovery
-from pharm_demo.common import digest, write_json
+from pharm.discovery import query as discovery
+from pharm.core.common import digest, write_json
 from server import app as backend
 
 
@@ -188,7 +188,7 @@ def test_catalog_unavailable_and_corrupt_schema(tmp_path, database, monkeypatch)
 
 @pytest.fixture
 def full_batman(batch, tmp_path):
-    from pharm_demo.batman_local import REQUIRED_FILES, PREDICTED_FILES
+    from pharm.batman.local import REQUIRED_FILES, PREDICTED_FILES
 
     directory = tmp_path / "batman"
     directory.mkdir()
@@ -227,7 +227,7 @@ def full_batman(batch, tmp_path):
 
 
 def test_full_batman_expansion_preserves_scope_and_disambiguates(full_batman, tmp_path):
-    from pharm_demo.discovery_batman import expand_database
+    from pharm.batman.catalog import expand_database
 
     base, directory, manifest = full_batman
     original_hash = digest(base)
@@ -256,7 +256,7 @@ def test_full_batman_expansion_preserves_scope_and_disambiguates(full_batman, tm
 
 
 def test_full_batman_rejects_changed_download_and_manifest(full_batman, tmp_path):
-    from pharm_demo.discovery_batman import expand_database
+    from pharm.batman.catalog import expand_database
 
     base, directory, manifest = full_batman
     altered_manifest = tmp_path / "altered.json"
@@ -271,7 +271,7 @@ def test_full_batman_rejects_changed_download_and_manifest(full_batman, tmp_path
 
 
 def test_database_config_selects_expanded_snapshot(full_batman, tmp_path, monkeypatch):
-    from pharm_demo.discovery_batman import expand_database
+    from pharm.batman.catalog import expand_database
 
     base, directory, manifest = full_batman
     expanded = tmp_path / "expanded.sqlite"
@@ -286,7 +286,7 @@ def test_database_config_selects_expanded_snapshot(full_batman, tmp_path, monkey
 
 
 def test_predicted_targets_ignores_numbers_in_spaced_chemical_name(tmp_path):
-    from pharm_demo.discovery_batman import predicted_targets
+    from pharm.batman.catalog import predicted_targets
 
     path = tmp_path / "predicted.txt"
     path.write_text("PubChem_CID IUPAC_name predicted_target_proteins\n"
