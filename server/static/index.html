@@ -1,39 +1,103 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Pharmacology Multi-Agent · 研究工作台</title>
-<style>
-:root{--ink:#172436;--muted:#647283;--paper:#f7f4ec;--paper2:#fffdf7;--line:#d9ddd8;--teal:#087f78;--teal2:#d9efeb;--amber:#bd741d;--red:#a63c37;--blue:#35698d;--shadow:0 18px 40px rgba(33,49,59,.08);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);min-height:100vh}button,select,input,textarea{font:inherit}button{cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #5bc4b6;outline-offset:2px}
-header{height:68px;border-bottom:1px solid var(--line);background:rgba(255,253,247,.94);display:flex;align-items:center;justify-content:space-between;padding:0 30px;position:sticky;top:0;z-index:10;backdrop-filter:blur(10px)}.brand{display:flex;align-items:center;gap:13px}.mark{width:30px;height:30px;border:2px solid var(--teal);border-radius:50%;position:relative}.mark:before,.mark:after{content:"";position:absolute;background:var(--teal)}.mark:before{width:12px;height:2px;left:7px;top:12px}.mark:after{height:12px;width:2px;left:12px;top:7px}.brand h1{font-size:17px;letter-spacing:.02em;margin:0;font-weight:750}.brand small{display:block;color:var(--muted);font-size:11px;margin-top:2px}.header-note{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:10px}.dot{height:7px;width:7px;border-radius:50%;background:var(--teal);display:inline-block;box-shadow:0 0 0 4px var(--teal2)}
-main{max-width:1500px;margin:auto;padding:28px 30px 40px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.16em;color:var(--teal);font-weight:800}.intro{display:flex;align-items:end;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:21px;margin-bottom:24px}.intro h2{font-size:clamp(24px,3vw,38px);letter-spacing:-.04em;margin:7px 0 5px}.intro p{margin:0;color:var(--muted);font-size:13px}.runtime{font-size:12px;color:var(--muted);text-align:right;line-height:1.7}.runtime strong{color:var(--ink);font-weight:650}
-.workspace{display:grid;grid-template-columns:320px minmax(350px,1fr) 300px;gap:18px;align-items:start}.rail,.inspector,.timeline{background:var(--paper2);border:1px solid var(--line);box-shadow:var(--shadow)}.rail{padding:20px;min-height:488px}.rail h3,.inspector h3,.timeline h3{font-size:13px;margin:0 0 16px;letter-spacing:.02em}.field{margin:0 0 18px}.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:7px}.field select{width:100%;height:38px;background:var(--paper);border:1px solid #c9d1cc;border-radius:4px;color:var(--ink);padding:0 9px}.primary,.secondary{width:100%;border-radius:4px;height:40px;border:1px solid transparent;font-weight:700;font-size:13px;transition:.2s}.primary{background:var(--teal);color:white}.primary:hover{background:#056861}.secondary{background:transparent;color:var(--ink);border-color:#bfc9c5;margin-top:9px}.secondary:hover{border-color:var(--teal);color:var(--teal)}button[disabled]{opacity:.42;cursor:not-allowed}.rule{height:1px;background:var(--line);margin:20px 0}.meta{font-size:11px;color:var(--muted);line-height:1.75}.meta b{color:var(--ink);font-weight:650}.account{display:flex;gap:8px;align-items:flex-start;background:#fbf1dc;color:#795726;border-left:3px solid #d59b3e;padding:9px 10px;margin-top:18px;font-size:11px;line-height:1.55}.account svg{flex:none;margin-top:1px}
-.flow{background:transparent;min-width:0}.flow-head{display:flex;align-items:center;justify-content:space-between;margin:1px 0 15px}.flow-head h3{margin:0;font-size:13px}.legend{font-size:11px;color:var(--muted);display:flex;gap:13px}.legend span{display:inline-flex;align-items:center;gap:5px}.legend i{width:8px;height:8px;border-radius:50%;display:inline-block}.i-done{background:var(--teal)}.i-run{background:#d79739}.i-wait{background:#b4bdc0} .flow-canvas{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(5,minmax(76px,auto));gap:36px 8px;min-height:600px;border-block:1px solid var(--line);padding:26px 14px;background:linear-gradient(90deg,rgba(217,239,235,.22),transparent 60%);isolation:isolate}.flow-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1}.flow-edge{fill:none;stroke:#9ab5ac;stroke-width:1.5}.node{position:relative;width:min(188px,140%);min-height:76px;justify-self:center;border:1px solid #cbd4cf;background:var(--paper2);padding:12px;text-align:left;border-radius:4px;transition:border-color .18s,box-shadow .18s;box-shadow:0 5px 14px rgba(35,55,57,.04)}.node:hover{border-color:var(--teal);box-shadow:0 8px 18px rgba(8,127,120,.12)}.node.selected{border:2px solid var(--teal);padding:11px}.node .node-top{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700}.status-dot{width:8px;height:8px;border-radius:50%;background:#aeb8b7;flex:none}.node.succeeded .status-dot{background:var(--teal)}.node.running .status-dot{background:#d89534;animation:pulse 1.5s infinite}.node.blocked .status-dot,.node.failed .status-dot{background:var(--red)}.node small{display:block;color:var(--muted);font-size:10px;margin-top:7px;line-height:1.6}.n-plan{grid-area:1/2}.n-herb{grid-area:2/1;justify-self:start}.n-disease{grid-area:2/3;justify-self:end}.n-intersection{grid-area:3/2}.n-network{grid-area:4/1;justify-self:start}.n-enrich{grid-area:4/3;justify-self:end}.n-review{grid-area:5/2}.flow-canvas.expanded{grid-template-rows:repeat(6,minmax(76px,auto))}.expanded .n-herb{grid-area:2/1;width:100%}.expanded .n-genecards{grid-area:2/2;width:100%;min-width:0}.expanded .n-omim{grid-area:2/3;width:100%;min-width:0}.expanded .n-disease{grid-area:3/2/4/4;justify-self:center;width:min(188px,100%)}.expanded .n-intersection{grid-area:4/2}.expanded .n-network{grid-area:5/1}.expanded .n-enrich{grid-area:5/3}.expanded .n-review{grid-area:6/2}@keyframes pulse{50%{opacity:.35}}
-.inspector{padding:20px;min-height:488px}.inspector .stage-title{font-size:19px;letter-spacing:-.025em;margin:3px 0 9px}.badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;border:1px solid #bdcbc5;padding:4px 7px;color:var(--muted);border-radius:20px}.badge.running{border-color:#dfb776;color:#9a6217;background:#fff9ed}.badge.succeeded{border-color:#88c9bd;color:#087f78;background:#effaf7}.badge.blocked,.badge.failed{border-color:#df9a94;color:var(--red);background:#fff2f0}.inspector p{font-size:12px;line-height:1.7;color:#46576a;margin:15px 0 17px}.inspector dl{margin:0;border-top:1px solid var(--line)}.inspector dt{font-size:10px;color:var(--muted);margin-top:14px}.inspector dd{font-size:12px;margin:5px 0 0;line-height:1.55}.blockers{color:var(--red)!important}.review-note{font-size:11px;color:#087f78;margin:0 0 6px}.blocker-list.resolved{color:#7a8a86!important;border-left:2px solid #88c9bd;padding-left:10px}.blocker-list.resolved li{opacity:.75}.account.reviewed{border-color:#88c9bd!important;background:#effaf7!important}.account.reviewed b{color:#087f78!important}.artifacts{list-style:none;padding:0;margin:6px 0 0}.artifacts li{font-size:11px;margin:5px 0}.artifacts a{color:var(--blue);text-decoration:none;border-bottom:1px solid #b8cedd}.artifacts a:hover{color:var(--teal)}.session{font-family:ui-monospace,monospace;color:#596c72;font-size:10px;word-break:break-all}
-.timeline{margin-top:22px;padding:20px 24px}.timeline-head{display:flex;justify-content:space-between;align-items:center}.timeline h3{margin-bottom:0}.timeline-note{font-size:11px;color:var(--muted)}.events{margin-top:17px;border-top:1px solid var(--line)}.event{display:grid;grid-template-columns:124px 120px 1fr;gap:14px;padding:12px 0;border-bottom:1px solid #e8e8e1;align-items:start}.event time{font-family:ui-monospace,monospace;font-size:10px;color:#7b8785}.event .role{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--teal);font-weight:750}.event .message{font-size:12px;color:#334657;line-height:1.5}.empty{color:var(--muted);font-size:12px;padding:20px 0}.toast{position:fixed;right:24px;bottom:24px;background:var(--ink);color:white;padding:12px 16px;border-radius:4px;font-size:12px;box-shadow:var(--shadow);opacity:0;transform:translateY(10px);pointer-events:none;transition:.25s;z-index:20}.toast.show{opacity:1;transform:none}.toast.error{background:var(--red)}
-@media(max-width:1100px){.workspace{grid-template-columns:290px minmax(0,1fr)}.rail{grid-column:1;grid-row:1/3}.flow{grid-column:2;grid-row:1}.inspector{grid-column:2;grid-row:2;min-height:auto}}@media(max-width:720px){header{padding:0 16px;height:62px}.header-note{display:none}main{padding:20px 14px}.intro{display:block}.runtime{text-align:left;margin-top:12px}.workspace{display:flex;flex-direction:column}.rail,.flow,.inspector{width:100%}.inspector{order:0}.rail{min-height:0}.composer-fields{display:block}.flow-canvas{min-height:570px;padding-inline:5px;gap:32px 8px}.node{width:min(166px,143%);padding:10px 8px}.node.selected{padding:9px 7px}.event{grid-template-columns:1fr;gap:4px}.timeline{padding:18px}.legend{gap:7px;font-size:10px;flex-wrap:wrap;justify-content:flex-end}}
-/* runtime mode and blocker callouts */
-.fixture-note{display:none;background:#fff0da;color:#754d18;border:1px solid #e2b768;border-left:3px solid #c98528;padding:10px;margin-top:9px;font-size:11px;line-height:1.55}.fixture-note.show{display:block}.account.network{background:#edf4f6;color:#356071;border-left-color:#6a9eb0}.account.blocked{background:#fff0ee;color:var(--red);border-left-color:var(--red)}
-.report-link{display:inline-block;margin-top:8px;font-size:11px;color:var(--blue);text-decoration:none;border-bottom:1px solid #b8cedd}
-.blocker-list{margin:0;padding-left:16px}.blocker-list li{margin:0 0 6px}.metric{display:block;font-size:11px;line-height:1.7;color:#40586a}.metric b{font-weight:650;color:var(--muted);margin-right:5px}
-.run-mode-banner{display:none;margin-top:10px;width:max-content;max-width:100%;padding:7px 10px;border:1px solid #dcae55;border-left:3px solid #bd741d;background:#fff0d6;color:#754d18;font-size:11px;font-weight:750;letter-spacing:.02em}.run-mode-banner.show{display:block}
-
-[hidden]{display:none!important}.meta,.account span,.event .message{overflow-wrap:anywhere}.events{max-height:440px;overflow-y:auto}.workspace{align-items:start}.rail,.inspector{min-width:0}.rail .form-note{margin:0 0 16px}.mode-help{font-size:11px;line-height:1.65;color:var(--muted);margin:8px 0 0}.panel-tabs{display:flex;border-bottom:1px solid var(--line);margin:-5px 0 20px;gap:20px}.panel-tab{border:0;border-bottom:2px solid transparent;padding:10px 0;background:transparent;color:var(--muted);font-size:13px}.panel-tab[aria-selected="true"]{color:var(--teal);border-color:var(--teal);font-weight:700}.field input,.field textarea,.field select{width:100%;border:1px solid #bdc9c3;background:#fffefa;border-radius:4px;padding:9px 10px;font-size:12px;color:var(--ink)}.field textarea{resize:vertical;min-height:65px;line-height:1.6}.field input:focus,.field textarea:focus{outline:2px solid #9bd0c5;outline-offset:1px}.field label{font-size:12px;color:var(--ink)}.field .help,.form-note{display:block;font-size:11px;color:var(--muted);line-height:1.6;margin-top:6px}.form-note{margin:0 0 16px}.composer-actions{display:flex;gap:8px}.composer-actions .secondary{margin:0;flex:1}.composer-actions .primary{flex:1.4}.form-status{font-size:12px;line-height:1.6;overflow-wrap:anywhere;margin:12px 0 0;color:var(--teal)}.form-status.error{color:var(--red)}.form-details{font-size:12px;border-top:1px solid var(--line);padding-top:10px;margin-bottom:16px}.form-details summary{cursor:pointer;color:var(--muted);margin-bottom:12px}.fixture-disclaimer{font-size:11px;color:#795726;background:#fff0da;padding:9px;margin-bottom:12px}.i-alert{background:var(--red)}.run-mode-banner.live{display:block;background:#edf6f3;border-color:#accbc0;color:#216655}.is-busy{opacity:.75} @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-</style>
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方剂反向疾病发现工作台</title>
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
-<header><div class="brand"><span class="mark" aria-hidden="true"></span><div><h1>Pharmacology Multi-Agent</h1><small>分子机制协作研究工作台</small></div></div><div class="header-note"><span class="dot"></span>运行环境 <strong>Codex luna · medium</strong></div></header>
-<main>
-  <section class="intro"><div><div class="eyebrow">RESEARCH OPERATIONS / 01</div><h2>药理研究任务</h2><p>追踪药材靶点与疾病靶点如何汇合为可检查的分析结果。</p><div class="run-mode-banner" id="runModeBanner">当前查看：合成工程验证 · 非真实药理结果</div></div><div class="runtime" id="viewingTask"><strong>正在查看</strong><br>等待运行记录</div></section>
-  <section class="workspace">
-    <aside class="rail" aria-label="任务工作栏"><div class="panel-tabs" role="tablist" aria-label="任务工作栏视图"><button id="composeTab" class="panel-tab" role="tab" aria-selected="true" aria-controls="composePanel">新建任务</button><button id="runsTab" class="panel-tab" role="tab" aria-selected="false" aria-controls="runsPanel" tabindex="-1">任务与记录</button></div><section id="composePanel" role="tabpanel" aria-labelledby="composeTab"><p class="form-note">填写研究对象，保存后即可启动多 Agent 协作。</p><form id="taskForm"><div class="composer-fields"><div class="field wide"><label for="formulaInput">方剂 / 研究名称</label><input id="formulaInput" name="formula" required maxlength="80" placeholder="例如：芍药甘草汤" autocomplete="off"></div><div class="field"><label for="herbsInput">药材</label><textarea id="herbsInput" name="herbs" required placeholder="白芍&#10;炙甘草" maxlength="3600"></textarea><span class="help">每行一味，也可用逗号分隔。</span></div><div class="field"><label for="diseasesInput">疾病关键词</label><textarea id="diseasesInput" name="diseases" required placeholder="Hyperthyroidism" maxlength="3600"></textarea><span class="help">用于疾病库检索，建议填写英文。</span><button type="button" id="thyroidPreset" class="panel-tab">填入五类甲状腺疾病</button></div><div class="field wide"><label for="notesInput">研究说明 <span class="help" style="display:inline">可选</span></label><textarea id="notesInput" name="research_notes" maxlength="4000" placeholder="说明本轮目标、关注范围或希望各 Agent 核查的问题。"></textarea><span class="help">说明会随任务一起交给各 Agent；请勿填写密码或验证码。</span></div></div><p class="form-note">已确认规则：先对单个疾病的 GeneCards 完整检索记录分别取中位数以上靶点，再合并不同疾病靶点去重（2026-09-17 医院方确认）。</p><div class="field"><label for="newMode">运行方式</label><select id="newMode" aria-describedby="newModeHelp"><option value="live">真实数据研究</option><option value="fixture">测试数据演练（非研究结果）</option></select><p class="mode-help" id="newModeHelp"></p></div><details class="form-details"><summary>已有数据（可选）</summary><div class="field"><label for="batchInput">已有导入批次（可选）</label><input id="batchInput" maxlength="80" placeholder="例如：20260913_01"><span class="help">没有完整导出也可启动来源核验。待确认的筛选阈值与背景集会保留为待办。</span></div></details><div id="newFixtureNote" class="fixture-disclaimer" hidden>使用固定合成数据验证协作流程，不查询上述研究对象，也不产生真实药理结论。</div><div class="composer-actions"><button type="button" class="secondary" id="saveTaskBtn">保存任务</button><button type="submit" class="primary" id="createRunBtn">保存并启动</button></div><div id="formStatus" class="form-status" role="status" aria-live="polite"></div></form></section><section id="runsPanel" role="tabpanel" aria-labelledby="runsTab" hidden><h3>任务与运行记录</h3><div class="field"><label for="taskSelect">研究任务</label><select id="taskSelect"></select></div><div class="field"><label for="runSelect">查看运行</label><select id="runSelect"><option value="">加载中…</option></select></div><div class="field"><label for="modeSelect">启动模式</label><select id="modeSelect" aria-describedby="modeHelp"><option value="live">真实数据研究</option><option value="fixture">测试数据演练（非研究结果）</option></select><p class="mode-help" id="modeHelp"></p><div class="fixture-note" id="fixtureNote"><b>合成验证</b><br>使用预先准备的测试数据，不查询所选药材和疾病。会调用 Agent，但不产生药理结论。</div></div><button class="primary" id="startBtn">开始实时运行</button><button class="secondary" id="resumeBtn" disabled>从断点继续</button><button class="secondary" id="signoffBtn" disabled>人工复核签字</button><div class="field" id="signoffForm" hidden><label for="reviewerInput">复核人</label><input id="reviewerInput" maxlength="40" placeholder="姓名"><label for="signoffNoteInput">复核备注（可选）</label><textarea id="signoffNoteInput" maxlength="500" placeholder="复核范围与结论"></textarea><button class="primary" id="signoffSubmit">确认签字（先自动复核清单）</button></div><div class="rule"></div><div class="meta" id="supplementBlock"><b>甲状腺癌补充流程</b><br><span id="supplementInfo">加载中…</span><div id="supplementArtifacts"></div></div><div class="rule"></div><div class="meta" id="taskMeta">等待任务信息…</div><div class="account" id="runtimeNotice"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7v5c0 5 3.8 8.5 9 9 5.2-.5 9-4 9-9V7l-9-4Z"/><path d="M12 8v4m0 4h.01"/></svg><span><b>运行阻塞状态</b><br>选择运行后显示实际阻塞项。</span></div></section></aside>
-    <section class="flow" aria-label="研究流程"><div class="flow-head"><h3>依赖流程</h3><div class="legend"><span><i class="i-done"></i>已完成</span><span><i class="i-run"></i>运行中</span><span><i class="i-wait"></i>待处理</span></div></div><div class="flow-canvas" id="flowCanvas"><svg class="flow-lines" id="flowLines" aria-hidden="true"></svg><button class="node n-plan" data-stage="coordinator_plan"><span class="node-top"><i class="status-dot"></i>协调计划</span><small>输入、分工与验收口径</small></button><button class="node n-herb" data-stage="herb_targets"><span class="node-top"><i class="status-dot"></i>药材靶点</span><small>BATMAN-TCM</small></button><button class="node n-genecards" data-stage="genecards_targets" hidden><span class="node-top"><i class="status-dot"></i>GeneCards</span><small>合并查询后筛选</small></button><button class="node n-omim" data-stage="omim_targets" hidden><span class="node-top"><i class="status-dot"></i>OMIM</span><small>疾病—基因关联</small></button><button class="node n-disease" data-stage="disease_targets"><span class="node-top"><i class="status-dot"></i>疾病靶点</span><small>GeneCards · OMIM</small></button><button class="node n-intersection" data-stage="intersection"><span class="node-top"><i class="status-dot"></i>共同靶点交集</span><small>Venny 2.1.0 · 结果核对</small></button><button class="node n-network" data-stage="network_analysis"><span class="node-top"><i class="status-dot"></i>网络分析</span><small>STRING · 网络拓扑</small></button><button class="node n-enrich" data-stage="enrichment_analysis"><span class="node-top"><i class="status-dot"></i>富集分析</span><small>DAVID · 富集核验</small></button><button class="node n-review" data-stage="coordinator_review"><span class="node-top"><i class="status-dot"></i>协调验收</span><small>汇总证据与限制</small></button></div></section>
-    <aside class="inspector" aria-label="阶段详情"><section id="detailPanel" aria-labelledby="detailHeading"><h3 id="detailHeading">阶段详情</h3><div class="stage-title" id="stageTitle">选择一个阶段</div><span class="badge" id="stageBadge">无运行</span><p id="stageSummary">选择流程节点查看摘要、阻塞项、产物和会话引用。</p><dl><dt>阻塞项</dt><dd id="blockers" class="blockers">—</dd><dt>产物 · 点击下载</dt><dd><ul class="artifacts" id="artifacts"><li>—</li></ul><div id="reportLink"></div></dd><dt>Agent 会话</dt><dd id="session" class="session">—</dd><dt>运行指标</dt><dd id="metrics">—</dd></dl></section></aside>
+<header>
+  <h1>方剂反向疾病发现工作台</h1>
+  <p class="note">本地确定性流水线：方剂 → BATMAN 本地靶点 → 本地疾病索引反查。关键词关联≠疗效；scientific_complete 恒为 false。</p>
+</header>
+<main class="layout">
+  <section class="column" id="panel-task">
+    <h2>新建任务</h2>
+    <label>方剂
+      <select id="formula-select"></select>
+    </label>
+    <label>药材（每行一味，可增删编辑）
+      <textarea id="herbs-input" rows="10" spellcheck="false"></textarea>
+    </label>
+    <label>BATMAN 阈值
+      <input id="threshold-input" type="number" step="0.01" min="0" max="1" value="0.84">
+    </label>
+    <label>运行方式
+      <select id="mode-select">
+        <option value="live">live（本地数据反查）</option>
+        <option value="fixture">fixture（合成工程验证）</option>
+      </select>
+    </label>
+    <label>研究说明
+      <textarea id="notes-input" rows="3" spellcheck="false"></textarea>
+    </label>
+    <div class="button-row">
+      <button id="save-task">保存任务</button>
+      <button id="save-start" class="primary">保存并启动</button>
+    </div>
+    <p id="task-message" class="message"></p>
+    <h2>已有任务</h2>
+    <ul id="task-list" class="item-list"></ul>
   </section>
-  <section class="timeline"><div class="timeline-head"><h3>事件时间线</h3><span class="timeline-note" id="timelineNote">仅显示可复核的运行事件</span></div><div class="events" id="events"><div class="empty">选择运行后加载事件。</div></div></section>
-</main><div class="toast" id="toast" role="status"></div>
-<script src="/assets/workbench.js"></script>
-</body></html>
+
+  <section class="column" id="panel-runs">
+    <h2>运行</h2>
+    <ul id="run-list" class="item-list"></ul>
+    <div class="button-row">
+      <button id="resume-run" hidden>恢复运行</button>
+      <a id="report-link" href="#" hidden>下载 report.md</a>
+    </div>
+    <h2>阶段</h2>
+    <div id="stage-graph" class="stage-graph"></div>
+    <h2>事件</h2>
+    <ul id="event-list" class="event-list"></ul>
+  </section>
+
+  <section class="column" id="panel-detail">
+    <h2>阶段详情</h2>
+    <div id="stage-detail"><p class="placeholder">在中间栏选择一个阶段查看详情。</p></div>
+    <div id="result-panel" hidden>
+      <h2>候选疾病</h2>
+      <table id="candidates-table">
+        <thead><tr><th>疾病关键词</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note">排列为索引固定顺序，不是疗效排名；零匹配如实显示。</p>
+      <div id="evidence-panel" hidden>
+        <h3 id="evidence-title"></h3>
+        <table id="evidence-table">
+          <thead><tr><th>基因</th><th>来源</th><th>行号</th><th>分值</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="evidence-note" class="note"></p>
+      </div>
+      <p id="unmatched-genes" class="note"></p>
+      <p id="unmatched-herbs" class="note"></p>
+    </div>
+    <div id="assist-panel" hidden>
+      <h2>人机协助</h2>
+      <div id="assist-launch">
+        <p id="assist-guidance-text" class="assist-guidance"></p>
+        <label>采集入口 URL
+          <input id="assist-url" type="text" placeholder="https://..." spellcheck="false">
+        </label>
+        <button id="assist-start" class="primary">启动协助会话</button>
+      </div>
+      <div id="assist-live" hidden>
+        <div class="button-row">
+          <span>状态：<span id="assist-state" class="badge"></span></span>
+          <button id="assist-stop">结束会话</button>
+        </div>
+        <p class="note">点击画面取得焦点后可直接键入；滚轮滚动页面。</p>
+        <div class="assist-body">
+          <canvas id="assist-canvas" tabindex="0" width="1280" height="800"></canvas>
+          <ul id="assist-guidance-list"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="/assets/app.js"></script>
+</body>
+</html>

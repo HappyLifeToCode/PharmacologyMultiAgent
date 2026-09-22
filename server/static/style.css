@@ -1,0 +1,127 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #f6f4ed;
+  color: #152f3e;
+  font: 15px/1.7 system-ui, "Microsoft YaHei", sans-serif;
+}
+header { padding: 20px 28px 8px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 18px 0 8px; border-bottom: 1px solid #cfc9b8; padding-bottom: 4px; }
+h3 { font-size: 15px; margin: 12px 0 6px; }
+.note { color: #61777f; font-size: 13px; }
+.layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr) minmax(360px, 1.6fr);
+  gap: 18px;
+  padding: 0 28px 28px;
+}
+@media (max-width: 1080px) {
+  .layout { grid-template-columns: 1fr; }
+}
+.column {
+  background: #fffdf7;
+  border: 1px solid #d8d2c0;
+  border-radius: 6px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+label { display: block; margin: 8px 0; font-size: 13px; color: #41565f; }
+select, input, textarea {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 8px;
+  border: 1px solid #b9c2bd;
+  border-radius: 4px;
+  font: inherit;
+  background: #fff;
+}
+textarea { resize: vertical; font-family: inherit; }
+button {
+  padding: 7px 16px;
+  border: 1px solid #8fa39c;
+  border-radius: 4px;
+  background: #eef3f0;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { background: #dde8e2; }
+button.primary { background: #168d87; border-color: #168d87; color: #fff; }
+button.primary:hover { background: #0f7a74; }
+.button-row { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+.message { color: #8a4b16; font-size: 13px; min-height: 1.2em; }
+.item-list { list-style: none; margin: 0; padding: 0; }
+.item-list li {
+  padding: 6px 8px;
+  border-bottom: 1px solid #e6e1d2;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.item-list li:hover { background: #eef3f0; }
+.item-list li.selected { background: #d7e8e5; }
+.item-list .meta { display: block; font-size: 12px; color: #61777f; }
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #fff;
+  background: #8a9296;
+}
+.badge.succeeded { background: #168d87; }
+.badge.failed { background: #b4433a; }
+.badge.blocked, .badge.partial { background: #bd7535; }
+.badge.running, .badge.pending { background: #5b8ff9; }
+.stage-graph { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.stage-node {
+  flex: 1 1 0;
+  min-width: 92px;
+  border: 1px solid #b9c2bd;
+  border-radius: 4px;
+  padding: 8px 6px;
+  text-align: center;
+  cursor: pointer;
+  background: #fff;
+}
+.stage-node .stage-name { font-size: 13px; display: block; }
+.stage-node.selected { outline: 2px solid #168d87; }
+.stage-node.succeeded { border-color: #168d87; background: #e3f2ef; }
+.stage-node.failed { border-color: #b4433a; background: #f7e3e1; }
+.stage-node.blocked, .stage-node.partial { border-color: #bd7535; background: #f7ecdd; }
+.stage-node.running { border-color: #5b8ff9; background: #e6eefd; }
+.stage-arrow { align-self: center; padding: 0 4px; color: #8a9296; }
+.event-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; font-size: 12px; }
+.event-list li { border-bottom: 1px solid #eee9db; padding: 3px 0; color: #41565f; overflow-wrap: anywhere; }
+.event-list .meta { color: #8a9296; margin-right: 6px; }
+.placeholder { color: #8a9296; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border: 1px solid #d8d2c0; padding: 4px 8px; text-align: left; }
+th { background: #eef3f0; }
+#candidates-table tbody tr { cursor: pointer; }
+#candidates-table tbody tr:hover { background: #eef3f0; }
+#candidates-table tbody tr.selected { background: #d7e8e5; }
+.assist-guidance { background: #f3dfb2; border-left: 4px solid #bc7931; padding: 8px 10px; }
+.assist-body { display: flex; gap: 10px; align-items: flex-start; }
+#assist-canvas {
+  border: 1px solid #41565f;
+  border-radius: 4px;
+  max-width: 100%;
+  background: #20262b;
+  cursor: crosshair;
+}
+#assist-canvas:focus { outline: 2px solid #168d87; }
+#assist-guidance-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 220px;
+  max-height: 480px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+#assist-guidance-list li { border-bottom: 1px solid #eee9db; padding: 4px 0; overflow-wrap: anywhere; }
+#assist-guidance-list .meta { color: #8a9296; margin-right: 4px; }
+.artifact-list { list-style: none; padding: 0; font-size: 13px; }
+.blocker-list { color: #8a4b16; font-size: 13px; }
+.assist-mark { background: #f3dfb2; padding: 0 4px; border-radius: 3px; }

@@ -83,7 +83,8 @@ class AssistSession:
             self._cdp = self._context.new_cdp_session(self._page)
             self._cdp.on("Page.screencastFrame", self._on_frame)
             self._cdp.send("Page.startScreencast", {"format": "jpeg", "quality": self._quality, "everyNthFrame": 1})
-            # screencast 只在页面重绘时出帧；启动时轻拍一次焦点让内嵌画面立刻亮起
+            # screencast 只在页面重绘时出帧；等首绘完成后轻拍焦点，让内嵌画面亮起
+            self._page.wait_for_timeout(500)
             self._page.keyboard.press("Tab")
         except Exception as exc:
             self._start_error = str(exc)

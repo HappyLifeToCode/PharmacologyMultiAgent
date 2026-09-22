@@ -15,6 +15,7 @@ from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
 from pharm.assist.bridge import AssistManager, AssistUnavailable
+from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
 import asyncio
@@ -44,17 +45,25 @@ async def local_only(request: Request, call_next):
 
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "server/static/discovery.html")
-
-
-@app.get("/legacy")
-def legacy_index():
     return FileResponse(ROOT / "server/static/index.html")
 
 
-@app.get("/assets/discovery.js")
-def discovery_script():
-    return FileResponse(ROOT / "server/static/discovery.js", media_type="text/javascript")
+@app.get("/assets/app.js")
+def app_script():
+    return FileResponse(ROOT / "server/static/app.js", media_type="text/javascript")
+
+
+@app.get("/assets/style.css")
+def app_style():
+    return FileResponse(ROOT / "server/static/style.css", media_type="text/css")
+
+
+@app.get("/api/formulas")
+def formulas():
+    return {"formulas": [{"name": name,
+                          "herbs": [{"canonical": canonical, "candidates": candidates}
+                                    for canonical, candidates in formula_candidates(name)],
+                          "source": SOURCE} for name in list_formulas()]}
 
 
 @app.get("/api/discovery/catalog")
@@ -100,11 +109,6 @@ def discovery_artifact(run_id: str, filename: str):
     if not path.is_relative_to(root) or not path.is_file():
         raise HTTPException(404)
     return FileResponse(path, filename=filename, media_type="application/octet-stream")
-
-
-@app.get("/assets/workbench.js")
-def workbench_script():
-    return FileResponse(ROOT / "server/static/workbench.js", media_type="text/javascript")
 
 
 @app.get("/api/tasks")

@@ -25,3 +25,23 @@ def test_artifact_allowlist_and_post_origin(tmp_path, monkeypatch):
         assert not calls
         assert client.post("/api/run", json={"task_id": "x"}, headers={"Origin": "http://localhost"}).status_code == 200
         assert len(calls) == 1
+
+
+def test_index_static_assets_and_formulas_catalog():
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "方剂反向疾病发现工作台" in page.text
+        assert client.get("/assets/app.js").status_code == 200
+        assert client.get("/assets/style.css").status_code == 200
+        # 旧页面与旧静态资源已下线
+        assert client.get("/legacy").status_code == 404
+        assert client.get("/assets/discovery.js").status_code == 404
+        assert client.get("/assets/workbench.js").status_code == 404
+        formulas = client.get("/api/formulas").json()["formulas"]
+        assert [f["name"] for f in formulas] == ["温经汤", "半夏白术天麻汤", "济川煎", "桃核承气汤"]
+        wenjing = formulas[0]
+        assert len(wenjing["herbs"]) == 12
+        assert wenjing["source"] == "standard_reference_pending_user_confirmation"
+        assert any(herb["canonical"] == "甘草" and herb["candidates"] == ["甘草", "炙甘草"]
+                   for herb in wenjing["herbs"])
