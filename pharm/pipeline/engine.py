@@ -124,7 +124,10 @@ def _availability(task):
             with closing(discovery._connect(database)) as connection:
                 metadata = discovery._metadata(connection)
             result["discovery_index"] = {"available": True, "database": str(database),
-                                         "diseases": metadata["diseases"], "created_at": metadata["created_at"]}
+                                         "disease_count": len(metadata["diseases"]),
+                                         "diseases": metadata["diseases"][:10],
+                                         "diseases_truncated": len(metadata["diseases"]) > 10,
+                                         "created_at": metadata["created_at"]}
     except (ValueError, OSError, sqlite3.Error) as exc:
         result["discovery_index"] = {"available": False, "error": str(exc), "guidance": INDEX_GUIDANCE}
     return result
@@ -137,18 +140,21 @@ def _reverse_lookup(database, genes, chunk_size=3000):
         return discovery.query(database, genes=genes), {"chunked": False}
     chunks = [genes[i:i + chunk_size] for i in range(0, len(genes), chunk_size)]
     parts = [discovery.query(database, genes=part) for part in chunks]
+    diseases = [candidate["disease"] for candidate in parts[0]["candidates"]]
     candidates = []
-    for position, disease in enumerate(discovery.DISEASES):
+    for position, disease in enumerate(diseases):
         rows = [row for part in parts for row in part["candidates"][position]["evidence"]]
         matched = sorted({row["gene_symbol"] for row in rows})
         indexed = parts[0]["candidates"][position]["indexed_target_count"]
+        per_source = {}
+        for row in rows:
+            per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
             "disease": disease, "matched_genes": matched, "matched_count": len(matched),
             "indexed_target_count": indexed,
             "input_coverage": len(matched) / len(genes),
             "disease_coverage": len(matched) / indexed if indexed else None,
-            "source_gene_counts": {source: len({row["gene_symbol"] for row in rows if row["source"] == source})
-                                   for source in ("genecards", "omim")},
+            "source_gene_counts": {source: len(symbols) for source, symbols in per_source.items()},
             "evidence": rows,
         })
     all_matched = {gene for candidate in candidates for gene in candidate["matched_genes"]}

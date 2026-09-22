@@ -61,7 +61,8 @@ def database(batch, tmp_path):
 def test_query_counts_duplicates_cross_disease_and_zero_matches(database):
     before = digest(database)
     result = discovery.query(database, genes=["TP53", "EGFR", "TP53", "ZZZTEST"])
-    first, second, third, fourth, fifth = result["candidates"]
+    # 索引疾病集合来自批次实际值：本批次覆盖 Hyperthyroidism/Hypothyroidism/Thyroid cancer
+    first, second, third = result["candidates"]
     assert result["input_count"] == 3
     assert result["matched_input_count"] == 2
     assert result["unmatched_genes"] == ["ZZZTEST"]
@@ -73,8 +74,7 @@ def test_query_counts_duplicates_cross_disease_and_zero_matches(database):
     assert any(row["relevance_score"] == 1 for row in first["evidence"])
     assert second["matched_count"] == 1
     assert third["disease_coverage"] == 0
-    assert fourth["disease_coverage"] is None
-    assert fifth["matched_count"] == 0
+    assert third["matched_count"] == 0
     assert result["scientific_complete"] is False
     assert result["dataset"]["selection"] == "all_valid_export_rows"
     assert result["database_sha256"] == before == digest(database)
@@ -160,7 +160,7 @@ def test_api_roundtrip_and_boundaries(batch, tmp_path, monkeypatch):
     discovery.build_database(batch, tmp_path / discovery.DEFAULT_DATABASE)
     with TestClient(backend.app, base_url="http://localhost") as client:
         catalog = client.get("/api/discovery/catalog").json()
-        assert len(catalog["diseases"]) == 5
+        assert len(catalog["diseases"]) == 3
         response = client.post("/api/discovery/query", json={"herbs": ["药材甲"]})
         assert response.status_code == 200
         body = response.json()
@@ -238,7 +238,7 @@ def test_full_batman_expansion_preserves_scope_and_disambiguates(full_batman, tm
     assert stats["rejected_count"] == 3
     assert digest(base) == original_hash
     catalog = discovery.catalog(expanded)
-    assert len(catalog["diseases"]) == 5
+    assert len(catalog["diseases"]) == 3
     duplicates = [name for name in catalog["herbs"] if name.startswith("黄芪")]
     assert len(duplicates) == 2 and duplicates[0] != duplicates[1]
     assert discovery.query(expanded, herbs=[duplicates[0]])["input"]["genes"] == ["TP53"]
@@ -293,3 +293,157 @@ def test_predicted_targets_ignores_numbers_in_spaced_chemical_name(tmp_path):
                     "1 methyl 8(17)-tetraene acid 7157(0.9)|207(0.7)\n"
                     "2 name without targets\n3\n", encoding="utf-8")
     assert list(predicted_targets(path, {"1", "2", "3"})) == [("1", [("7157", "0.9"), ("207", "0.7")])]
+
+
+def test_generalized_disease_set_from_batch_values(batch, tmp_path):
+    """疾病集合来自批次 disease 列实际值，首次出现序（genecards.csv 先于 omim.csv）。"""
+    provenance = json.loads((batch / "provenance.json").read_text(encoding="utf-8"))
+    diseases = ["Disease Alpha", "Disease Beta", "Disease Gamma"]
+    for name in ("genecards", "omim"):
+        provenance["sources"][name]["diseases"] = diseases
+    write_json(batch / "provenance.json", provenance)
+    write_csv(batch / "genecards.csv", ["disease", "gene_symbol", "relevance_score"], [
+        {"disease": "Disease Beta", "gene_symbol": "TP53", "relevance_score": 5},
+        {"disease": "Disease Alpha", "gene_symbol": "EGFR", "relevance_score": 9},
+    ])
+    write_csv(batch / "omim.csv", ["disease", "gene_symbol"], [
+        {"disease": "Disease Gamma", "gene_symbol": "AKT1"},
+    ])
+    path = tmp_path / "wide.sqlite"
+    metadata = discovery.build_database(batch, path)
+    assert metadata["import_kind"] == "genecards_omim_batch"
+    assert metadata["diseases"] == ["Disease Beta", "Disease Alpha", "Disease Gamma"]
+    result = discovery.query(path, genes=["TP53", "AKT1", "TNF"])
+    assert [c["disease"] for c in result["candidates"]] == ["Disease Beta", "Disease Alpha", "Disease Gamma"]
+    assert result["candidates"][0]["matched_count"] == 1
+    assert result["candidates"][1]["matched_count"] == 0  # 零匹配如实显示
+    assert result["candidates"][2]["matched_count"] == 1
+    catalog = discovery.catalog(path)
+    assert [d["name"] for d in catalog["diseases"]] == ["Disease Beta", "Disease Alpha", "Disease Gamma"]
+
+
+def test_legacy_index_without_diseases_field_falls_back_to_distinct(database):
+    """旧索引 metadata 没有疾病清单时，回退到 associations 表实际值（字典序）。"""
+    with sqlite3.connect(database) as connection:
+        metadata = json.loads(connection.execute("SELECT value FROM metadata").fetchone()[0])
+        metadata.pop("diseases")
+        connection.execute("UPDATE metadata SET value=?", (json.dumps(metadata, ensure_ascii=False),))
+    result = discovery.query(database, genes=["TP53"])
+    assert [c["disease"] for c in result["candidates"]] == [
+        "Hyperthyroidism", "Hypothyroidism", "Thyroid cancer"]
+    assert discovery.catalog(database)["diseases"][0]["name"] == "Hyperthyroidism"
+
+
+@pytest.fixture
+def assoc_batch(tmp_path):
+    directory = tmp_path / "assoc_batch"
+    directory.mkdir()
+    (directory / "raw.txt").write_text("Synthetic fixture, not research data", encoding="utf-8")
+    write_json(directory / "provenance.json", {
+        "sources": {"associations": {"complete": True, "source_url": "https://example.org/assoc",
+                                     "accessed_at": "2026-09-22", "raw_files": ["raw.txt"],
+                                     "diseases": ["Disease Alpha", "Disease Beta", "Disease Gamma"]}},
+        "mapping": {"confirmed": True, "method": "synthetic exact symbol", "version": "fixture",
+                    "raw_files": ["raw.txt"]},
+    })
+    write_csv(directory / "associations.csv", ["disease", "gene_symbol", "score", "source", "extra"], [
+        {"disease": "Disease Alpha", "gene_symbol": "TP53", "score": "12.5", "source": "genecards", "extra": "row-1"},
+        {"disease": "Disease Alpha", "gene_symbol": "EGFR", "score": "", "source": "omim", "extra": ""},
+        {"disease": "Disease Beta", "gene_symbol": "TP53", "score": "3", "source": "genecards", "extra": ""},
+    ])
+    return directory
+
+
+def test_generic_associations_build_query_catalog(assoc_batch, tmp_path):
+    from pharm.diseases.associations import build_associations_database
+    path = tmp_path / "generic.sqlite"
+    metadata = build_associations_database(assoc_batch, path)
+    assert metadata["import_kind"] == "generic_associations"
+    # 声明的 Disease Gamma 零关联，不进索引
+    assert metadata["diseases"] == ["Disease Alpha", "Disease Beta"]
+    assert metadata["rejected_symbol_rows"] == 0
+    result = discovery.query(path, genes=["TP53", "TNF"])
+    assert [c["disease"] for c in result["candidates"]] == ["Disease Alpha", "Disease Beta"]
+    alpha = result["candidates"][0]
+    assert alpha["matched_count"] == 1
+    assert alpha["source_gene_counts"] == {"genecards": 1}
+    assert alpha["evidence"][0]["record"]["extra"] == "row-1"
+    assert alpha["evidence"][0]["relevance_score"] == 12.5
+    assert result["candidates"][1]["matched_count"] == 1
+    catalog = discovery.catalog(path)
+    assert [d["name"] for d in catalog["diseases"]] == ["Disease Alpha", "Disease Beta"]
+    assert catalog["source_rows"] == {"associations": 3}
+    with pytest.raises(ValueError, match="未收录"):
+        discovery.query(path, herbs=["白芍"])
+
+
+@pytest.mark.parametrize("problem", ["missing_provenance", "incomplete", "bad_url", "escape"])
+def test_generic_batch_provenance_rejected(assoc_batch, problem):
+    from pharm.diseases.associations import build_associations_database
+    if problem == "missing_provenance":
+        (assoc_batch / "provenance.json").unlink()
+    else:
+        provenance = json.loads((assoc_batch / "provenance.json").read_text(encoding="utf-8"))
+        if problem == "incomplete":
+            provenance["sources"]["associations"]["complete"] = False
+        elif problem == "bad_url":
+            provenance["sources"]["associations"]["source_url"] = "ftp://example.org/data"
+        else:
+            provenance["sources"]["associations"]["raw_files"] = ["../outside.txt"]
+        write_json(assoc_batch / "provenance.json", provenance)
+    with pytest.raises(ValueError):
+        build_associations_database(assoc_batch, assoc_batch / "out.sqlite")
+    assert not (assoc_batch / "out.sqlite").exists()
+
+
+def test_generic_batch_duplicate_rows_rejected(assoc_batch, tmp_path):
+    from pharm.diseases.associations import build_associations_database
+    with (assoc_batch / "associations.csv").open("a", encoding="utf-8") as stream:
+        stream.write("Disease Alpha,TP53,12.5,genecards,row-dup\n")
+    with pytest.raises(ValueError, match="重复行"):
+        build_associations_database(assoc_batch, tmp_path / "dup.sqlite")
+    assert not (tmp_path / "dup.sqlite").exists()
+
+
+def test_generic_batch_invalid_symbols_archived_not_invented(assoc_batch, tmp_path):
+    from pharm.diseases.associations import build_associations_database
+    with (assoc_batch / "associations.csv").open("a", encoding="utf-8") as stream:
+        stream.write("Disease Beta,tp53lower,9,genecards,\n")
+        # Disease Gamma 只有非法符号行 → 零有效关联，不进索引
+        stream.write("Disease Gamma,BAD GENE,1,genecards,\n")
+    path = tmp_path / "generic.sqlite"
+    metadata = build_associations_database(assoc_batch, path)
+    assert metadata["rejected_symbol_rows"] == 2
+    assert "Disease Gamma" not in metadata["diseases"]
+    archived = tmp_path / "generic.rejected_symbols.csv"
+    assert archived.is_file()
+    text = archived.read_text(encoding="utf-8-sig")
+    assert "tp53lower" in text and "BAD GENE" in text
+    result = discovery.query(path, genes=["TP53"])
+    assert result["candidates"][0]["matched_count"] == 1
+
+
+def test_generic_batch_disease_cap(assoc_batch, tmp_path):
+    from pharm.diseases.associations import build_associations_database
+    provenance = json.loads((assoc_batch / "provenance.json").read_text(encoding="utf-8"))
+    provenance["sources"]["associations"].pop("diseases")
+    write_json(assoc_batch / "provenance.json", provenance)
+    rows = ["disease,gene_symbol\n"] + ["Disease %03d,TP%d\n" % (i, i) for i in range(501)]
+    (assoc_batch / "associations.csv").write_text("".join(rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="上限"):
+        build_associations_database(assoc_batch, tmp_path / "cap.sqlite")
+
+
+def test_prepare_batch_auto_detects_and_rejects_mixed(assoc_batch, batch, tmp_path):
+    metadata = discovery.prepare_batch(assoc_batch, tmp_path / "a.sqlite")
+    assert metadata["import_kind"] == "generic_associations"
+    metadata = discovery.prepare_batch(batch, tmp_path / "b.sqlite")
+    assert metadata["import_kind"] == "genecards_omim_batch"
+    (assoc_batch / "genecards.csv").write_text(
+        "disease,gene_symbol,relevance_score\nDisease Alpha,TP53,1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="无法识别批次类型"):
+        discovery.prepare_batch(assoc_batch, tmp_path / "c.sqlite")
+    empty = tmp_path / "empty_batch"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="缺少"):
+        discovery.prepare_batch(empty, tmp_path / "d.sqlite")

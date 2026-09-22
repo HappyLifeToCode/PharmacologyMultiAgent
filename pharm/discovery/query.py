@@ -1,4 +1,4 @@
-"""Local five-query disease lookup; association evidence, not efficacy prediction."""
+"""Local disease-association reverse lookup; association evidence, not efficacy prediction."""
 
 from __future__ import annotations
 
@@ -18,14 +18,17 @@ from ..core.imports import (
 )
 from ..core.symbols import normalize_symbols
 
+# 早期五病甲状腺批次的固定范围，仅供旧 fixture 与兼容测试引用；
+# 新建索引的疾病集合一律来自批次文件实际值，不再使用本常量做校验。
 DISEASES = (
     "Hyperthyroidism", "Hypothyroidism", "Thyroid cancer",
     "Thyroid nodules", "Thyroiditis",
 )
-DEFAULT_DATABASE = Path("local/discovery/five_diseases.sqlite")
+MAX_DISEASES = 500
+DEFAULT_DATABASE = Path("local/discovery/disease_index.sqlite")
 LIMITATION = (
-    "仅检索既有五类甲状腺疾病关键词导出；关键词检索关联不等于确诊疾病的因果或治疗证据。"
-    "使用全部合格导出记录，不新增 GeneCards 中位数或疗效筛选阈值。"
+    "本地索引仅收录批次导入的疾病-基因关联；关键词检索关联不等于确诊疾病的因果或治疗证据。"
+    "使用全部合格导出记录，不新增疗效筛选阈值。"
     "匹配数和覆盖比例仅作描述，不代表治疗能力、显著性或疾病优先级；未命中不代表无关联。"
 )
 
@@ -42,30 +45,39 @@ def database_path(root=ROOT):
 
 
 def build_database(batch, database):
+    """GeneCards+OMIM 三源批次 -> 本地只读索引。
+
+    疾病集合取批次 genecards.csv/omim.csv disease 列的实际值，顺序按文件内
+    首次出现（genecards.csv 先于 omim.csv），查询与目录输出沿用该固定顺序，
+    不是疗效排名。provenance 声明的疾病范围是查询范围记录：行不得超出声明，
+    声明了但零关联的疾病不进索引。
+    """
     batch, database = Path(batch).resolve(), Path(database).resolve()
     if database.exists():
         raise ValueError("数据库已存在；请为新数据版本指定新的文件名")
     provenance = _load_provenance(batch)
     _validate_mapping(provenance, batch)
     files = {"provenance.json"}
+    declared = {}
+    rows_by_source = {}
     for source in ("batman", "genecards", "omim"):
         declaration = _validate_source(provenance, source, batch)
-        if source != "batman" and (
-            not isinstance(declaration.get("diseases"), list)
-            or len(declaration["diseases"]) != len(DISEASES)
-            or set(declaration["diseases"]) != set(DISEASES)
-        ):
-            raise ValueError("当前版本仅接受既有五病范围，来源声明不一致：" + source)
         _, names = source_inputs(batch, source)
         files.update(names)
+        if source == "batman":
+            continue
+        scope = declaration.get("diseases")
+        if not isinstance(scope, list) or not scope or any(not isinstance(d, str) or not d.strip() for d in scope):
+            raise ValueError("provenance.sources.%s.diseases 必须为非空字符串列表" % source)
+        required = {"gene_symbol", "relevance_score"} if source == "genecards" else {"gene_symbol"}
+        declared[source] = [d.strip() for d in scope]
+        rows_by_source[source] = _query_rows(batch, source, required, declared[source])
     hashes = {name: digest(batch / name) for name in sorted(files)}
     herbs = provenance["sources"]["batman"]["herbs"]
     herb_data = load_herb(batch, {"herbs": herbs})
     records = []
     counts = {}
-    for source, required in (("genecards", {"gene_symbol", "relevance_score"}),
-                             ("omim", {"gene_symbol"})):
-        rows = _query_rows(batch, source, required, list(DISEASES))
+    for source, rows in rows_by_source.items():
         counts[source] = len(rows)
         for line, row in enumerate(rows, 2):
             _, rejected = normalize_symbols([row["gene_symbol"]])
@@ -78,16 +90,35 @@ def build_database(batch, database):
                     raise ValueError(f"{source}.csv:{line} 非法分值")
             records.append((row["gene_symbol"], row["disease"], source, line, score,
                             json.dumps(row, ensure_ascii=False)))
+    diseases = []
+    for source in ("genecards", "omim"):
+        for row in rows_by_source[source]:
+            if row["disease"] not in diseases:
+                diseases.append(row["disease"])
+    if len(diseases) > MAX_DISEASES:
+        raise ValueError("疾病数量超过上限 %d：%d" % (MAX_DISEASES, len(diseases)))
     if hashes != {name: digest(batch / name) for name in hashes}:
         raise ValueError("建立索引期间来源文件发生变化，请重新准备数据")
     metadata = {
         "schema_version": 1, "created_at": now(), "batch_name": batch.name,
-        "diseases": list(DISEASES), "herbs": herbs, "source_rows": counts,
+        "import_kind": "genecards_omim_batch",
+        "diseases": diseases, "declared_diseases": declared,
+        "herbs": herbs, "source_rows": counts,
         "herb_source_counts": herb_data["source_counts"],
         "selection": "all_valid_export_rows", "identifier_policy": "exact_symbol_no_alias_mapping",
         "disease_identifier_policy": "source_query_labels_not_ontology_ids",
         "provenance": provenance, "source_sha256": hashes, "limitation": LIMITATION,
     }
+    _create_database(database, metadata, records, [
+        (row["herb"], row["compound_id"], row["gene_symbol"], row["evidence"], row["score"])
+        for row in herb_data["relations"]
+    ])
+    return metadata
+
+
+def _create_database(database, metadata, records, herb_rows):
+    """写入只读索引 sqlite：临时文件 + 不覆盖既有库 + 库内 metadata 单条。"""
+    database = Path(database).resolve()
     database.parent.mkdir(parents=True, exist_ok=True)
     temporary = database.with_name(database.name + "." + uuid4().hex + ".tmp")
     try:
@@ -107,29 +138,48 @@ def build_database(batch, database):
                 """)
                 connection.execute("INSERT INTO metadata VALUES (?)", (json.dumps(metadata, ensure_ascii=False),))
                 connection.executemany("INSERT INTO associations VALUES (?,?,?,?,?,?)", records)
-                connection.executemany("INSERT INTO herb_relations VALUES (?,?,?,?,?)", [
-                    (row["herb"], row["compound_id"], row["gene_symbol"], row["evidence"], row["score"])
-                    for row in herb_data["relations"]
-                ])
+                connection.executemany("INSERT INTO herb_relations VALUES (?,?,?,?,?)", herb_rows)
         if database.exists():
             raise ValueError("目标数据库已存在，请使用新的版本文件名")
         temporary.rename(database)
     finally:
         temporary.unlink(missing_ok=True)
-    return metadata
+
+
+def prepare_batch(batch, database):
+    """自动识别批次类型建索引：associations.csv 走通用通道；genecards.csv/
+    omim.csv 走三源批次；两类文件共存时报错而不是猜测。"""
+    batch = Path(batch)
+    has_generic = (batch / "associations.csv").is_file()
+    has_legacy = (batch / "genecards.csv").is_file() or (batch / "omim.csv").is_file()
+    if has_generic and has_legacy:
+        raise ValueError("批次目录同时包含 associations.csv 与 genecards.csv/omim.csv，无法识别批次类型，请分开存放")
+    if has_generic:
+        from ..diseases.associations import build_associations_database
+        return build_associations_database(batch, database)
+    if has_legacy:
+        return build_database(batch, database)
+    raise ValueError("批次目录缺少 associations.csv 或 genecards.csv/omim.csv：" + str(batch))
 
 
 def _connect(database):
     database = Path(database).resolve()
     if not database.is_file():
-        raise ValueError("本地五病索引尚未准备，请先执行 discovery prepare")
+        raise ValueError("本地疾病索引尚未准备，请先执行 discovery prepare")
     return sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
 
 
 def _metadata(connection):
     metadata = json.loads(connection.execute("SELECT value FROM metadata").fetchone()[0])
-    if metadata.get("schema_version") not in (1, 2) or metadata.get("diseases") != list(DISEASES):
-        raise ValueError("不支持的反查数据库版本或疾病范围")
+    if metadata.get("schema_version") not in (1, 2):
+        raise ValueError("不支持的反查数据库版本")
+    diseases = metadata.get("diseases")
+    if not isinstance(diseases, list) or not diseases or any(not isinstance(d, str) or not d for d in diseases):
+        # 旧索引 metadata 可能没有疾病清单：回退到关联表实际值（字典序）
+        diseases = [row[0] for row in connection.execute("SELECT DISTINCT disease FROM associations ORDER BY disease")]
+        if not diseases:
+            raise ValueError("索引缺少疾病清单")
+        metadata["diseases"] = diseases
     return metadata
 
 
@@ -137,7 +187,7 @@ def catalog(database):
     with closing(_connect(database)) as connection:
         metadata = _metadata(connection)
         totals = dict(connection.execute("SELECT disease, COUNT(DISTINCT gene) FROM associations GROUP BY disease"))
-    return {"diseases": [{"name": disease, "target_count": totals.get(disease, 0)} for disease in DISEASES],
+    return {"diseases": [{"name": disease, "target_count": totals.get(disease, 0)} for disease in metadata["diseases"]],
             "herbs": metadata["herbs"], "source_rows": metadata["source_rows"],
             "herb_catalog": metadata.get("herb_catalog", []),
             "batman_expansion": metadata.get("batman_expansion"),
@@ -191,17 +241,19 @@ def query(database, *, herbs=None, genes=None):
                 f"SELECT gene,disease,source,source_row,score,record FROM associations WHERE gene IN ({placeholders}) ORDER BY disease,gene,source,source_row", symbols)
         ]
     candidates, all_matched = [], set()
-    for disease in DISEASES:
+    for disease in metadata["diseases"]:
         rows = [row for row in evidence if row["disease"] == disease]
         matched = sorted({row["gene_symbol"] for row in rows})
         all_matched.update(matched)
+        per_source = {}
+        for row in rows:
+            per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
             "disease": disease, "matched_genes": matched, "matched_count": len(matched),
             "indexed_target_count": totals.get(disease, 0),
             "input_coverage": len(matched) / len(symbols),
             "disease_coverage": len(matched) / totals[disease] if totals.get(disease) else None,
-            "source_gene_counts": {source: len({row["gene_symbol"] for row in rows if row["source"] == source})
-                                   for source in ("genecards", "omim")},
+            "source_gene_counts": {source: len(genes) for source, genes in per_source.items()},
             "evidence": rows,
         })
     if "herb_catalog" in metadata:
@@ -234,7 +286,7 @@ def save_result(result, output):
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(row for candidate in result["candidates"] for row in candidate["evidence"])
-    lines = ["# 五病范围本地反向查询", "", result["limitation"], "",
+    lines = ["# 本地疾病索引反向查询", "", result["limitation"], "",
              f"输入靶点 {result['input_count']} 个，至少命中一个关键词的靶点 {result['matched_input_count']} 个。",
              "", "| 疾病关键词 | 匹配靶点 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: |"]
     for candidate in result["candidates"]:
@@ -268,7 +320,7 @@ def main():
     args = parser.parse_args()
     args.db = args.db or database_path()
     if args.command == "prepare":
-        metadata = build_database(args.batch, args.db)
+        metadata = prepare_batch(args.batch, args.db)
         print(json.dumps({"database": str(args.db), "source_rows": metadata["source_rows"]}, ensure_ascii=False))
     elif args.command == "expand-batman":
         from ..batman.catalog import expand_database

@@ -58,7 +58,7 @@ def discovery_catalog():
     try:
         return discovery.catalog(discovery.database_path(ROOT))
     except (ValueError, OSError, sqlite3.Error):
-        raise HTTPException(503, "本地五病索引不可用，请先按照反向查询说明准备索引")
+        raise HTTPException(503, "本地疾病索引不可用，请先按照反向查询说明准备索引")
 
 
 def execute_discovery(body):

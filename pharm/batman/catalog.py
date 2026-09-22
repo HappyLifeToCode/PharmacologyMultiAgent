@@ -82,7 +82,7 @@ def expand_database(source_database, output, data_dir, manifest):
         metadata = _metadata(source)
     baseline_herbs = list(metadata["herbs"])
     if metadata["schema_version"] != 1:
-        raise ValueError("请从原始五病 v1 索引建立全药材版本")
+        raise ValueError("请从 v1 基准索引建立全药材版本")
     expected_manifest = metadata["source_sha256"].get("raw/batman_full_files.manifest.json")
     if not expected_manifest or digest(manifest) != expected_manifest:
         raise ValueError("BATMAN 文件清单与原批次登记哈希不一致")
