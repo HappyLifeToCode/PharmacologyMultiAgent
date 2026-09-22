@@ -1,4 +1,4 @@
-"""Run a queued research task using independent Codex sessions."""
+"""Run a queued research task through the local reverse-discovery pipeline."""
 import argparse
 import sys
 from pathlib import Path
@@ -10,7 +10,7 @@ from pharm.pipeline.engine import start
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", default=None)
-    parser.add_argument("--mode", choices=["live", "fixture"], default="live")
+    parser.add_argument("--mode", choices=["live", "fixture"], default=None)
     parser.add_argument("--resume")
     args = parser.parse_args()
     task_id = args.task

@@ -3,57 +3,56 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
 
-from ..core.archive import _component
+from ..batman.formulas import formula_herbs, list_formulas
+
+MODES = ("live", "fixture")
 
 
 def prepare_task(body):
     if not isinstance(body, dict):
         raise ValueError("任务必须是 JSON 对象")
-    allowed = {"formula", "herbs", "diseases", "research_notes", "import_batch"}
+    allowed = {"formula", "herbs", "research_notes", "batman_threshold", "mode"}
     if set(body) - allowed:
         raise ValueError("包含不支持的任务字段")
     formula = body.get("formula")
-    if not isinstance(formula, str) or not 1 <= len(formula.strip()) <= 80:
-        raise ValueError("请填写方剂或研究名称（最多 80 字）")
-    formula = formula.strip()
-    try:
-        _component(formula)
-    except ValueError:
-        raise ValueError("研究名称不能包含路径符号或 Windows 保留名称")
-    def entries(key, label):
-        values = body.get(key)
-        if not isinstance(values, list) or not 1 <= len(values) <= 30:
-            raise ValueError(label + "需填写 1—30 项")
+    if formula is not None:
+        if not isinstance(formula, str) or formula not in list_formulas():
+            raise ValueError("方剂名称须为内置四方之一：" + "、".join(list_formulas()))
+    herbs = body.get("herbs")
+    if herbs is None and formula is None:
+        raise ValueError("请填写方剂名称或药材清单")
+    if herbs is not None:
+        if not isinstance(herbs, list) or not 1 <= len(herbs) <= 30:
+            raise ValueError("药材需填写 1—30 项")
         output, seen = [], set()
-        for value in values:
+        for value in herbs:
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= 120 or any(ord(c) < 32 for c in value):
-                raise ValueError(label + "每项需为 1—120 字的单行文本")
+                raise ValueError("药材每项需为 1—120 字的单行文本")
             value = value.strip()
             if value.casefold() not in seen:
                 output.append(value)
                 seen.add(value.casefold())
-        return output
+        herbs = output
+        composition = "herbs_override" if formula else "custom_herbs"
+    else:
+        herbs = formula_herbs(formula)
+        composition = "formula"
     notes = body.get("research_notes", "")
     if not isinstance(notes, str) or len(notes) > 4000 or "\x00" in notes:
         raise ValueError("研究说明最多 4000 字")
-    task = {"formula": formula, "herbs": entries("herbs", "药材"), "diseases": entries("diseases", "疾病关键词"),
-            "research_notes": notes.strip(), "organism": "Homo sapiens", "taxon_id": 9606,
-            "batman_threshold": 0.84, "batman_threshold_confirmed": True,
-            "genecards_filter": "relevance_score > median_of_complete_query_results",
-            "genecards_median_scope": "per_disease_median", "genecards_median_status": "confirmed",
-            "genecards_online": True,
-            "string_confidence": 0.9, "string_additional_nodes": 0,
-            "enrichment_input": "herb_disease_intersection", "enrichment_background": None,
-            "enrichment_test_required": "hypergeometric", "multiple_testing": "Benjamini-Hochberg", "fdr_lt": 0.05}
-    batch = body.get("import_batch", "")
-    if not isinstance(batch, str):
-        raise ValueError("导入批次需为文本")
-    if batch.strip():
-        task["import_batch"] = _component(batch.strip())
+    threshold = body.get("batman_threshold", 0.84)
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(float(threshold)):
+        raise ValueError("batman_threshold 须为有限数值")
+    mode = body.get("mode", "live")
+    if mode not in MODES:
+        raise ValueError("mode 只支持 live 或 fixture")
+    task = {"formula": formula, "herbs": herbs, "research_notes": notes.strip(),
+            "batman_threshold": float(threshold), "mode": mode, "composition": composition}
     key = hashlib.sha256(json.dumps(task, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return dict(task_id="web_" + key, **task)
 

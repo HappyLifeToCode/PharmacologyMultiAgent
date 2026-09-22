@@ -97,8 +97,8 @@ def _open_text(path):
     return path.open("r", encoding="utf-8", errors="strict")
 
 
-def _load_herb_compounds(path, herbs):
-    """herb_browse.txt -> {task herb name: {PubChem CID: compound name}}.
+def _match_herb_compounds(path, herbs):
+    """herb_browse.txt -> ({name: {PubChem CID: compound name}}, [未命中名])。不抛错。
 
     Task herbs are matched against the Chinese name column first, then the
     pinyin column (uppercase), so both "白芍" and "BAI SHAO" are accepted.
@@ -126,6 +126,11 @@ def _load_herb_compounds(path, herbs):
                 if match:
                     compounds[owner][match.group(2)] = match.group(1).strip()
     missing = [h for h in herbs if not compounds[h]]
+    return compounds, missing
+
+
+def _load_herb_compounds(path, herbs):
+    compounds, missing = _match_herb_compounds(path, herbs)
     if missing:
         raise ValueError("herb_browse.txt 中未找到药材（核对中文名/拼音及炮制形式）：" + "、".join(missing))
     return compounds
@@ -282,3 +287,88 @@ def generate_import(task, directory):
             "rejected_symbol_rows": len(rejected_symbols),
             "include_predicted": include_predicted, "per_herb": per_herb,
             "import_dir": str(target_dir)}
+
+
+def query_local_targets(herb_candidates, threshold=0.84, task=None):
+    """查本地 BATMAN 全量下载：canonical 药材 -> 成分 -> 靶点关系。
+
+    herb_candidates 为 {canonical 名: [候选名, ...]}，按候选顺序取第一个在
+    herb_browse.txt 命中的名字；全部未命中的 canonical 记入 unmatched（动物/
+    矿物药可能本无记录），不抛错。known 行为二值证据，score=None 且不过滤；
+    predicted 行仅在本地 predicted 文件存在时纳入，保留 score 严格大于阈值者。
+    """
+    task = task or {}
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(float(threshold)):
+        raise ValueError("batman_threshold must be finite numeric")
+    root = _data_root(task)
+    files = {}
+    for kind, name in REQUIRED_FILES.items():
+        candidate = root / name
+        if not candidate.is_file():
+            raise ValueError("本地 BATMAN 文件缺失：" + str(candidate))
+        files[kind] = candidate
+    for kind, names in PREDICTED_FILES.items():
+        for name in names:
+            candidate = root / name
+            if candidate.is_file():
+                files[kind] = candidate
+                break
+    include_predicted = all(kind in files for kind in PREDICTED_FILES)
+
+    all_names = [name for names in herb_candidates.values() for name in names]
+    matched, _ = _match_herb_compounds(files["herbs"], all_names)
+    per_canonical = {}
+    unmatched = []
+    for canonical, names in herb_candidates.items():
+        chosen = next((name for name in names if matched.get(name)), None)
+        if chosen is None:
+            unmatched.append(canonical)
+        else:
+            per_canonical[canonical] = (chosen, matched[chosen])
+
+    all_cids = {cid for _, compounds in per_canonical.values() for cid in compounds}
+    known = _load_known(files["known_by_ingredients"], all_cids)
+    predicted = {}
+    if include_predicted:
+        symbols = _load_entrez_symbols([files["known_by_targets"], files["predicted_by_targets"]])
+        for cid, hits in _load_predicted(files["predicted_by_ingredients"], all_cids).items():
+            rows = []
+            for entrez, prob in hits:
+                symbol = symbols.get(entrez)
+                if symbol:
+                    rows.append((symbol, float(prob)))
+            predicted[cid] = rows
+
+    relations = []
+    rejected = []
+    per_herb = {}
+    for canonical, (batman_name, compounds) in per_canonical.items():
+        rows_before = len(relations)
+        for cid in sorted(compounds):
+            for symbol in known.get(cid, []):
+                if not _valid_symbol(symbol):
+                    rejected.append({"herb": canonical, "compound_id": cid, "gene_symbol": symbol, "evidence": "known"})
+                    continue
+                relations.append({"herb": canonical, "batman_name": batman_name, "compound_id": cid,
+                                  "compound_name": compounds[cid], "gene_symbol": symbol,
+                                  "score": None, "evidence": "known"})
+            for symbol, prob in predicted.get(cid, []):
+                if not _valid_symbol(symbol):
+                    rejected.append({"herb": canonical, "compound_id": cid, "gene_symbol": symbol, "evidence": "predicted"})
+                    continue
+                if prob > float(threshold):
+                    relations.append({"herb": canonical, "batman_name": batman_name, "compound_id": cid,
+                                      "compound_name": compounds[cid], "gene_symbol": symbol,
+                                      "score": prob, "evidence": "predicted"})
+        per_herb[canonical] = {"batman_name": batman_name, "compounds": len(compounds),
+                               "relations": len(relations) - rows_before}
+
+    genes = sorted({row["gene_symbol"] for row in relations})
+    return {
+        "genes": genes, "relations": relations, "unmatched": unmatched,
+        "rejected_symbols": rejected, "per_herb": per_herb,
+        "include_predicted": include_predicted, "threshold": float(threshold),
+        "data_version": DATA_VERSION, "source_url": BATMAN_SOURCE_URL,
+        "files": {kind: {"filename": path.name, "bytes": path.stat().st_size, "sha256": digest(path)}
+                  for kind, path in sorted(files.items())},
+    }

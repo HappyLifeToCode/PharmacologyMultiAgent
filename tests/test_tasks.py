@@ -4,7 +4,7 @@ from pharm.pipeline.tasks import save_task, prepare_task
 
 
 def body():
-    return {"formula": "芍药甘草汤", "herbs": ["白芍", "炙甘草", "白芍"], "diseases": ["Hyperthyroidism"], "research_notes": "保留原始来源与访问日期"}
+    return {"formula": "温经汤", "research_notes": "保留原始来源与访问日期"}
 
 
 def test_fresh_checkout_ignores_shared_and_legacy_tasks(tmp_path, monkeypatch):
@@ -40,7 +40,7 @@ def test_cli_empty_tasks_and_resume_without_task_list(tmp_path, monkeypatch, cap
     assert "tasks/README.md" in capsys.readouterr().err
     monkeypatch.setattr(sys, "argv", [str(script), "--resume", "old_run"])
     runpy.run_path(str(script), run_name="__main__")
-    assert calls == [((None, "live"), {"resume": "old_run", "background": False})]
+    assert calls == [((None, None), {"resume": "old_run", "background": False})]
 
 
 def test_save_preserves_existing_tasks_and_deduplicates_retries(tmp_path):
@@ -48,19 +48,34 @@ def test_save_preserves_existing_tasks_and_deduplicates_retries(tmp_path):
     p.parent.mkdir()
     p.write_text('{"task_id":"existing","extra":"用户已有字段"}', encoding="utf-8-sig")
     task, created = save_task(body(), tmp_path)
-    assert created and task["herbs"] == ["白芍", "炙甘草"]
+    assert created and task["herbs"] == ["吴茱萸", "当归", "芍药", "川芎", "人参", "桂枝",
+                                       "阿胶", "牡丹皮", "生姜", "甘草", "半夏", "麦冬"]
+    assert task["composition"] == "formula"
     before = p.read_bytes()
     assert save_task(body(), tmp_path) == (task, False)
     assert p.read_bytes() == before
     rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines()]
     assert rows[0] == {"task_id": "existing", "extra": "用户已有字段"}
     assert rows[1]["research_notes"] == body()["research_notes"]
-    assert task["batman_threshold"] == 0.84 and task["batman_threshold_confirmed"] is True
-    assert task["enrichment_background"] is None
+    assert task["batman_threshold"] == 0.84 and task["mode"] == "live"
     assert not (p.parent / ".tasks.lock").exists()
 
 
-@pytest.mark.parametrize("change", [{"formula":"../escape"}, {"formula":"CON"}, {"herbs":[]}, {"herbs":"白芍"}, {"diseases":["bad\nentry"]}, {"research_notes":"x"*4001}, {"import_batch":"../outside"}, {"model":"other"}])
+def test_herbs_override_formula_composition(tmp_path):
+    task, created = save_task({"formula": "温经汤", "herbs": ["白芍", "炙甘草", "白芍"]}, tmp_path)
+    assert created
+    assert task["herbs"] == ["白芍", "炙甘草"]
+    assert task["composition"] == "herbs_override"
+    task, _ = save_task({"herbs": ["白芍", "甘草"]}, tmp_path)
+    assert task["formula"] is None and task["composition"] == "custom_herbs"
+
+
+def test_task_requires_formula_or_herbs():
+    with pytest.raises(ValueError, match="方剂名称或药材清单"):
+        prepare_task({})
+
+
+@pytest.mark.parametrize("change", [{"formula":"../escape"}, {"formula":"CON"}, {"formula":"未知方"}, {"herbs":[]}, {"herbs":"白芍"}, {"herbs":["bad\nentry"]}, {"research_notes":"x"*4001}, {"diseases":["Hyperthyroidism"]}, {"import_batch":"../outside"}, {"model":"other"}, {"mode":"bogus"}, {"batman_threshold":"high"}])
 def test_invalid_tasks_are_not_persisted(tmp_path, change):
     with pytest.raises(ValueError):
         save_task(dict(body(), **change), tmp_path)

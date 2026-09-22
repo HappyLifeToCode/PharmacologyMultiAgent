@@ -166,7 +166,7 @@ async def run_new(request: Request):
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("请求必须是 JSON 对象")
-        return {"run_id": start(body.get("task_id"), body.get("mode", "live"))}
+        return {"run_id": start(body.get("task_id"), body.get("mode"))}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except RuntimeError as exc:
@@ -178,6 +178,8 @@ def run_resume(run_id: str):
     manifest_for(run_id)
     try:
         return {"run_id": start(resume=run_id)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
 

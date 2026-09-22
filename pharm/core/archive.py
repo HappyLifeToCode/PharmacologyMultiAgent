@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from .common import read_json, write_json, digest, now, public_artifact
 
-STAGE_DIRS = {"herb_targets": "01_batman", "disease_targets": "02_disease", "genecards_targets": "02_disease/genecards", "omim_targets": "02_disease/omim", "intersection": "03_intersect", "network_analysis": "04_ppi", "enrichment_analysis": "05_enrich"}
+STAGE_DIRS = {"preflight": "01_preflight", "herb_targets": "02_herb", "disease_reverse": "03_reverse", "review": "04_review"}
 _ARCHIVE_LOCK = threading.RLock()
 
 
@@ -18,14 +18,19 @@ def _component(value):
     return value
 
 
+def archive_name(task):
+    """归档根目录名：内置方剂用方名，自由药材组合用 custom_<task_id>。"""
+    return task.get('formula') or 'custom_' + str(task['task_id'])
+
+
 def init_archive(task, archive_root):
-    canonical = Path(archive_root).resolve() / _component(task['formula'])
+    canonical = Path(archive_root).resolve() / _component(archive_name(task))
     for name in STAGE_DIRS.values():
         (canonical / name).mkdir(parents=True, exist_ok=True)
     meta = canonical / '_meta.md'
     with _ARCHIVE_LOCK:
         if not meta.exists():
-            meta.write_text('# ' + task['formula'] + ' 数据流水账\n\n建目录不代表研究完成。原始文件、访问受限证据和分析产物按运行/尝试分批保存；以每批 status、参数和来源判断用途。合成数据禁止写入。归档时间不是数据库访问日期；未知访问日期保留空值。\n', encoding='utf-8')
+            meta.write_text('# ' + archive_name(task) + ' 数据流水账\n\n建目录不代表研究完成。原始文件、访问受限证据和分析产物按运行/尝试分批保存；以每批 status、参数和来源判断用途。合成数据禁止写入。归档时间不是数据库访问日期；未知访问日期保留空值。\n', encoding='utf-8')
     return canonical
 
 
