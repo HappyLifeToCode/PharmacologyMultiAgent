@@ -72,7 +72,7 @@ def test_fixture_end_to_end(root):
 
 
 def test_live_blocked_without_local_data(root):
-    run_id, manifest = run_task(root, {"herbs": ["白芍"]})
+    run_id, manifest = run_task(root, {"herbs": ["白芍"], "agents": False})
     assert manifest["status"] == "partial"
     assert manifest["stages"]["preflight"]["status"] == "succeeded"
     availability = json.loads((root / "runs" / run_id / "preflight/attempt_01/availability.json").read_text(encoding="utf-8"))
@@ -123,7 +123,7 @@ def test_review_detects_tampered_artifact(root):
 def test_live_herb_unmatched_recorded(root, tmp_path):
     data = _batman_data_dir(tmp_path)
     task = {"task_id": "web_testbatman", "formula": None, "herbs": ["白芍", "阿胶"],
-            "research_notes": "", "batman_threshold": 0.84, "mode": "live",
+            "research_notes": "", "batman_threshold": 0.84, "mode": "live", "agents": False,
             "batman_local_dir": str(data), "batman_accessed_at": "2026-09-17"}
     (root / "tasks").mkdir()
     (root / "tasks" / "tasks.local.jsonl").write_text(json.dumps(task, ensure_ascii=False) + "\n", encoding="utf-8")

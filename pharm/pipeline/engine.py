@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -21,6 +22,7 @@ from ..core.archive import archive_run
 from ..batman import local as batman_local
 from ..batman.formulas import resolve_batman_names
 from ..discovery import query as discovery
+from ..agents import runtime
 from .scheduler import STAGES, execute_graph
 
 WORKFLOW_VERSION = 3
@@ -37,6 +39,27 @@ BATMAN_ASSIST = ("BATMAN 本地数据未配置。可在工作台启动在线采�
 INDEX_ASSIST = ("本地疾病索引未准备。可在工作台启动在线采集协助会话，"
                 "由您在内嵌浏览器中完成人机验证后继续。")
 SYNTHETIC = "synthetic_engineering"
+
+# live + agents=true 时，程序计算完成后由对应 Agent 会话核验（结论不改变程序产物）。
+# 角色提示词在 agents/<角色>.md，内容哈希参与阶段 input_signature。
+AGENT_ROLES = {"herb_targets": "batman_targets", "disease_reverse": "disease_discovery", "review": "review"}
+AGENT_INSTRUCTIONS = {
+    "herb_targets": "核验 herb_targets 阶段的药材靶点产物（计数一致性、未命中药材、known/predicted 分布、provenance 完整性），按角色文件清单逐项核对。",
+    "disease_reverse": "核验 disease_reverse 阶段的疾病反查产物（候选计数、置信度组件方向、零匹配如实性），并在 findings 中用中文写一段面向研究者的结果解释。",
+    "review": "程序验收已通过为前提，核对全链证据完整性并写验收结论与遗留事项。",
+}
+
+
+def _bounded(value, max_items=20, _depth=0):
+    """Agent 证据裁剪：长列表变为计数+样例，大结果集不整体进 prompt。"""
+    if isinstance(value, dict):
+        return {k: _bounded(v, max_items, _depth + 1) for k, v in value.items()}
+    if isinstance(value, list):
+        if len(value) <= max_items or _depth == 0:
+            return [_bounded(v, max_items, _depth + 1) for v in value]
+        return {"count": len(value), "sample": [_bounded(v, max_items, _depth + 1)
+                                                for v in value[:5]]}
+    return value
 
 FIXTURE_GENES = ["TP53", "EGFR", "AKT1", "TNF", "IL6", "VEGFA"]
 FIXTURE_ASSOCIATIONS = [
@@ -189,6 +212,8 @@ class Runner:
         if self.manifest.get("workflow_version") != WORKFLOW_VERSION:
             raise ValueError("旧结构运行不能由新流水线恢复，请新建运行")
         self.task = self.manifest["task"]
+        self.home = None
+        self._agents = self.manifest["mode"] == "live" and self.task.get("agents") is True
 
     def save(self):
         with LOCK:
@@ -230,6 +255,9 @@ class Runner:
         inputs["upstream"] = {key: digest(self.directory / path)
                               for key, path in self.manifest.get("verified_targets", {}).items()
                               if key in upstream and (self.directory / path).is_file()}
+        if self._agents and role in AGENT_ROLES:
+            prompt = ROOT / "agents" / (AGENT_ROLES[role] + ".md")
+            inputs["agent_prompt"] = digest(prompt) if prompt.is_file() else None
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
     def _batman_signature(self):
@@ -288,6 +316,86 @@ class Runner:
                     self.manifest["archive_error"] = str(exc)
                     self.event("system", "archive.failed", str(exc))
                 self.save()
+
+    def _check_agents(self):
+        """多 Agent 模式开工前检查：Codex CLI 存在 + 本机 profile 可用。"""
+        if not (shutil.which("codex.exe") or shutil.which("codex")):
+            return False, "找不到 Codex CLI"
+        try:
+            self.home = runtime.prepare_home()
+        except Exception as exc:
+            return False, str(exc)
+        return True, None
+
+    def _agent_session(self, agent_role, directory, instruction, evidence):
+        definition = (ROOT / "agents" / (agent_role + ".md")).read_text(encoding="utf-8-sig")
+        prompt = "\n".join([
+            "你是药理反向发现流水线的独立核验会话。使用中文。范围只限本次核验：不修改任何文件，不读取账号文件，不安装软件，不访问网络，不重新计算。",
+            "所有数字由确定性程序产出；你的职责是核验与解释，不得修改或“修正”程序产物中的数字；发现不一致如实上报。",
+            "角色：" + agent_role,
+            definition,
+            "任务：" + json.dumps(self.task, ensure_ascii=False),
+            "证据（大列表已按计数+样例裁剪）：" + json.dumps(_bounded(evidence), ensure_ascii=False),
+            instruction,
+            "返回结构化 JSON：status（succeeded/partial/blocked/failed）、summary、findings、confidence（high/medium/low 自评核验把握，理由写入 findings）；blockers、artifacts 填空数组；graph、rework 填 null。",
+        ])
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        return runtime.execute(prompt, directory,
+                               timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "360")),
+                               home=self.home)
+
+    def _maybe_agent_review(self, role, result, directory, evidence):
+        """程序计算完成且成功后由对应 Agent 核验；Agent 结论不改变程序产物。"""
+        if not self._agents or result.get("status") != "succeeded" or role not in AGENT_ROLES:
+            return result
+        agent_role = AGENT_ROLES[role]
+        self.event(role, "agent.started", "启动 " + agent_role + " 核验会话")
+        try:
+            agent_result, meta = self._agent_session(agent_role, directory / "agent",
+                                                     AGENT_INSTRUCTIONS[role], evidence)
+            review = {"agent_role": agent_role, "session_id": meta.get("session_id"),
+                      "status": agent_result["status"], "summary": agent_result.get("summary"),
+                      "confidence": agent_result.get("confidence"),
+                      "findings": agent_result.get("findings", []),
+                      "model": meta.get("model"), "elapsed_seconds": meta.get("elapsed_seconds")}
+            result["agent_review"] = review
+            result.setdefault("artifacts", []).append("agent/execution.json")
+            self.event(role, "agent.completed", "%s：%s" % (agent_role, agent_result["status"]))
+            if agent_result["status"] == "failed":
+                result["status"] = "partial"
+                result.setdefault("blockers", []).append("Agent 核验未通过：" + str(agent_result.get("summary", "")))
+        except Exception as exc:
+            result["agent_review"] = {"agent_role": agent_role, "error": str(exc)}
+            result.setdefault("findings", []).append("Agent 核验未完成：" + str(exc))
+            self.event(role, "agent.error", str(exc))
+        return result
+
+    def _coordinator_opening(self):
+        """preflight 之后、herb_targets 之前的协调开场核对；失败不阻塞流水线。"""
+        if not self._agents:
+            return
+        preflight = self.manifest["stages"].get("preflight", {})
+        availability = None
+        for path in preflight.get("artifacts", []):
+            if path.endswith("availability.json") and (self.directory / path).is_file():
+                availability = read_json(self.directory / path)
+        try:
+            result, meta = self._agent_session("coordinator", self.directory / "coordinator_opening",
+                                               "核对任务参数与 preflight 可用性报告：参数是否合理、本地数据缺口是否属实、指引是否可执行。无问题则确认。",
+                                               {"task": self.task, "preflight_status": preflight.get("status"),
+                                                "availability": availability})
+            self.manifest["coordinator_opening"] = {"status": result["status"], "summary": result.get("summary"),
+                                                    "session_id": meta.get("session_id")}
+            self.event("coordinator", "agent.completed", "开场核对：" + result["status"])
+        except Exception as exc:
+            self.manifest["coordinator_opening"] = {"error": str(exc)}
+            self.event("coordinator", "agent.error", str(exc))
+        self.save()
+
+    def _herb_stage_with_opening(self):
+        self._coordinator_opening()
+        return self.herb_targets_stage()
 
     def preflight_stage(self):
         role = "preflight"
@@ -375,13 +483,19 @@ class Runner:
             if self.manifest["mode"] == "fixture":
                 findings.append("合成工程验证数据，非真实 BATMAN 查询结果")
             self.event(role, "tool.succeeded", "本地解析 %d 味药材，唯一靶点 %d 个" % (len(output["herbs"]), len(output["genes"])))
-            self.finish(role, {
+            result = {
                 "status": "succeeded",
                 "summary": "%d 味药材解析出 %d 个唯一靶点（关系 %d 行）%s" % (
                     len(output["herbs"]), len(output["genes"]), len(output["relations"]),
                     "（合成验证）" if self.manifest["mode"] == "fixture" else ""),
                 "blockers": [], "findings": findings, "artifacts": ["targets.json"],
-            }, directory)
+            }
+            result = self._maybe_agent_review(role, result, directory, {
+                "source_counts": output["source_counts"], "threshold": output["threshold"],
+                "per_herb": output["per_herb"], "unmatched_herbs": output["unmatched_herbs"],
+                "genes_total": len(output["genes"]), "genes_sample": output["genes"][:20],
+                "provenance": output["provenance"]})
+            self.finish(role, result, directory)
         except Exception as exc:
             self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)],
                                "artifacts": ["targets.json"] if (directory / "targets.json").is_file() else []}, directory)
@@ -453,9 +567,18 @@ class Runner:
             if self.manifest["mode"] == "fixture":
                 findings.append("合成工程验证索引与靶点，非真实疾病关联")
             self.event(role, "tool.succeeded", summary)
-            self.finish(role, {"status": "succeeded", "summary": summary, "blockers": [], "findings": findings,
-                               "artifacts": ["reverse/result.json", "reverse/candidates.csv", "reverse/evidence.csv", "reverse/report.md", "reverse/manifest.json"]},
-                        directory)
+            stage_result = {"status": "succeeded", "summary": summary, "blockers": [], "findings": findings,
+                            "artifacts": ["reverse/result.json", "reverse/candidates.csv", "reverse/evidence.csv", "reverse/report.md", "reverse/manifest.json"]}
+            stage_result = self._maybe_agent_review(role, stage_result, directory, {
+                "input_count": result["input_count"], "matched_input_count": result["matched_input_count"],
+                "chunking": result.get("chunking", {"chunked": False}),
+                "candidates": [{"disease": c["disease"], "matched_count": c["matched_count"],
+                                "input_coverage": c["input_coverage"], "disease_coverage": c["disease_coverage"],
+                                "confidence": c.get("confidence"),
+                                "evidence_rows": len(c["evidence"])} for c in result["candidates"]],
+                "unmatched_genes_sample": result["unmatched_genes"][:30],
+                "unmatched_total": len(result["unmatched_genes"])})
+            self.finish(role, stage_result, directory)
         except Exception as exc:
             self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": []}, directory)
 
@@ -474,11 +597,21 @@ class Runner:
         write_json(directory / "verification.json", {"checks": "artifacts_sha256_and_count_consistency", "problems": problems})
         self.write_report(problems)
         if problems:
-            self.finish(role, {"status": "failed", "summary": "验收发现 %d 个问题" % len(problems),
-                               "blockers": problems, "artifacts": ["verification.json"]}, directory)
+            result = {"status": "failed", "summary": "验收发现 %d 个问题" % len(problems),
+                      "blockers": problems, "artifacts": ["verification.json"]}
         else:
-            self.finish(role, {"status": "succeeded", "summary": "产物存在性、哈希与计数一致性核对通过",
-                               "blockers": [], "artifacts": ["verification.json"]}, directory)
+            result = {"status": "succeeded", "summary": "产物存在性、哈希与计数一致性核对通过",
+                      "blockers": [], "artifacts": ["verification.json"]}
+        result = self._maybe_agent_review(role, result, directory, {
+            "problems": problems,
+            "metrics": self.manifest.get("metrics", {}),
+            "stages": {name: {"status": stage.get("status"), "summary": stage.get("summary")}
+                       for name, stage in self.manifest["stages"].items() if name != role},
+            "artifact_index": {path: (stage.get("artifact_sha256") or {}).get(path)
+                               for name, stage in self.manifest["stages"].items() if name != role
+                               for path in stage.get("artifacts", [])},
+            "coordinator_opening": self.manifest.get("coordinator_opening")})
+        self.finish(role, result, directory)
 
     def _verify(self):
         """核对成功阶段的产物存在性/哈希、跨阶段计数与 provenance 完整性。"""
@@ -532,6 +665,12 @@ class Runner:
                  "BATMAN 阈值：" + str(task.get("batman_threshold", 0.84)), ""]
         if task.get("research_notes"):
             lines.extend(["研究说明：" + task["research_notes"], ""])
+        if not fixture:
+            if self._agents:
+                opening = manifest.get("coordinator_opening") or {}
+                lines.extend(["多 Agent 核验：已启用（协调开场：" + str(opening.get("status", "未执行")) + "；各阶段核验结论见 handoff 的 agent_review）", ""])
+            else:
+                lines.extend(["多 Agent 核验：未启用（agents=false），本运行为纯程序流水线，无 Agent 核验", ""])
         lines.extend(["## 阶段概览", "", "| 阶段 | 状态 | 摘要 |", "| --- | --- | --- |"])
         for role in STAGES:
             stage = manifest["stages"][role]
@@ -576,8 +715,19 @@ class Runner:
         self.manifest["metrics"] = {}
         self.save()
         try:
+            if self._agents:
+                ok, error = self._check_agents()
+                if not ok:
+                    self.manifest["status"] = "failed"
+                    self.manifest["fatal_error"] = ("多 Agent 模式需要可用的 Codex 环境：" + error
+                                                    + "；核验环境后将任务 agents 保持 true 重试，或设 agents=false 仅用程序流水线")
+                    self.event("system", "agents.unavailable", error)
+                    for stage in self.manifest["stages"].values():
+                        stage.update(status="skipped", summary="多 Agent 环境不可用，未执行", finished_at=now())
+                    self.write_report([self.manifest["fatal_error"]])
+                    return
             stage_map = {"preflight": self.preflight_stage,
-                         "herb_targets": self.herb_targets_stage,
+                         "herb_targets": self._herb_stage_with_opening,
                          "disease_reverse": self.disease_reverse_stage,
                          "review": self.review_stage}
             execute_graph(lambda name: stage_map[name](), max_workers=1)

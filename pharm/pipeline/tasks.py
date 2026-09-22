@@ -16,7 +16,7 @@ MODES = ("live", "fixture")
 def prepare_task(body):
     if not isinstance(body, dict):
         raise ValueError("任务必须是 JSON 对象")
-    allowed = {"formula", "herbs", "research_notes", "batman_threshold", "mode"}
+    allowed = {"formula", "herbs", "research_notes", "batman_threshold", "mode", "agents"}
     if set(body) - allowed:
         raise ValueError("包含不支持的任务字段")
     formula = body.get("formula")
@@ -51,8 +51,16 @@ def prepare_task(body):
     mode = body.get("mode", "live")
     if mode not in MODES:
         raise ValueError("mode 只支持 live 或 fixture")
+    agents = body.get("agents")
+    if agents is None:
+        agents = mode == "live"
+    if not isinstance(agents, bool):
+        raise ValueError("agents 须为布尔值")
+    if mode == "fixture":
+        agents = False  # fixture 是合成工程验证，永不调用模型
     task = {"formula": formula, "herbs": herbs, "research_notes": notes.strip(),
-            "batman_threshold": float(threshold), "mode": mode, "composition": composition}
+            "batman_threshold": float(threshold), "mode": mode, "composition": composition,
+            "agents": agents}
     key = hashlib.sha256(json.dumps(task, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return dict(task_id="web_" + key, **task)
 
