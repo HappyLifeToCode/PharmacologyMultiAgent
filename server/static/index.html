@@ -39,6 +39,15 @@
     <p id="task-message" class="message"></p>
     <h2>已有任务</h2>
     <ul id="task-list" class="item-list"></ul>
+    <div id="selected-task-actions" class="button-row" hidden>
+      <button id="run-task" class="primary">运行此任务</button>
+      <select id="run-mode-override" title="运行方式覆盖">
+        <option value="">按任务方式</option>
+        <option value="live">live（本地数据反查）</option>
+        <option value="fixture">fixture（合成验证）</option>
+      </select>
+    </div>
+    <p id="run-task-message" class="message"></p>
   </section>
 
   <section class="column" id="panel-runs">
@@ -49,6 +58,7 @@
       <a id="report-link" href="#" hidden>下载 report.md</a>
     </div>
     <h2>阶段</h2>
+    <p class="graph-legend">实线：程序确定性计算；核验：对应 Agent 会话核验产物（live 模式）</p>
     <div id="stage-graph" class="stage-graph"></div>
     <h2>事件</h2>
     <ul id="event-list" class="event-list"></ul>

@@ -3,18 +3,42 @@
 const $ = (id) => document.getElementById(id);
 const STAGES = {
   discovery: [
-    ["preflight", "本地数据预检"],
-    ["herb_targets", "药材靶点解析"],
-    ["disease_reverse", "疾病反向查询"],
-    ["review", "程序验收与报告"],
+    ["preflight", "本地数据预检", "检查本地 BATMAN 库与疾病索引是否就位"],
+    ["herb_targets", "药材靶点解析", "从本地 BATMAN-TCM 库查询药材成分与靶点"],
+    ["disease_reverse", "疾病反向查询", "用本地疾病索引（GeneCards/OMIM 官方导出批次构建）反查关联疾病"],
+    ["review", "程序验收与报告", "程序核对证据并生成报告"],
   ],
   analysis: [
-    ["shared_targets", "共同靶点提取"],
-    ["network", "网络分析"],
-    ["enrichment", "富集分析"],
-    ["analysis_review", "验收与报告"],
+    ["shared_targets", "共同靶点提取", "方剂靶点 ∩ 所选疾病的索引关联基因"],
+    ["network", "网络分析", "STRING 构建蛋白互作网络，CytoNCA 计算 Degree"],
+    ["enrichment", "富集分析", "DAVID 富集 GO/KEGG 通路（参数确认后）"],
+    ["analysis_review", "验收与报告", "程序核对证据并生成报告"],
   ],
 };
+const ROLE_LABELS = { system: "系统", coordinator: "协调" };
+for (const stages of Object.values(STAGES)) {
+  for (const [role, label] of stages) ROLE_LABELS[role] = label;
+}
+const EVENT_KIND_LABELS = {
+  "stage.started": "开始", "stage.completed": "完成", "stage.reused": "复用",
+  "stage.auto_retry": "自动重试", "tool.started": "工具启动", "tool.succeeded": "工具完成",
+  "tool.failed": "工具失败", "agent.started": "Agent 会话开始", "agent.completed": "Agent 会话完成",
+  "agent.error": "Agent 会话错误", "assist_requested": "协助请求", "agents.unavailable": "Agent 环境不可用",
+  "run.failed": "运行失败", "run.completed": "运行结束", "archive.failed": "归档失败",
+};
+
+function toLocalTime(iso) {
+  // ISO 时间戳 → 本地时间；当年省略年份，跨年带年份
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  const now = new Date();
+  const datePart = date.getFullYear() === now.getFullYear()
+    ? pad(date.getMonth() + 1) + "-" + pad(date.getDate())
+    : date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+  return datePart + " " + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds());
+}
 const state = {
   formulas: [],
   tasks: [],
@@ -129,8 +153,33 @@ function selectTask(task) {
   $("threshold-input").value = task.batman_threshold;
   $("mode-select").value = task.mode || "live";
   $("notes-input").value = task.research_notes || "";
+  $("selected-task-actions").hidden = false;
+  $("run-task-message").textContent = "";
   loadTasks();
   refreshRuns();
+}
+
+function updateRunTaskButton() {
+  const running = state.runs.some((run) => run.status === "running");
+  const button = $("run-task");
+  button.disabled = running;
+  button.title = running ? "已有运行进行中（全局单运行锁），结束后可启动" : "";
+}
+
+async function runSelectedTask() {
+  $("run-task-message").textContent = "";
+  try {
+    const mode = $("run-mode-override").value;
+    const body = { task_id: state.selectedTask };
+    if (mode) body.mode = mode;
+    const started = await postJSON("/api/run", body);
+    state.selectedRun = started.run_id;
+    state.selectedStage = null;
+    $("run-task-message").textContent = "已启动运行 " + started.run_id;
+    await refreshRuns();
+  } catch (err) {
+    $("run-task-message").textContent = err.message;
+  }
 }
 
 // ---------- 中栏：运行与阶段 ----------
@@ -145,6 +194,7 @@ async function refreshRuns() {
       if (manifest) renderRun(manifest);
     }
     refreshAssistStatus();
+    updateRunTaskButton();
   } catch (err) {
     /* 轮询失败下轮再试 */
   }
@@ -183,7 +233,7 @@ function renderRunList() {
     item.appendChild(document.createTextNode(" " + run.run_id));
     const meta = document.createElement("span");
     meta.className = "meta";
-    meta.textContent = (run.mode === "fixture" ? "合成验证 · " : "") + (run.updated_at || run.created_at || "");
+    meta.textContent = (run.mode === "fixture" ? "合成验证 · " : "") + toLocalTime(run.updated_at || run.created_at || "");
     item.appendChild(meta);
     item.addEventListener("click", () => {
       state.selectedRun = run.run_id;
@@ -225,7 +275,7 @@ function renderStageGraph(manifest) {
   const graph = $("stage-graph");
   graph.innerHTML = "";
   const stages = STAGES[manifest.pipeline || "discovery"] || STAGES.discovery;
-  stages.forEach(([role, label], index) => {
+  stages.forEach(([role, label, subtitle], index) => {
     if (index) {
       const arrow = document.createElement("span");
       arrow.className = "stage-arrow";
@@ -244,6 +294,12 @@ function renderStageGraph(manifest) {
     badge.textContent = stage.status;
     node.appendChild(name);
     node.appendChild(badge);
+    if (subtitle) {
+      const note = document.createElement("span");
+      note.className = "stage-subtitle";
+      note.textContent = subtitle;
+      node.appendChild(note);
+    }
     node.addEventListener("click", () => {
       state.selectedStage = role;
       renderStageGraph(manifest);
@@ -260,11 +316,20 @@ async function refreshEvents(runId) {
     list.innerHTML = "";
     for (const event of data.events.slice(-60).reverse()) {
       const item = document.createElement("li");
-      const meta = document.createElement("span");
-      meta.className = "meta";
-      meta.textContent = (event.timestamp || "") + " " + (event.role || "") + " " + (event.type || "");
-      item.appendChild(meta);
-      item.appendChild(document.createTextNode(event.message || ""));
+      const time = document.createElement("span");
+      time.className = "event-time";
+      time.textContent = toLocalTime(event.timestamp);
+      const role = document.createElement("span");
+      role.className = "event-role";
+      role.textContent = ROLE_LABELS[event.role] || event.role || "";
+      const message = document.createElement("span");
+      message.className = "event-message";
+      const kind = EVENT_KIND_LABELS[event.type] || event.type || "";
+      const text = event.message || "";
+      message.textContent = text.startsWith(kind) ? text : (kind + " " + text);
+      item.appendChild(time);
+      item.appendChild(role);
+      item.appendChild(message);
       list.appendChild(item);
     }
   } catch (err) { /* 下轮再试 */ }
@@ -575,7 +640,7 @@ function appendGuidance(entry) {
   const item = document.createElement("li");
   const meta = document.createElement("span");
   meta.className = "meta";
-  meta.textContent = entry.ts || "";
+  meta.textContent = entry.ts ? toLocalTime(entry.ts) : "";
   item.appendChild(meta);
   item.appendChild(document.createTextNode(entry.text || ""));
   list.appendChild(item);
@@ -681,6 +746,7 @@ async function boot() {
   bindAssistPanel();
   $("save-task").addEventListener("click", () => saveTask(false));
   $("save-start").addEventListener("click", () => saveTask(true));
+  $("run-task").addEventListener("click", runSelectedTask);
   await loadFormulas();
   await loadTasks();
   await refreshRuns();
