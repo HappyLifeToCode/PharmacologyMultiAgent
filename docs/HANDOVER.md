@@ -75,6 +75,7 @@
 - **fixture 强制 agents=false**：任务传 agents=true 也会被压为 false（测试断言）。
 - **DAVID max_list_size 默认 400**：交集大的分析需显式配置并接受分批/另行适配。
 - Windows 下杀毒可能造成文件占用：写 JSON/归档已带重试。
+- Agent 核验默认超时为 900 秒（15 分钟），可用环境变量 `PHARM_AGENT_TIMEOUT` 临时覆盖；超时会保留程序产物并将阶段标记为 `partial`。
 
 ## 7. 待办（按优先级）
 

@@ -98,7 +98,7 @@ RESULT_SCHEMA = {
 }
 
 
-def execute(prompt, directory, browser=False, on_event=None, timeout=360, home=None, resume_session=None, record_session=False):
+def execute(prompt, directory, browser=False, on_event=None, timeout=900, home=None, resume_session=None, record_session=False):
     runtime = read_json(ROOT / "configs/runtime.json")
     executable = shutil.which("codex.exe") or shutil.which("codex")
     if not executable:

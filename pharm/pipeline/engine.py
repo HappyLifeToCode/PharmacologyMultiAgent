@@ -386,7 +386,7 @@ class Runner:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         return runtime.execute(prompt, directory,
-                               timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "360")),
+                               timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "900")),
                                home=self.home)
 
     def _maybe_agent_review(self, role, result, directory, evidence):
