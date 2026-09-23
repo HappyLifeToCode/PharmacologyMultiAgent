@@ -4,10 +4,12 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+WORKSPACE_STATE = Path("local/workspace.json")
 
 
 def now():
@@ -35,6 +37,34 @@ def write_json(path, value):
             time.sleep(0.05 * (attempt + 1))
 
 
+def workspace_identity(root=None):
+    """Return the machine-local workspace identity used to isolate run data.
+
+    Runs created before this marker exists (or in another checkout) deliberately
+    remain on disk but are not loaded into the workbench. This prevents stale
+    test runs and another user's results from being presented as current work.
+    """
+    root = Path(root or ROOT)
+    path = root / WORKSPACE_STATE
+    if path.is_file():
+        value = read_json(path)
+        identity = value.get("workspace_id") if isinstance(value, dict) else None
+        if isinstance(identity, str) and re.fullmatch(r"[a-f0-9]{32}", identity):
+            return value
+        raise ValueError("本地工作区标识文件无效，请检查 local/workspace.json")
+    value = {"workspace_id": uuid.uuid4().hex, "created_at": now(),
+             "policy": "仅展示本工作区创建的运行"}
+    write_json(path, value)
+    return value
+
+
+def owned_run(manifest, root=None):
+    """Whether a run belongs to the current local workbench."""
+    if not isinstance(manifest, dict):
+        return False
+    return manifest.get("workspace_id") == workspace_identity(root)["workspace_id"]
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -46,11 +76,14 @@ def safe_name(value):
 
 
 def task_list():
-    # Never load shared examples or the legacy tracked task list automatically.
+    # Never load shared examples, legacy tracked tasks, or tasks from another
+    # local workbench. They remain on disk for audit but are not selectable.
     path = ROOT / "tasks/tasks.local.jsonl"
     if not path.exists():
         return []
-    tasks = [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    workspace_id = workspace_identity(ROOT)["workspace_id"]
+    tasks = [task for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()
+             for task in [json.loads(line)] if task.get("workspace_id") == workspace_id]
     ids = [safe_name(t["task_id"]) for t in tasks]
     if len(ids) != len(set(ids)):
         raise ValueError("任务清单存在重复 task_id")

@@ -104,15 +104,17 @@ button.primary:hover { background: #0f7a74; }
 .event-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; font-size: 12px; }
 .event-list li {
   display: grid;
-  grid-template-columns: 108px 88px 1fr;
+  grid-template-columns: minmax(92px, 108px) minmax(76px, 88px) minmax(0, 1fr);
   gap: 8px;
   border-bottom: 1px solid #eee9db;
   padding: 4px 0;
   color: #41565f;
 }
-.event-list .event-time { color: #8a9296; font-family: Consolas, "Courier New", monospace; }
+.event-list li > * { min-width: 0; }
+.event-list .event-time { color: #8a9296; font-family: Consolas, "Courier New", monospace; white-space: nowrap; }
+.event-list .event-role, .event-list .event-message { overflow-wrap: anywhere; word-break: break-word; }
 .event-list .event-role { color: #168d87; }
-.event-list .event-message { overflow-wrap: anywhere; }
+.event-list .event-message { min-width: 0; }
 .placeholder { color: #8a9296; }
 table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 th, td { border: 1px solid #d8d2c0; padding: 3px 7px; text-align: left; }

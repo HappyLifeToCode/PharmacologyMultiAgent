@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from server import app as backend
-from pharm.core.common import write_json
+from pharm.core.common import write_json, workspace_identity
 
 
 def test_artifact_allowlist_and_post_origin(tmp_path, monkeypatch):
@@ -11,7 +11,9 @@ def test_artifact_allowlist_and_post_origin(tmp_path, monkeypatch):
     (directory / "allowed.csv").write_text("gene_symbol\nTP53\n")
     (directory / "stderr.log").write_text("private")
     (directory / "prompt.txt").write_text("private prompt")
-    write_json(directory / "manifest.json", {"run_id": "test_run", "stages": {"herb_targets": {"artifacts": ["allowed.csv", "prompt.txt"]}}})
+    write_json(directory / "manifest.json", {"run_id": "test_run",
+                                               "workspace_id": workspace_identity(tmp_path)["workspace_id"],
+                                               "stages": {"herb_targets": {"artifacts": ["allowed.csv", "prompt.txt"]}}})
     calls = []
     monkeypatch.setattr(backend, "start", lambda *args, **kwargs: calls.append(args) or "test_run")
     with TestClient(backend.app, base_url="http://localhost") as client:
@@ -52,7 +54,8 @@ def test_analysis_endpoint_and_pipeline_field(tmp_path, monkeypatch):
     from pharm.pipeline import engine as engine_module
     monkeypatch.setattr(engine_module, "ROOT", tmp_path)
     write_json(tmp_path / "runs" / "ana_run" / "manifest.json",
-               {"run_id": "ana_run", "pipeline": "analysis", "created_at": "2026-09-22T00:00:00+00:00",
+               {"run_id": "ana_run", "workspace_id": workspace_identity(tmp_path)["workspace_id"],
+                "pipeline": "analysis", "created_at": "2026-09-22T00:00:00+00:00",
                 "stages": {}})
     calls = []
 
@@ -76,3 +79,25 @@ def test_analysis_endpoint_and_pipeline_field(tmp_path, monkeypatch):
         assert runs[0]["pipeline"] == "analysis"
         assert client.post("/api/analysis", json={"discovery_run_id": "r1", "disease": "X"},
                            headers={"Origin": "https://other.example"}).status_code == 403
+
+
+def test_old_or_other_workspace_runs_are_not_loaded(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "ROOT", tmp_path)
+    from pharm.pipeline import engine as engine_module
+    monkeypatch.setattr(engine_module, "ROOT", tmp_path)
+    current = workspace_identity(tmp_path)["workspace_id"]
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    write_json(runs / "old" / "manifest.json", {"run_id": "old", "workspace_id": "0" * 32,
+                                                  "created_at": "2026-09-22T00:00:00+00:00",
+                                                  "stages": {}})
+    write_json(runs / "legacy" / "manifest.json", {"run_id": "legacy",
+                                                     "created_at": "2026-09-22T00:00:00+00:00",
+                                                     "stages": {}})
+    write_json(runs / "current" / "manifest.json", {"run_id": "current", "workspace_id": current,
+                                                      "created_at": "2026-09-22T00:00:00+00:00",
+                                                      "stages": {}})
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        assert [item["run_id"] for item in client.get("/api/runs").json()["runs"]] == ["current"]
+        assert client.get("/api/runs/old").status_code == 404
+        assert client.get("/api/runs/legacy").status_code == 404

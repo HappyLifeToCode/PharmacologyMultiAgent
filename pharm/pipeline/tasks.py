@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from ..batman.formulas import formula_herbs, list_formulas
+from ..core.common import workspace_identity
 
 MODES = ("live", "fixture")
 
@@ -67,6 +68,7 @@ def prepare_task(body):
 
 def save_task(body, project_root):
     task = prepare_task(body)
+    task["workspace_id"] = workspace_identity(project_root)["workspace_id"]
     directory = Path(project_root) / "tasks"
     directory.mkdir(parents=True, exist_ok=True)
     path, lock = directory / "tasks.local.jsonl", directory / ".tasks.lock"
@@ -83,7 +85,8 @@ def save_task(body, project_root):
             if not line.strip():
                 continue
             current = json.loads(line)
-            if current.get("task_id") == task["task_id"]:
+            if (current.get("task_id") == task["task_id"] and
+                    current.get("workspace_id") == task["workspace_id"]):
                 if current != task:
                     raise ValueError("同名任务内容已被修改，请使用不同的研究说明保存新任务")
                 return task, False

@@ -18,7 +18,8 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 
-from ..core.common import ROOT, digest, now, read_json, safe_name, task_list, write_json, public_artifact
+from ..core.common import (ROOT, digest, now, read_json, safe_name, task_list,
+                            write_json, public_artifact, workspace_identity, owned_run)
 from ..core.archive import archive_run
 from ..batman import local as batman_local
 from ..batman.formulas import resolve_batman_names
@@ -405,12 +406,14 @@ class Runner:
             result["agent_review"] = review
             result.setdefault("artifacts", []).append("agent/execution.json")
             self.event(role, "agent.completed", "%s：%s" % (agent_role, agent_result["status"]))
-            if agent_result["status"] == "failed":
+            if agent_result["status"] != "succeeded":
                 result["status"] = "partial"
-                result.setdefault("blockers", []).append("Agent 核验未通过：" + str(agent_result.get("summary", "")))
+                result.setdefault("blockers", []).append("Agent 核验未完成或未通过：" + str(agent_result.get("summary", "")))
         except Exception as exc:
             result["agent_review"] = {"agent_role": agent_role, "error": str(exc)}
             result.setdefault("findings", []).append("Agent 核验未完成：" + str(exc))
+            result["status"] = "partial"
+            result.setdefault("blockers", []).append("Agent 核验未完成：" + str(exc))
             self.event(role, "agent.error", str(exc))
         return result
 
@@ -1124,9 +1127,12 @@ class Runner:
 
 def manifests():
     out = []
+    workspace_id = workspace_identity(ROOT)["workspace_id"]
     for file in (ROOT / "runs").glob("*/manifest.json"):
         try:
             value = read_json(file)
+            if value.get("workspace_id") != workspace_id:
+                continue
             if value.get("status") == "running" and value["run_id"] not in ACTIVE:
                 # Could be another CLI process; do not guess or mutate persisted state.
                 value["note"] = "运行由另一进程执行或已中断；确认进程后可恢复。"
@@ -1150,6 +1156,8 @@ def _analysis_task(analysis, mode):
         source_manifest = read_json(source_dir / "manifest.json")
     except (OSError, ValueError):
         raise ValueError("来源运行不存在：" + run_id) from None
+    if not owned_run(source_manifest, ROOT):
+        raise ValueError("来源运行属于旧数据或其他工作区，不能开展机制分析")
     if source_manifest.get("pipeline", "discovery") != "discovery":
         raise ValueError("来源运行不是 discovery 流水线")
     stage = source_manifest.get("stages", {}).get("disease_reverse", {})
@@ -1216,6 +1224,8 @@ def start(task_id=None, mode=None, resume=None, background=True, pipeline="disco
             manifest = read_json(ROOT / "runs" / run_id / "manifest.json")
             if manifest.get("workflow_version") != WORKFLOW_VERSION:
                 raise ValueError("旧结构运行不能由新流水线恢复，请新建运行")
+            if not owned_run(manifest, ROOT):
+                raise ValueError("运行属于旧数据或其他工作区，不能恢复；请新建运行")
             # Successful verified stages can be reused; all other stages get new attempts.
         else:
             if pipeline == "analysis":
@@ -1232,7 +1242,13 @@ def start(task_id=None, mode=None, resume=None, background=True, pipeline="disco
             run_id = run_id.replace(".", "_")
             directory = ROOT / "runs" / run_id
             directory.mkdir()
-            manifest = {"run_id": run_id, "task": task, "mode": mode, "pipeline": pipeline, "status": "pending", "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"), "scientific_complete": False, "workflow_version": WORKFLOW_VERSION, "stages": {role: {"label": labels[role], "status": "pending", "summary": "等待调度", "blockers": [], "artifacts": []} for role in scheduler.stages_for(pipeline)}}
+            manifest = {"run_id": run_id, "workspace_id": workspace_identity(ROOT)["workspace_id"],
+                        "task": task, "mode": mode, "pipeline": pipeline, "status": "pending",
+                        "created_at": now(), "runtime": read_json(ROOT / "configs/runtime.json"),
+                        "scientific_complete": False, "workflow_version": WORKFLOW_VERSION,
+                        "stages": {role: {"label": labels[role], "status": "pending",
+                                          "summary": "等待调度", "blockers": [], "artifacts": []}
+                                   for role in scheduler.stages_for(pipeline)}}
             if pipeline == "analysis":
                 manifest["analysis"] = task["analysis"]
             write_json(directory / "manifest.json", manifest)

@@ -118,7 +118,8 @@ def _craft_source_run(root, targets_genes, disease, disease_genes):
     common.write_json(reverse_dir / "result.json", {
         "input_count": len(targets_genes), "candidates": [{"disease": disease}],
         "database": str(db), "database_sha256": common.digest(db)})
-    manifest = {"run_id": run_id, "pipeline": "discovery", "workflow_version": engine.WORKFLOW_VERSION,
+    manifest = {"run_id": run_id, "workspace_id": common.workspace_identity(root)["workspace_id"],
+                "pipeline": "discovery", "workflow_version": engine.WORKFLOW_VERSION,
                 "mode": "live", "status": "succeeded",
                 "task": {"task_id": "web_src", "formula": None, "herbs": ["白芍"],
                          "batman_threshold": 0.84, "composition": "custom_herbs"},

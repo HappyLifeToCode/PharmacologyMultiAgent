@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from pharm.core.common import ROOT, read_json, safe_name, task_list, public_artifact
+from pharm.core.common import ROOT, read_json, safe_name, task_list, public_artifact, owned_run
 from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
@@ -144,7 +144,10 @@ def public_manifest(value):
 def manifest_for(run_id):
     try:
         safe_name(run_id)
-        return read_json(ROOT / "runs" / run_id / "manifest.json")
+        value = read_json(ROOT / "runs" / run_id / "manifest.json")
+        if not owned_run(value, ROOT):
+            raise HTTPException(404, "运行不存在")
+        return value
     except (ValueError, OSError):
         raise HTTPException(404, "运行不存在")
 

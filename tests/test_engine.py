@@ -125,6 +125,7 @@ def test_live_herb_unmatched_recorded(root, tmp_path):
     task = {"task_id": "web_testbatman", "formula": None, "herbs": ["白芍", "阿胶"],
             "research_notes": "", "batman_threshold": 0.84, "mode": "live", "agents": False,
             "batman_local_dir": str(data), "batman_accessed_at": "2026-09-17"}
+    task["workspace_id"] = common.workspace_identity(root)["workspace_id"]
     (root / "tasks").mkdir()
     (root / "tasks" / "tasks.local.jsonl").write_text(json.dumps(task, ensure_ascii=False) + "\n", encoding="utf-8")
     run_id = engine.start("web_testbatman", background=False)

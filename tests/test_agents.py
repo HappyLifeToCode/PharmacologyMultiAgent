@@ -66,6 +66,8 @@ def _save_task(root, body):
     不在网页表单白名单内，直接写任务清单（与 test_engine 同一做法）。"""
     task = dict({"task_id": "web_" + uuid.uuid4().hex[:12], "formula": None,
                  "research_notes": "", "batman_threshold": 0.84, "mode": "live"}, **body)
+    from pharm.core.common import workspace_identity
+    task["workspace_id"] = workspace_identity(root)["workspace_id"]
     (root / "tasks").mkdir(exist_ok=True)
     with (root / "tasks" / "tasks.local.jsonl").open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(task, ensure_ascii=False) + "\n")
@@ -136,7 +138,7 @@ def test_agent_failed_marks_partial_but_keeps_artifacts(live_root, monkeypatch, 
     manifest = common.read_json(root / "runs" / run_id / "manifest.json")
     stage = manifest["stages"]["herb_targets"]
     assert stage["status"] == "partial"
-    assert any("Agent 核验未通过" in b for b in stage["blockers"])
+    assert any("Agent 核验未完成或未通过" in b for b in stage["blockers"])
     # 程序产物保留，不被 Agent 结论覆盖
     assert (root / "runs" / run_id / manifest["verified_targets"]["herb_targets"]).is_file()
     review = _handoff(root, run_id, "herb_targets")["agent_review"]
@@ -144,7 +146,7 @@ def test_agent_failed_marks_partial_but_keeps_artifacts(live_root, monkeypatch, 
     assert manifest["status"] == "partial"
 
 
-def test_agent_session_error_keeps_program_status(live_root, monkeypatch, mock_execute):
+def test_agent_session_error_marks_stage_partial_and_keeps_program_result(live_root, monkeypatch, mock_execute):
     root, data = live_root
     original = engine.runtime.execute
 
@@ -157,12 +159,12 @@ def test_agent_session_error_keeps_program_status(live_root, monkeypatch, mock_e
     task = _save_task(root, _task_with_data(data))
     run_id = engine.start(task["task_id"], background=False)
     manifest = common.read_json(root / "runs" / run_id / "manifest.json")
-    # 阶段状态由程序结果决定，Agent 错误如实记录
-    assert manifest["stages"]["disease_reverse"]["status"] == "succeeded"
+    # 程序产物保留，Agent 错误使阶段降为 partial
+    assert manifest["stages"]["disease_reverse"]["status"] == "partial"
     handoff = _handoff(root, run_id, "disease_reverse")
     assert "CLI 进程异常退出" in handoff["agent_review"]["error"]
     assert any("Agent 核验未完成" in f for f in handoff["findings"])
-    assert manifest["status"] == "succeeded"
+    assert manifest["status"] == "partial"
 
 
 def test_agents_false_live_runs_pure_program(root, live_root, monkeypatch, calls):

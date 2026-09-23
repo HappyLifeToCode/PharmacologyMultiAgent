@@ -47,6 +47,8 @@ const state = {
   selectedRun: null,
   selectedStage: null,
   handoff: null,
+  pollTimer: null,
+  runRevision: null,
   assist: { ws: null, state: "idle", available: null },
 };
 
@@ -148,6 +150,7 @@ function selectTask(task) {
   state.selectedTask = task.task_id;
   state.selectedRun = null;
   state.selectedStage = null;
+  state.runRevision = null;
   $("formula-select").value = task.formula || "";
   $("herbs-input").value = task.herbs.join("\n");
   $("threshold-input").value = task.batman_threshold;
@@ -156,7 +159,24 @@ function selectTask(task) {
   $("selected-task-actions").hidden = false;
   $("run-task-message").textContent = "";
   loadTasks();
-  refreshRuns();
+  refreshRuns().then(() => {
+    // 任务是左栏的主选择器：自动展示该任务最新运行，避免用户再点一次中栏。
+    const related = visibleRuns();
+    if (!related.length) {
+      state.selectedRun = null;
+      state.selectedStage = null;
+      state.runRevision = null;
+      $("stage-graph").innerHTML = "";
+      $("event-list").innerHTML = "";
+      $("stage-detail").innerHTML = "<p class='placeholder'>该任务尚无运行。</p>";
+      return;
+    }
+    state.selectedRun = related[0].run_id;
+    state.selectedStage = null;
+    state.runRevision = null;
+    renderRunList();
+    renderRun(related[0]);
+  });
 }
 
 function updateRunTaskButton() {
@@ -175,6 +195,7 @@ async function runSelectedTask() {
     const started = await postJSON("/api/run", body);
     state.selectedRun = started.run_id;
     state.selectedStage = null;
+    state.runRevision = null;
     $("run-task-message").textContent = "已启动运行 " + started.run_id;
     await refreshRuns();
   } catch (err) {
@@ -187,16 +208,49 @@ async function runSelectedTask() {
 async function refreshRuns() {
   try {
     const data = await api("/api/runs");
-    state.runs = data.runs;
+    state.runs = Array.isArray(data.runs) ? data.runs : [];
+    if (state.selectedRun && !state.runs.some((run) => run.run_id === state.selectedRun)) {
+      state.selectedRun = null;
+      state.selectedStage = null;
+      state.handoff = null;
+      state.runRevision = null;
+      $("event-list").innerHTML = "";
+      $("stage-graph").innerHTML = "";
+      $("stage-detail").innerHTML = "<p class='placeholder'>当前工作区暂无可显示的运行。</p>";
+    }
     renderRunList();
     if (state.selectedRun) {
       const manifest = state.runs.find((run) => run.run_id === state.selectedRun);
-      if (manifest) renderRun(manifest);
+      if (manifest) {
+        const revision = JSON.stringify({
+          updated_at: manifest.updated_at,
+          status: manifest.status,
+          report: manifest.report,
+          stages: Object.fromEntries(Object.entries(manifest.stages || {}).map(([role, stage]) => [
+            role, {status: stage.status, attempt: stage.attempt, summary: stage.summary, finished_at: stage.finished_at},
+          ])),
+        });
+        if (revision !== state.runRevision) {
+          renderRun(manifest);
+          state.runRevision = revision;
+        } else {
+          refreshEvents(manifest.run_id);
+        }
+      }
     }
     refreshAssistStatus();
     updateRunTaskButton();
   } catch (err) {
-    /* 轮询失败下轮再试 */
+    // 后端重启或切换工作区后，不能继续显示上一轮缓存的运行数据。
+    state.runs = [];
+    state.selectedRun = null;
+    state.selectedStage = null;
+    state.handoff = null;
+    state.runRevision = null;
+    renderRunList();
+    $("event-list").innerHTML = "";
+    $("stage-graph").innerHTML = "";
+    $("stage-detail").innerHTML = "<p class='placeholder'>当前工作区暂无可显示的运行。</p>";
   }
 }
 
@@ -749,8 +803,13 @@ async function boot() {
   $("run-task").addEventListener("click", runSelectedTask);
   await loadFormulas();
   await loadTasks();
-  await refreshRuns();
-  setInterval(refreshRuns, 5000);
+  const poll = async () => {
+    await refreshRuns();
+    const selected = state.runs.find((run) => run.run_id === state.selectedRun);
+    const interval = selected && selected.status === "running" ? 2000 : 5000;
+    state.pollTimer = setTimeout(poll, interval);
+  };
+  await poll();
 }
 
 boot().catch((err) => {
