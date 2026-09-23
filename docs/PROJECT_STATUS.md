@@ -24,7 +24,7 @@
 | 问题 | 现状 | 接下来需要什么 |
 |---|---|---|
 | 多 Agent 核验未过完整真实运行 | 编排、提示词、降级与签名均有 mock 对拍；2026-09-22 单次真实会话冒烟通过（通道与 schema 验证），六会话完整 live 未跑 | 数据同步后一次完整真实 live 冒烟（agents=true），核对六个会话产物与降级行为 |
-| STRING/CytoNCA/DAVID 真实可达性 | 模块与历史测试恢复；本轮未触真实服务/软件 | 冒烟：STRING API 小样本、CytoNCA 桥三节点、DAVID 小列表提交；结果如实记录 |
+| STRING/CytoNCA/DAVID 正式验证 | 模块与历史测试恢复；2026-09-22 可达性实测（STRING API v12.0 200、DAVID 首页 200、Cytoscape 3.10.0 在 D:/Tools）；正式桥接/提交未做 | 冒烟：STRING API 小样本、CytoNCA 桥三节点、DAVID 小列表提交；结果如实记录 |
 | 在线采集未实现 | blocked 阶段带 assist 升级标记；协助会话画面/输入已通 | 采集编排设计（预留 agents/runtime.py 浏览器路径） |
 | 四方组成出处 | 标准教材通用口径，标注 pending_user_confirmation | 用户确认组成与 canonical→BATMAN 候选名映射 |
 | 疾病覆盖范围 | 索引疾病集合完全取决于导入批次 | 合规宽覆盖批次来源 |

@@ -12,7 +12,7 @@
 ## 2. 当前状态
 
 - 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**202 passed, 4 skipped**。
-- 如实未做：**真实 Codex 会话冒烟**（多 Agent 编排只有 mock 验证）；**STRING API/CytoNCA/DAVID 真实可达性**未在本轮验证；本机无研究数据。
+- 如实未做：六会话**完整**真实 live 运行（单次真实 Codex 会话冒烟已于 2026-09-22 通过，gpt-5.6-luna，证据 runs/diagnostics/model_smoke_20260922.json）；STRING 桥接/CytoNCA 计算/DAVID 正式提交未验证（可达性 2026-09-22 实测：STRING API 200、DAVID 首页 200、Cytoscape 在 D:/Tools，runs/diagnostics/dependency_smoke_20260922.json）；本机无研究数据。
 - 未实现：在线采集编排（agents/runtime.py 的浏览器采集路径预留）；四方组成出处待用户确认；疾病库覆盖取决于批次。
 
 ## 3. 关键资产位置
@@ -78,8 +78,8 @@
 
 ## 7. 待办（按优先级）
 
-1. **真实模型冒烟**：本机 icrc 环境跑一次 live + agents=true，核对六个会话产物、降级与签名行为（当前仅 mock 验证）。
-2. **STRING/CytoNCA/DAVID 冒烟**：小样本真实可达性核验并留证。
+1. **数据同步**：BATMAN v2.0 全量文件与疾病索引批次到本机 → 六会话完整真实 live 运行 + 人工抽检（单次会话冒烟 2026-09-22 已通过）。
+2. **STRING/CytoNCA/DAVID 正式冒烟**：可达性 2026-09-22 已核验（200/200/软件在）；小样本桥接与正式提交留证仍待做。
 3. **数据同步**：BATMAN v2.0 全量文件与疾病索引批次到本机 → 真实 live 验证 + 人工抽检。
 4. **四方组成确认**：formulas.py 的 source 标注 pending_user_confirmation，待用户/文献确认。
 5. **在线采集编排**（预留）：Agent 采集 → 人机协助接管 → 产物导入 → resume。
