@@ -47,6 +47,24 @@ PREDICTED_FILES = {
                              "predicted_browse_by_targets.txt.gz"],
 }
 
+
+def accessed_at(task=None):
+    """Return the recorded BATMAN acquisition date without inventing one."""
+    task = task or {}
+    value = str(task.get("batman_accessed_at") or "").strip()
+    if not value:
+        local_config = ROOT / "configs/batman_data.local.json"
+        if local_config.is_file():
+            configured = read_json(local_config).get("accessed_at")
+            value = str(configured or "").strip()
+    if value:
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("BATMAN accessed_at 必须为 YYYY-MM-DD 日期") from exc
+        return value
+    return None
+
 _INGREDIENT_RE = re.compile(r"^(.*)\((\d+)\)$")
 _PREDICTED_TARGET_RE = re.compile(r"(\d+)\(([\d.]+)\)")
 
