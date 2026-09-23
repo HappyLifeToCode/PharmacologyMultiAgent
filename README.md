@@ -117,7 +117,6 @@ data/ runs/ reports/ local/   运行生成或本机私有内容，默认不提�
 | [数据交接约定](docs/DATA_CONTRACT.md) | 双流水线产物、状态语义、归档布局 |
 | [环境准备](docs/ENVIRONMENT_SETUP.md) | 软件、浏览器与数据来源准备 |
 | [Codex 执行配置](docs/CODEX_RUNTIME.md) | 多 Agent 核验层的模型会话配置（live 默认启用） |
-| [Agent 工作分配](docs/AGENT_ASSIGNMENTS.md) | 团队认领表（旧分工待重新认领） |
 | [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 任务字段与示例 |
 
 ## 历史
@@ -126,6 +125,6 @@ data/ runs/ reports/ local/   运行生成或本机私有内容，默认不提�
 
 ## 参与开发
 
-1. 阅读 [交接说明](docs/HANDOVER.md) 与 [数据交接约定](docs/DATA_CONTRACT.md)，在 [工作分配](docs/AGENT_ASSIGNMENTS.md) 中认领模块。
+1. 阅读 [交接说明](docs/HANDOVER.md) 与 [数据交接约定](docs/DATA_CONTRACT.md)，接口变更同步更新文档并与上下游对齐。
 2. 直推 `main`；**push 前必须 `pytest tests/ -q` 全绿**。
 3. 不编造数据、不用合成结果顶替、不绕过站点人机验证；接口变更同步更新文档并与上下游对齐。
