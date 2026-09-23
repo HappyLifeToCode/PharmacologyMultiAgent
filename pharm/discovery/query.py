@@ -319,6 +319,9 @@ def query(database, *, herbs=None, genes=None):
             per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
             "disease": disease, "matched_genes": matched, "matched_count": len(matched),
+            # 一个基因可能在 GeneCards/OMIM 中对应多条原始证据；两者不能直接相等。
+            "unique_evidence_gene_count": len(matched),
+            "evidence_row_count": len(rows),
             "indexed_target_count": totals.get(disease, 0),
             "input_coverage": len(matched) / len(symbols),
             "disease_coverage": len(matched) / totals[disease] if totals.get(disease) else None,
@@ -347,7 +350,8 @@ def save_result(result, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / "result.json", result)
-    columns = ["disease", "matched_count", "indexed_target_count", "input_coverage", "disease_coverage", "confidence"]
+    columns = ["disease", "matched_count", "unique_evidence_gene_count", "evidence_row_count",
+               "indexed_target_count", "input_coverage", "disease_coverage", "confidence"]
     with (output / "candidates.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")
         writer.writeheader()

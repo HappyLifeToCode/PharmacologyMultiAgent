@@ -157,6 +157,15 @@ def test_reverse_lookup_chunks_over_query_limit(root, tmp_path):
     assert result["matched_input_count"] == 1
 
 
+def test_chunked_reverse_lookup_preserves_evidence_count_semantics(root, tmp_path):
+    database = tmp_path / "idx.sqlite"
+    engine._write_fixture_index(database)
+    result, _ = engine._reverse_lookup(database, ["TP53"] * 3001)
+    for candidate in result["candidates"]:
+        assert candidate["unique_evidence_gene_count"] == candidate["matched_count"]
+        assert candidate["evidence_row_count"] == len(candidate["evidence"])
+
+
 def test_fixture_reverse_uses_synthetic_index(root):
     _, manifest = run_task(root, {"herbs": ["白芍", "甘草"], "mode": "fixture"})
     result = json.loads((root / "runs" / _ / manifest["verified_targets"]["disease_reverse"]).read_text(encoding="utf-8"))

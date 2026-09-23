@@ -26,6 +26,16 @@ h3 { font-size: 15px; margin: 12px 0 6px; }
   padding: 10px 12px;
   min-width: 0;
 }
+#panel-runs {
+  display: flex;
+  flex-direction: column;
+}
+#panel-runs > .event-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: none;
+  overflow-y: auto;
+}
 label { display: block; margin: 6px 0; font-size: 12px; color: #41565f; }
 select, input, textarea {
   display: block;

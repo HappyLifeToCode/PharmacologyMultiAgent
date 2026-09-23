@@ -195,6 +195,8 @@ def _reverse_lookup(database, genes, chunk_size=3000):
             per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
             "disease": disease, "matched_genes": matched, "matched_count": len(matched),
+            "unique_evidence_gene_count": len(matched),
+            "evidence_row_count": len(rows),
             "indexed_target_count": indexed,
             "input_coverage": len(matched) / len(genes),
             "disease_coverage": len(matched) / indexed if indexed else None,
@@ -625,7 +627,8 @@ class Runner:
                 "candidates": [{"disease": c["disease"], "matched_count": c["matched_count"],
                                 "input_coverage": c["input_coverage"], "disease_coverage": c["disease_coverage"],
                                 "confidence": c.get("confidence"),
-                                "evidence_rows": len(c["evidence"])} for c in result["candidates"]],
+                                "evidence_rows": c.get("evidence_row_count", len(c["evidence"])),
+                                "unique_evidence_gene_count": c.get("unique_evidence_gene_count", len({row["gene_symbol"] for row in c["evidence"]}))} for c in result["candidates"]],
                 "unmatched_genes_sample": result["unmatched_genes"][:30],
                 "unmatched_total": len(result["unmatched_genes"])})
             self.finish(role, stage_result, directory)

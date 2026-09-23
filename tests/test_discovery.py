@@ -462,6 +462,22 @@ def test_confidence_present_with_components_and_version(database):
         assert "启发式" in confidence["note"]
 
 
+def test_evidence_rows_are_distinct_from_unique_matched_genes(database):
+    """同一基因有多条来源证据时，行数可以大于去重后的基因数。"""
+    result = discovery.query(database, genes=["TP53", "EGFR"])
+    hyper = result["candidates"][0]
+    assert hyper["matched_count"] == 2
+    assert hyper["unique_evidence_gene_count"] == 2
+    assert hyper["evidence_row_count"] == len(hyper["evidence"]) == 4
+    assert hyper["evidence_row_count"] > hyper["matched_count"]
+
+    output = database.parent / "evidence-counts"
+    discovery.save_result(result, output)
+    header = (output / "candidates.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+    assert "unique_evidence_gene_count" in header
+    assert "evidence_row_count" in header
+
+
 def test_confidence_matches_hand_calculated_values(database):
     """对拍：手工按 heuristic_v1 公式计算的预期值。
 

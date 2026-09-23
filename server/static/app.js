@@ -303,6 +303,24 @@ function renderRunList() {
 }
 
 function renderRun(manifest) {
+  // 运行或任务切换后按结果选择最值得先看的阶段。
+  const stages = STAGES[manifest.pipeline || "discovery"] || STAGES.discovery;
+  const roles = stages.map(([role]) => role);
+  if (!state.selectedStage || !roles.includes(state.selectedStage)) {
+    const statuses = roles.map((role) => (manifest.stages || {})[role]?.status || "pending");
+    const runningIndex = statuses.findIndex((status) => status === "running");
+    const issueIndex = statuses.findIndex((status) => status === "partial" || status === "blocked");
+    if (runningIndex >= 0) {
+      state.selectedStage = roles[runningIndex];
+    } else if (issueIndex >= 0) {
+      state.selectedStage = roles[issueIndex];
+    } else if (statuses.length && statuses.every((status) => status === "succeeded")) {
+      state.selectedStage = roles[roles.length - 1];
+    } else {
+      const activeIndex = statuses.findIndex((status) => status === "failed" || status === "running" || status === "pending");
+      state.selectedStage = roles[activeIndex >= 0 ? activeIndex : 0] || null;
+    }
+  }
   renderStageGraph(manifest);
   const resume = $("resume-run");
   resume.hidden = !(manifest.status === "failed" || manifest.status === "partial");
