@@ -11,6 +11,7 @@ import re
 import time
 from pathlib import Path
 from urllib.parse import quote
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from ..core.common import now, write_json
@@ -23,8 +24,11 @@ def _assist_json(base_url, path, payload=None):
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(base_url.rstrip("/") + path, data=body,
                       headers={"Content-Type": "application/json"} if body else {})
-    with urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except URLError as exc:
+        raise RuntimeError("无法连接人机协助工作台（127.0.0.1:8766）。请先启动 server/app.py：" + str(exc)) from exc
 
 
 def wait_for_assist(base_url, url, disease, meta, timeout=900):
