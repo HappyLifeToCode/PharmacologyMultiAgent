@@ -218,15 +218,40 @@ async def assist_start(request: Request):
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("请求必须是 JSON 对象")
+        url, guidance, request_id = body.get("url"), body.get("guidance"), body.get("request_id")
+        if url is not None and (not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://") or url.startswith("data:"))):
+            raise ValueError("url 必须是 http(s) 或 data: URL")
+        if guidance is not None and (not isinstance(guidance, str) or len(guidance) > 2000):
+            raise ValueError("引导文本最多 2000 字")
+        session = await run_in_threadpool(assist_manager.start, url, guidance, request_id)
+        return {"state": session.state, "url": session.url}
+    except AssistUnavailable as exc:
+        raise HTTPException(503, "内嵌浏览器不可用：" + str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.post("/api/assist/request")
+async def assist_request(request: Request):
+    """采集 Agent 登记遇到人机验证的当前页面，等待用户接管。"""
+    if len(await request.body()) > 20000:
+        raise HTTPException(413, "协助请求过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) - {"url", "guidance", "context"}:
+            raise ValueError("协助请求仅接受 url、guidance、context")
         url, guidance = body.get("url"), body.get("guidance")
         if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://") or url.startswith("data:")):
             raise ValueError("url 必须是 http(s) 或 data: URL")
         if guidance is not None and (not isinstance(guidance, str) or len(guidance) > 2000):
             raise ValueError("引导文本最多 2000 字")
-        session = await run_in_threadpool(assist_manager.start, url, guidance)
-        return {"state": session.state, "url": session.url}
-    except AssistUnavailable as exc:
-        raise HTTPException(503, "内嵌浏览器不可用：" + str(exc))
+        context = body.get("context")
+        if context is not None and not isinstance(context, dict):
+            raise ValueError("context 必须是对象")
+        pending = await run_in_threadpool(assist_manager.request, url, guidance, context)
+        return {"state": "pending", **pending}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except RuntimeError as exc:

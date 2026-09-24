@@ -27,6 +27,7 @@ import json
 import queue
 import threading
 import time
+from uuid import uuid4
 from datetime import datetime, timezone
 
 from playwright.sync_api import sync_playwright
@@ -39,14 +40,18 @@ class AssistUnavailable(RuntimeError):
     """headed 浏览器不可用（无显示环境等）；不静默降级。"""
 
 
+def _validate_url(url):
+    if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://") or url.startswith("data:")):
+        raise ValueError("url 必须是 http(s) 或 data: URL")
+
+
 def _ts():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class AssistSession:
     def __init__(self, url, guidance=None, headless=False, viewport=(1280, 800), quality=60):
-        if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://") or url.startswith("data:")):
-            raise ValueError("url 必须是 http(s) 或 data: URL")
+        _validate_url(url)
         self.url = url
         self.state = "running"
         self.last_error = None
@@ -294,12 +299,41 @@ class AssistManager:
         self._headless = headless
         self._lock = threading.Lock()
         self._session = None
+        self._pending = None
 
-    def start(self, url, guidance=None):
+    def request(self, url, guidance=None, context=None):
+        """由采集端登记当前页面，等待用户从工作台接管。"""
+        _validate_url(url)
         with self._lock:
             if self._session is not None and self._session.state in ACTIVE_STATES:
                 raise RuntimeError("已有进行中的协助会话，请先停止")
-            self._session = AssistSession(url, guidance=guidance, headless=self._headless)
+            if self._pending is not None:
+                raise RuntimeError("已有待处理的协助请求，请先启动或取消")
+            self._pending = {"request_id": uuid4().hex, "url": url,
+                             "guidance": str(guidance or ""), "context": context or {},
+                             "requested_at": _ts()}
+            return dict(self._pending)
+
+    def start(self, url=None, guidance=None, request_id=None):
+        with self._lock:
+            if self._session is not None and self._session.state in ACTIVE_STATES:
+                raise RuntimeError("已有进行中的协助会话，请先停止")
+            pending = self._pending
+            if url is None:
+                if pending is None:
+                    raise ValueError("当前没有待处理的 Agent 协助请求")
+                if request_id is not None and request_id != pending["request_id"]:
+                    raise ValueError("协助请求已变化，请刷新页面")
+                url, guidance = pending["url"], guidance or pending["guidance"]
+            else:
+                _validate_url(url)
+            self._pending = None
+            try:
+                self._session = AssistSession(url, guidance=guidance, headless=self._headless)
+            except Exception:
+                if pending is not None:
+                    self._pending = pending
+                raise
             return self._session
 
     def current(self):
@@ -308,6 +342,7 @@ class AssistManager:
     def stop(self):
         with self._lock:
             session = self._session
+            self._pending = None
         if session is not None:
             session.close()
         return session
@@ -315,6 +350,12 @@ class AssistManager:
     def status(self):
         session = self._session
         if session is None:
-            return {"state": "idle", "url": None, "guidance": []}
+            if self._pending is not None:
+                return {"state": "pending", "url": self._pending["url"],
+                        "guidance": ([{"text": self._pending["guidance"], "ts": self._pending["requested_at"]}]
+                                     if self._pending["guidance"] else []),
+                        "pending": dict(self._pending), "last_error": None}
+            return {"state": "idle", "url": None, "guidance": [], "pending": None}
         return {"state": session.state, "url": session.current_url,
-                "guidance": session.guidance_history, "last_error": session.last_error}
+                "guidance": session.guidance_history, "pending": None,
+                "last_error": session.last_error}

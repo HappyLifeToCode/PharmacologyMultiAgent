@@ -49,7 +49,7 @@ const state = {
   handoff: null,
   pollTimer: null,
   runRevision: null,
-  assist: { ws: null, state: "idle", available: null },
+  assist: { ws: null, state: "idle", available: null, pending: null },
 };
 
 async function api(path, options) {
@@ -689,15 +689,22 @@ function updateAssistPanel() {
   state.assist.available = assist;
   const panel = $("assist-panel");
   const running = state.assist.state === "running" || state.assist.state === "waiting_human";
-  panel.hidden = !assist && !running;
+  const pending = state.assist.state === "pending" && state.assist.pending;
+  panel.hidden = !assist && !running && !pending;
   $("assist-launch").hidden = running;
   $("assist-live").hidden = !running;
   if (assist) $("assist-guidance-text").textContent = assist.guidance || "";
+  const source = pending || state.assist.pending;
+  $("assist-source").textContent = source && source.url
+    ? "采集 Agent 已暂停在：" + source.url
+    : "等待采集 Agent 提供当前页面…";
+  $("assist-start").disabled = !source || !source.url;
 }
 
 async function refreshAssistStatus() {
   try {
     const status = await api("/api/assist/status");
+    state.assist.pending = status.pending;
     setAssistState(status.state);
     if ((status.state === "running" || status.state === "waiting_human")
         && (!state.assist.ws || state.assist.ws.readyState > 1)) {
@@ -769,10 +776,10 @@ function relPos(event, canvas) {
 
 function bindAssistPanel() {
   $("assist-start").addEventListener("click", async () => {
-    const url = $("assist-url").value.trim();
     const guidance = state.assist.available ? state.assist.available.guidance : "";
     try {
-      const result = await postJSON("/api/assist/start", { url, guidance });
+      const pending = state.assist.pending;
+      const result = await postJSON("/api/assist/start", { guidance, request_id: pending && pending.request_id });
       setAssistState(result.state);
       connectAssistWs();
     } catch (err) {

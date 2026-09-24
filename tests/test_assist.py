@@ -168,6 +168,23 @@ def test_assist_endpoints_single_session(backend):
         assert client.get("/api/assist/status").json()["state"] == "closed"
 
 
+def test_agent_handoff_supplies_url_for_user_assistance(backend):
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        response = client.post("/api/assist/request", json={
+            "url": PAGE_URL, "guidance": "请完成页面验证", "context": {"source": "genecards"}})
+        assert response.status_code == 200
+        request = response.json()
+        assert request["state"] == "pending"
+        status = client.get("/api/assist/status").json()
+        assert status["state"] == "pending"
+        assert status["pending"]["request_id"] == request["request_id"]
+        assert status["pending"]["url"] == PAGE_URL
+        started = client.post("/api/assist/start", json={"request_id": request["request_id"]})
+        assert started.status_code == 200
+        assert started.json()["url"] == PAGE_URL
+        assert client.post("/api/assist/stop").status_code == 200
+
+
 def ws_collect(ws, predicate, timeout=40):
     """读下行消息直到 predicate 命中；frame 文本帧后紧跟二进制帧。"""
     deadline = time.time() + timeout
