@@ -69,7 +69,7 @@ OMIM 在线采集（只使用本人有权访问的页面；遇到登录/验证�
 
 采集器只保存授权页面提供的 Gene Map 导出文件和原始 HTML，不把搜索摘要当作 OMIM 基因关联；下载文件仍需用上面的 `omim_export convert` 转换并经过批次校验。
 
-`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。遇到人机验证时，它会通过 `/api/assist/request` 把当前页面交给工作台，等待用户完成验证并点击“验证完成，继续采集”，再回到原疾病关键词继续采集。当前 discovery pipeline 尚未自动调用该在线采集器，接入入口仍需由后续在线采集编排触发。
+`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。遇到人机验证时，它会通过 `/api/assist/request` 把当前页面交给工作台，等待用户完成验证并点击“验证完成，继续采集”，再回到原疾病关键词继续采集。静态验证页不触发重绘时，协助桥会自动截图作为画布兜底，避免用户看到黑屏。当前 discovery pipeline 尚未自动调用该在线采集器，接入入口仍需由后续在线采集编排触发。
 
 ## 导入后运行
 

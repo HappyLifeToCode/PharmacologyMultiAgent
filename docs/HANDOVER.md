@@ -1,7 +1,7 @@
 # 项目交接说明（给下一位协作者 / 大模型）
 
 > 目的：让没有本项目上下文的人（或 AI）能快速接手。阅读顺序：本文件 → docs/PROJECT_STATUS.md → docs/DATA_CONTRACT.md。
-> 更新日期：2026-09-23（修正疾病反查证据行与唯一基因数的核验口径）。项目根目录即本文件所在仓库。
+> 更新日期：2026-09-24（补充在线采集人机协助与静态验证页画布修复）。项目根目录即本文件所在仓库。
 
 ## 2026-09-23 济川煎反查口径修正
 
@@ -11,6 +11,14 @@
 
 本机 BATMAN 数据获取日期记录为 2026-09-18，Agent 默认超时 900 秒；STRING/CytoNCA/DAVID 已有真实工程冒烟证据，但仍不代表正式科研验收，`scientific_complete` 继续为 false。
 
+## 2026-09-24 人机协助静态验证页修复
+
+人机协助桥 `pharm/assist/bridge.py` 已修复静态 Cloudflare/OMIM 验证页黑屏问题。此前桥接只依赖 CDP screencast 的重绘事件，页面停留在静态验证页时可能没有首帧；现在在超过 1 秒未收到 CDP 帧时，自动调用 Playwright 截图发布 JPEG 兜底帧，并在收到正常 screencast 帧后恢复按帧推送。该改动只影响画面显示，不绕过验证码或改变采集权限。
+
+本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**。提交为 `1927fb6`（`修复人机协助静态页面黑屏`），已推送 `main`。
+
+当前边界保持不变：GeneCards/OMIM 采集器已经能够登记协助请求、等待用户完成验证并继续；discovery 主流水线尚未自动编排在线采集、产物导入和 resume，仍需后续实现。
+
 ## 1. 项目是什么
 
 中药复方反向疾病发现工具。输入方剂（内置四方：温经汤/半夏白术天麻汤/济川煎/桃核承气汤，或自由药材组合）→ BATMAN-TCM v2.0 本地全量文件解析药材—成分—靶点 → 本地 SQLite 疾病索引反查候选疾病关联（带启发式置信度 heuristic_v1）→ 程序验收。对候选疾病可发起**机制分析链路**（pipeline="analysis"）：共同靶点 → STRING/CytoNCA 网络 → DAVID 富集 → 验收。
@@ -19,7 +27,7 @@
 
 ## 2. 当前状态
 
-- 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**202 passed, 4 skipped**。
+- 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**209 passed, 3 skipped**。
 - 如实未做：六会话**完整**真实 live 运行（单次真实 Codex 会话冒烟已于 2026-09-22 通过，gpt-5.6-luna，证据 runs/diagnostics/model_smoke_20260922.json）；STRING 桥接/CytoNCA 计算/DAVID 正式提交未验证（可达性 2026-09-22 实测：STRING API 200、DAVID 首页 200、Cytoscape 在 D:/Tools，runs/diagnostics/dependency_smoke_20260922.json）；本机无研究数据。
 - 未实现：在线采集编排（agents/runtime.py 的浏览器采集路径预留）；四方组成出处待用户确认；疾病库覆盖取决于批次。
 
