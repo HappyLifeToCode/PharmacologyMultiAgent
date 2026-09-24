@@ -310,6 +310,8 @@ def artifact(run_id: str, filename: str):
     if not path.is_file() or path.suffix.lower() not in (".png", ".json", ".csv", ".tsv", ".txt", ".md"):
         raise HTTPException(404)
     response = FileResponse(path, media_type="image/png" if path.suffix == ".png" else "text/plain; charset=utf-8")
+    if filename == "report.md":
+        response.headers["Content-Disposition"] = 'attachment; filename="report.md"'
     response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
     return response
 

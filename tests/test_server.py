@@ -9,15 +9,20 @@ def test_artifact_allowlist_and_post_origin(tmp_path, monkeypatch):
     directory = tmp_path / "runs/test_run"
     directory.mkdir(parents=True)
     (directory / "allowed.csv").write_text("gene_symbol\nTP53\n")
+    (directory / "report.md").write_text("# report\n")
     (directory / "stderr.log").write_text("private")
     (directory / "prompt.txt").write_text("private prompt")
     write_json(directory / "manifest.json", {"run_id": "test_run",
                                                "workspace_id": workspace_identity(tmp_path)["workspace_id"],
+                                               "report": "report.md",
                                                "stages": {"herb_targets": {"artifacts": ["allowed.csv", "prompt.txt"]}}})
     calls = []
     monkeypatch.setattr(backend, "start", lambda *args, **kwargs: calls.append(args) or "test_run")
     with TestClient(backend.app, base_url="http://localhost") as client:
         assert client.get("/artifacts/test_run/allowed.csv").status_code == 200
+        report = client.get("/artifacts/test_run/report.md")
+        assert report.status_code == 200
+        assert report.headers["content-disposition"] == 'attachment; filename="report.md"'
         assert client.get("/artifacts/test_run/stderr.log").status_code == 404
         assert client.get("/artifacts/test_run/prompt.txt").status_code == 404
         assert client.get("/api/runs/test_run").json()["stages"]["herb_targets"]["artifacts"] == ["allowed.csv"]

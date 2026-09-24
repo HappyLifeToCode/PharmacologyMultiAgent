@@ -323,7 +323,11 @@ function renderRun(manifest) {
   }
   renderStageGraph(manifest);
   const resume = $("resume-run");
-  resume.hidden = !(manifest.status === "failed" || manifest.status === "partial");
+  // 后端会为没有活动执行进程的遗留 running 运行附加 note；这类运行也可以恢复。
+  const staleRunning = manifest.status === "running" && !!manifest.note;
+  resume.hidden = !(manifest.status === "failed" || manifest.status === "partial" || staleRunning);
+  resume.textContent = staleRunning ? "恢复中断运行" : "恢复运行";
+  resume.title = staleRunning ? "该运行已没有活动执行进程，可从未完成阶段恢复" : "";
   resume.onclick = async () => {
     try {
       await postJSON("/api/runs/" + manifest.run_id + "/resume", {});
@@ -336,8 +340,10 @@ function renderRun(manifest) {
   if (manifest.report) {
     report.hidden = false;
     report.href = "/artifacts/" + manifest.run_id + "/" + manifest.report;
+    report.download = "report.md";
   } else {
     report.hidden = true;
+    report.removeAttribute("download");
   }
   if (state.selectedStage) renderStageDetail(manifest);
   refreshEvents(manifest.run_id);
