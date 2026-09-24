@@ -1,7 +1,7 @@
 # 项目交接说明（给下一位协作者 / 大模型）
 
 > 目的：让没有本项目上下文的人（或 AI）能快速接手。阅读顺序：本文件 → docs/PROJECT_STATUS.md → docs/DATA_CONTRACT.md。
-> 更新日期：2026-09-24（补充在线采集人机协助与静态验证页画布修复）。项目根目录即本文件所在仓库。
+> 更新日期：2026-09-24（记录协助画布 WebSocket 404 卡点）。项目根目录即本文件所在仓库。
 
 ## 2026-09-23 济川煎反查口径修正
 
@@ -15,9 +15,13 @@
 
 人机协助桥 `pharm/assist/bridge.py` 已修复静态 Cloudflare/OMIM 验证页黑屏问题。此前桥接只依赖 CDP screencast 的重绘事件，页面停留在静态验证页时可能没有首帧；现在在超过 1 秒未收到 CDP 帧时，自动调用 Playwright 截图发布 JPEG 兜底帧，并在收到正常 screencast 帧后恢复按帧推送。生产 headed Chromium 原始窗口移到屏幕外，用户只在工作台 canvas 中操作。该改动只影响画面显示，不绕过验证码或改变采集权限。
 
-本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**。提交为 `1927fb6`（`修复人机协助静态页面黑屏`），已推送 `main`。
+本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**；全量回归 **209 passed, 3 skipped**。相关提交 `1927fb6`、`282db0e`、`3d799df`、`2bc1c8f` 均已推送 `main`。
 
 当前边界保持不变：GeneCards/OMIM 采集器已经能够登记协助请求、等待用户完成验证并继续；用户必须在右侧内嵌协助画布中操作，完成后验证 cookies/storage state 会同步回原采集器，避免原页面重复验证。discovery 主流水线尚未自动编排在线采集、产物导入和 resume，仍需后续实现。
+
+### 当前暂停点：实际工作台 WebSocket 返回 404
+
+2026-09-24 实机测试中，`/api/assist/status` 能返回 `running`，后台 headed Chromium 也能启动且原始窗口已移到屏幕外；但浏览器连接 `ws://127.0.0.1:8766/ws/assist` 时收到 **404**，因此前端没有收到 JPEG 二进制帧，画布保持黑色。用 Playwright 复现时控制台记录：`WebSocket connection ... failed: Unexpected response code: 404`。这说明当前卡点在实际服务的 WebSocket 路由/运行环境，不是 OMIM 页面验证或截图内容本身。后续恢复工作时先核对实际启动环境的 Uvicorn WebSocket 支持（`websockets`/`wsproto`）、进程加载的项目路径和 `/ws/assist` 路由，再继续前端调试。用户已要求暂时停止开发，不要把画布显示为已完成。
 
 ## 1. 项目是什么
 
