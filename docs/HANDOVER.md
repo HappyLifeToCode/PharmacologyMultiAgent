@@ -13,7 +13,7 @@
 
 ## 2026-09-24 人机协助静态验证页修复
 
-人机协助桥 `pharm/assist/bridge.py` 已修复静态 Cloudflare/OMIM 验证页黑屏问题。此前桥接只依赖 CDP screencast 的重绘事件，页面停留在静态验证页时可能没有首帧；现在在超过 1 秒未收到 CDP 帧时，自动调用 Playwright 截图发布 JPEG 兜底帧，并在收到正常 screencast 帧后恢复按帧推送。该改动只影响画面显示，不绕过验证码或改变采集权限。
+人机协助桥 `pharm/assist/bridge.py` 已修复静态 Cloudflare/OMIM 验证页黑屏问题。此前桥接只依赖 CDP screencast 的重绘事件，页面停留在静态验证页时可能没有首帧；现在在超过 1 秒未收到 CDP 帧时，自动调用 Playwright 截图发布 JPEG 兜底帧，并在收到正常 screencast 帧后恢复按帧推送。生产 headed Chromium 原始窗口移到屏幕外，用户只在工作台 canvas 中操作。该改动只影响画面显示，不绕过验证码或改变采集权限。
 
 本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**。提交为 `1927fb6`（`修复人机协助静态页面黑屏`），已推送 `main`。
 

@@ -15,7 +15,7 @@
 | 置信度 heuristic_v1 | 候选疾病四维组件（match_score/log 归一、input_coverage、disease_coverage、evidence_quality=known 占比+genecards 归一分值；权重 0.3/0.3/0.2/0.2，null 剔除归一）；固定顺序非排名；手算对拍测试；前端列展示+组件展开；结果显式区分唯一证据基因数与原始证据行数 | 公式本身的研究评审（属研究问题） |
 | 机制分析链路（analysis） | shared_targets→network→enrichment→analysis_review（workflow_version=4，v3 resume 拒绝）；POST /api/analysis（校验来源 run 与疾病）；交集空如实；缺省继承来源运行模式；fixture 端到端；归档 05_analysis/；Agent 序列 mock 验证 | STRING API 真实可达性、CytoNCA 真实桥接、DAVID 真实提交——均未在本轮验证（门禁保留：network_topology/david_enrichment 未确认即 blocked/partial） |
 | STRING/CytoNCA/DAVID 模块 | 恢复至 pharm/network/（string_local 本地优先+API 回选路、cytoscape 桥、metrics 度值核对）、pharm/enrich/david；integrations/cytonca_bridge 原样恢复；历史测试原样通过（63 项） | 真实服务/软件冒烟；正式研究参数确认 |
-| 人机协助 | /api/assist/* + WS /ws/assist；headed Chromium + CDP screencast 推流；输入回传；guidance；静态验证页超过 1 秒无重绘时自动截图兜底；验证完成后同步 cookies/storage state 回原采集器；headed 失败显式 AssistUnavailable | 采集编排接入（预留） |
+| 人机协助 | /api/assist/* + WS /ws/assist；后台 headed Chromium（原始窗口移出屏幕）+ CDP screencast 推流；输入回传；guidance；静态验证页超过 1 秒无重绘时自动截图兜底；验证完成后同步 cookies/storage state 回原采集器；headed 失败显式 AssistUnavailable | 采集编排接入（预留） |
 | Web 工作台 | 三栏工作台；候选疾病置信度列+组件展开；"机制分析"按钮与 analysis 阶段图；Agent 核验展示；真实浏览器验证（含 WS 帧像素级、置信度与分析全链截图） | 全新开发机完整安装验收 |
 | 测试与工程 | 209 passed / 3 skipped；fixture 产物标注 synthetic_engineering 且不进归档 | 真实模型/真实数据验收 |
 

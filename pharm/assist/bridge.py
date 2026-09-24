@@ -81,7 +81,13 @@ class AssistSession:
     def _run(self):
         try:
             self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch(headless=self._headless)
+            launch_kwargs = {"headless": self._headless}
+            if not self._headless:
+                # 保留 headed Chromium（避免 Cloudflare 将其当作 headless），
+                # 但把原始窗口移到屏幕外；用户只在工作台 canvas 中操作。
+                launch_kwargs["args"] = ["--window-position=-10000,-10000",
+                                          "--window-size=%d,%d" % self._viewport]
+            self._browser = self._pw.chromium.launch(**launch_kwargs)
             self._context = self._browser.new_context(viewport={"width": self._viewport[0], "height": self._viewport[1]})
             self._page = self._context.new_page()
             self._page.goto(self.url, wait_until="domcontentloaded", timeout=45000)
