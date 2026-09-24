@@ -68,6 +68,7 @@ class AssistSession:
         self._start_error = None
         self._started = threading.Event()
         self._current_url = url
+        self._last_frame_at = 0.0
         self._thread = threading.Thread(target=self._run, name="pharm-assist", daemon=True)
         self._thread.start()
         if not self._started.wait(timeout=60):
@@ -101,6 +102,10 @@ class AssistSession:
             try:
                 task = self._tasks.get(timeout=0.2)
             except queue.Empty:
+                # 某些 Cloudflare/OMIM 验证页不触发 CDP screencast 重绘；
+                # 定期截图作为首帧和静态页面兜底，避免内嵌画布黑屏。
+                if time.monotonic() - self._last_frame_at > 1.0:
+                    self._publish_screenshot()
                 continue
             if task is None:
                 break
@@ -115,6 +120,18 @@ class AssistSession:
                 else:
                     self.last_error = str(exc)
         self._cleanup()
+
+    def _publish_screenshot(self):
+        try:
+            image = self._page.screenshot(type="jpeg", quality=self._quality)
+            meta = {"width": self._viewport[0], "height": self._viewport[1], "ts": time.time()}
+            with self._lock:
+                self._latest = (meta, image)
+                subs = list(self._subs)
+            self._last_frame_at = time.monotonic()
+            self._broadcast(("frame", meta, image), subs)
+        except Exception:
+            pass
 
     def _cleanup(self):
         for action in (
@@ -146,6 +163,7 @@ class AssistSession:
         with self._lock:
             self._latest = (meta, jpeg)
             subs = list(self._subs)
+        self._last_frame_at = time.monotonic()
         self._broadcast(("frame", meta, jpeg), subs)
 
     # ---- 订阅分发（线程安全） ----
