@@ -693,6 +693,7 @@ function updateAssistPanel() {
   panel.hidden = !assist && !running && !pending;
   $("assist-launch").hidden = running;
   $("assist-live").hidden = !running;
+  $("assist-complete").hidden = !running;
   if (assist) $("assist-guidance-text").textContent = assist.guidance || "";
   const source = pending || state.assist.pending;
   $("assist-source").textContent = source && source.url
@@ -795,6 +796,15 @@ function bindAssistPanel() {
     if (state.assist.ws) state.assist.ws.close();
     setAssistState("closed");
     $("assist-guidance-list").innerHTML = "";
+  });
+  $("assist-complete").addEventListener("click", async () => {
+    try {
+      const result = await postJSON("/api/assist/complete", {});
+      setAssistState(result.state);
+      appendGuidance({text: "已通知采集 Agent 继续执行。", ts: ""});
+    } catch (err) {
+      alert(err.message);
+    }
   });
   const canvas = $("assist-canvas");
   let lastMove = 0;

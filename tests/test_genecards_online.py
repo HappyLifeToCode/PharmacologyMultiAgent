@@ -2,6 +2,7 @@ import pytest
 
 from pharm.diseases.genecards_online import (parse_declared_total, parse_rows_from_html,
                                          parse_site_version)
+import pharm.diseases.genecards_online as genecards_online
 
 # 按 2026-09-18 真实页面（local/gc_page_sample.html，GeneCards 6.1）校准的结构
 ROW = ('<tr class="even"><td class="dt-control"></td><td class="dt-type-numeric">1</td>'
@@ -35,6 +36,23 @@ def test_parse_declared_total_variants():
 def test_parse_site_version():
     assert parse_site_version("Version 6.1 Build August 17, 2026") == "Version 6.1 Build August 17, 2026"
     assert parse_site_version("no version") is None
+
+
+def test_assist_handoff_waits_for_user_completion(monkeypatch):
+    calls = []
+    responses = iter([
+        {"request_id": "req-1"},
+        {"state": "pending", "pending": {"request_id": "req-1"}},
+        {"state": "done", "pending": None},
+    ])
+    monkeypatch.setattr(genecards_online, "_assist_json",
+                        lambda base, path, payload=None: calls.append((path, payload)) or next(responses))
+    monkeypatch.setattr(genecards_online.time, "sleep", lambda _: None)
+    meta = {"actions": []}
+    genecards_online._wait_for_assist("http://127.0.0.1:8766", "https://www.genecards.org/search/results?q=X", "X", meta)
+    assert [path for path, _ in calls] == ["/api/assist/request", "/api/assist/status", "/api/assist/status"]
+    assert meta["actions"][0]["action"] == "assist_requested"
+    assert meta["actions"][1]["action"] == "assist_completed"
 
 
 def test_real_sample_page_parses_exactly():

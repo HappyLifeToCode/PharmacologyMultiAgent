@@ -61,7 +61,7 @@ provenance.json     sources.associations + mapping
 .\.venv\Scripts\python.exe -m pharm.diseases.omim_export convert --files genemap2.xlsx --output omim.csv
 ```
 
-`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。它是预留的采集组件：当前 pipeline 不调用它，未来在线采集阶段经人机协助会话接入（见 [项目进度](PROJECT_STATUS.md)）。
+`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。遇到人机验证时，它会通过 `/api/assist/request` 把当前页面交给工作台，等待用户完成验证并点击“验证完成，继续采集”，再回到原疾病关键词继续采集。当前 discovery pipeline 尚未自动调用该在线采集器，接入入口仍需由后续在线采集编排触发。
 
 ## 导入后运行
 

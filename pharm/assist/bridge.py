@@ -347,6 +347,15 @@ class AssistManager:
             session.close()
         return session
 
+    def complete(self):
+        """用户确认验证完成，通知等待中的采集端继续。"""
+        with self._lock:
+            session = self._session
+        if session is None or session.state not in ACTIVE_STATES:
+            raise RuntimeError("当前没有进行中的协助会话")
+        session.set_state("done")
+        return session
+
     def status(self):
         session = self._session
         if session is None:

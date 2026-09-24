@@ -8,11 +8,14 @@ Cloudflare 拦截无头浏览器，因此采集必须使用有窗口的 headed �
 from __future__ import annotations
 
 import csv
+import json
+import os
 import re
 import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from ..core.common import ROOT, digest, now, write_json
 from ..core.symbols import _valid_symbol
@@ -170,7 +173,41 @@ def _collect_one_disease(page, disease, declared_hint, directory, pages_root,
     return rows, declared
 
 
-def collect_online(diseases, directory, headless=False, page_delay_ms=1800):
+def _assist_json(base_url, path, payload=None):
+    body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(base_url.rstrip("/") + path, data=body,
+                      headers={"Content-Type": "application/json"} if body else {})
+    with urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _wait_for_assist(base_url, url, disease, meta, timeout=900):
+    """将当前页面交给工作台，等待用户完成验证后再返回采集器。"""
+    request = _assist_json(base_url, "/api/assist/request", {
+        "url": url,
+        "guidance": "请完成 GeneCards 人机验证；完成后点击‘验证完成，继续采集’。",
+        "context": {"source": "genecards", "disease": disease},
+    })
+    request_id = request["request_id"]
+    meta["actions"].append({"action": "assist_requested", "disease": disease,
+                            "request_id": request_id, "at": now()})
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = _assist_json(base_url, "/api/assist/status")
+        pending = status.get("pending") or {}
+        if pending.get("request_id") == request_id:
+            time.sleep(2)
+            continue
+        if status.get("state") in ("done", "closed"):
+            meta["actions"].append({"action": "assist_completed", "disease": disease,
+                                    "request_id": request_id, "at": now()})
+            return
+        time.sleep(2)
+    raise RuntimeError("等待用户完成人机验证超时（15 分钟）：" + disease)
+
+
+def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
+                   assist_base_url=None):
     """Query each disease keyword online and emit genecards.csv + provenance.json.
 
     Returns collection metadata. Any challenge, pagination mismatch or structural
@@ -178,6 +215,7 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800):
     """
     if not diseases or any(not isinstance(d, str) or not d.strip() for d in diseases):
         raise ValueError("diseases 必须是非空关键词列表")
+    assist_base_url = assist_base_url or os.environ.get("PHARM_ASSIST_URL", "http://127.0.0.1:8766")
     from playwright.sync_api import sync_playwright
 
     directory = Path(directory)
@@ -220,19 +258,10 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800):
                     title = page.title()
                     if response is None or any(c in title for c in CHALLENGE_TITLES) \
                             or (response.status is not None and response.status != 200):
-                        # headed 模式下给人留完成验证的窗口（不绕过，由本人操作）
                         page.screenshot(path=str(directory / "challenge.png"))
                         meta["actions"].append({"action": "await_human_verification",
                                                 "disease": disease, "title": title, "at": now()})
-                        deadline = time.monotonic() + 900
-                        while True:
-                            on_wall = any(c in page.title() for c in CHALLENGE_TITLES)
-                            on_auth = "auth.lifemapsc.com" in page.url  # 注册/登录流程中，不打断
-                            if not on_wall and not on_auth:
-                                break
-                            if time.monotonic() > deadline:
-                                raise RuntimeError("人机验证/注册 15 分钟内未完成（证据已保留）：" + disease)
-                            page.wait_for_timeout(3000)
+                        _wait_for_assist(assist_base_url, page.url or url, disease, meta)
                         # 登录流程结束后页面可能不在结果页，主动回到检索 URL
                         page.goto(url, wait_until="domcontentloaded", timeout=60000)
                         page.wait_for_timeout(2500)

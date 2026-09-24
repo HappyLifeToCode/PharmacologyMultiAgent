@@ -264,6 +264,15 @@ def assist_stop():
     return {"state": "closed" if session is not None else "idle"}
 
 
+@app.post("/api/assist/complete")
+def assist_complete():
+    try:
+        session = assist_manager.complete()
+        return {"state": session.state, "url": session.current_url}
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
 @app.get("/api/assist/status")
 def assist_status():
     return assist_manager.status()

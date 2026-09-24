@@ -182,6 +182,9 @@ def test_agent_handoff_supplies_url_for_user_assistance(backend):
         started = client.post("/api/assist/start", json={"request_id": request["request_id"]})
         assert started.status_code == 200
         assert started.json()["url"] == PAGE_URL
+        completed = client.post("/api/assist/complete")
+        assert completed.status_code == 200
+        assert completed.json()["state"] == "done"
         assert client.post("/api/assist/stop").status_code == 200
 
 
