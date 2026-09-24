@@ -753,13 +753,37 @@ function connectAssistWs() {
         appendGuidance({ text: "输入被拒绝：" + message.message, ts: "" });
       }
     } else {
-      createImageBitmap(event.data).then((bitmap) => {
-        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-        bitmap.close();
-      }).catch(() => {});
+      drawAssistFrame(event.data);
     }
   };
   ws.onclose = () => { state.assist.ws = null; };
+}
+
+function drawAssistFrame(data) {
+  const canvas = $("assist-canvas");
+  const context = canvas.getContext("2d");
+  const blob = data instanceof Blob ? data : new Blob([data], { type: "image/jpeg" });
+  if (typeof createImageBitmap === "function") {
+    createImageBitmap(blob).then((bitmap) => {
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+    }).catch(() => drawAssistFrameWithImage(blob));
+    return;
+  }
+  drawAssistFrameWithImage(blob);
+}
+
+function drawAssistFrameWithImage(blob) {
+  const canvas = $("assist-canvas");
+  const context = canvas.getContext("2d");
+  const url = URL.createObjectURL(blob);
+  const image = new Image();
+  image.onload = () => {
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+  };
+  image.onerror = () => URL.revokeObjectURL(url);
+  image.src = url;
 }
 
 function sendAssist(payload) {
