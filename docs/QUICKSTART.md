@@ -58,7 +58,7 @@
 
 同一时刻只允许一个协助会话。采集端可调用 `POST /api/assist/request` 登记 `url`、`guidance` 和可选 `context`，前端再调用 `POST /api/assist/start`（只需 `request_id`）启动接管。在线采集 Agent 的完整采集编排仍需接入；当前桥接已经不要求用户手动输入 URL。
 
-> 当前实机已知问题：如果浏览器控制台显示 `WebSocket connection ... /ws/assist ... 404`，画布会保持黑色。此时不要重复点击“接管”，应先检查运行服务的 Uvicorn WebSocket 支持和实际加载路径。
+> 若浏览器控制台显示 `WebSocket connection ... /ws/assist ... 404`，画布会保持黑色。该问题 2026-09-24 已定位：服务环境缺 `websockets` 包（现已写入 requirements.txt，启动时缺包会直接报错）。请先 `pip install -r requirements.txt` 并重启服务；仍出现则核验运行进程加载的是否旧代码。
 
 ## 5. 环境检查与测试
 

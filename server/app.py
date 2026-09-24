@@ -364,6 +364,10 @@ def artifact(run_id: str, filename: str):
 
 if __name__ == "__main__":
     import uvicorn
+    try:
+        import websockets  # noqa: F401
+    except ImportError:
+        raise SystemExit("缺少 websockets 包，/ws/assist 将不可用；请先 pip install -r requirements.txt")
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()

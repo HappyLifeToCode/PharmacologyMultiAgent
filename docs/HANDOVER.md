@@ -1,7 +1,11 @@
 # 项目交接说明（给下一位协作者 / 大模型）
 
 > 目的：让没有本项目上下文的人（或 AI）能快速接手。阅读顺序：本文件 → docs/PROJECT_STATUS.md → docs/DATA_CONTRACT.md。
-> 更新日期：2026-09-24（记录协助画布 WebSocket 404 卡点）。项目根目录即本文件所在仓库。
+> 更新日期：2026-09-24（协助画布 WebSocket 404 卡点已修复）。项目根目录即本文件所在仓库。
+
+## 2026-09-24 协助画布 WebSocket 404 修复
+
+合作者实机发现的"画布黑屏、/ws/assist 返回 404"卡点已定位并修复：**uvicorn 的 WebSocket 支持依赖 `websockets` 包，此前未写入 requirements.txt**——开发机若用 `uvicorn` 裸装（无 websockets）则 WS 握手失败；测试走 TestClient 不经真实 WS，因此 200+ 项测试全绿也暴露不了。修复：`requirements.txt` 增加 `websockets>=15`；`server/app.py` 启动时缺包直接报错提示安装；`scripts/doctor.py` 检查列表同步。真实协议栈验证（2026-09-24，本机 8766 端口真实 uvicorn + websockets 客户端）：无会话连接收到 idle 状态 → 启动协助会话 → 收到 12KB JPEG 二进制帧（魔数校验通过）→ 正常关闭。另注：404 也可能来自旧进程加载旧代码——重启服务前核验进程路径与命令行。
 
 ## 2026-09-23 济川煎反查口径修正
 
@@ -9,7 +13,7 @@
 
 现行口径在结果和 Agent 提示词中显式区分：`matched_count` 与 `unique_evidence_gene_count` 都是唯一基因数；`evidence_row_count` 是原始证据行数，同一基因对应多条来源记录时可以更大。Agent 只核对唯一基因数与程序记录，不再要求两种数量相等。历史运行不改写；修正后的新运行应重新生成。
 
-本机 BATMAN 数据获取日期记录为 2026-09-18，Agent 默认超时 900 秒；STRING/CytoNCA/DAVID 已有真实工程冒烟证据，但仍不代表正式科研验收，`scientific_complete` 继续为 false。
+合作者机器 BATMAN 数据获取日期记录为 2026-09-18，Agent 默认超时 900 秒；STRING/CytoNCA/DAVID 仅完成可达性核验（2026-09-22：API/首页 200、软件在位），正式冒烟（桥接计算/真实提交）仍待做，更不代表正式科研验收，`scientific_complete` 继续为 false。
 
 ## 2026-09-24 人机协助静态验证页修复
 
@@ -19,9 +23,9 @@
 
 当前边界保持不变：GeneCards/OMIM 采集器已经能够登记协助请求、等待用户完成验证并继续；用户必须在右侧内嵌协助画布中操作，完成后验证 cookies/storage state 会同步回原采集器，避免原页面重复验证。discovery 主流水线尚未自动编排在线采集、产物导入和 resume，仍需后续实现。
 
-### 当前暂停点：实际工作台 WebSocket 返回 404
+### 历史暂停点（已解决）：实际工作台 WebSocket 返回 404
 
-2026-09-24 实机测试中，`/api/assist/status` 能返回 `running`，后台 headed Chromium 也能启动且原始窗口已移到屏幕外；但浏览器连接 `ws://127.0.0.1:8766/ws/assist` 时收到 **404**，因此前端没有收到 JPEG 二进制帧，画布保持黑色。用 Playwright 复现时控制台记录：`WebSocket connection ... failed: Unexpected response code: 404`。这说明当前卡点在实际服务的 WebSocket 路由/运行环境，不是 OMIM 页面验证或截图内容本身。后续恢复工作时先核对实际启动环境的 Uvicorn WebSocket 支持（`websockets`/`wsproto`）、进程加载的项目路径和 `/ws/assist` 路由，再继续前端调试。用户已要求暂时停止开发，不要把画布显示为已完成。
+2026-09-24 实机测试中，`/api/assist/status` 能返回 `running`，后台 headed Chromium 也能启动且原始窗口已移到屏幕外；但浏览器连接 `ws://127.0.0.1:8766/ws/assist` 时收到 **404**，画布保持黑色。当日排查方向（uvicorn WebSocket 支持、进程加载路径）正确，根因与修复见本节开头——**websockets 包缺失**，现已修复并实测通过。
 
 ## 1. 项目是什么
 
@@ -31,8 +35,8 @@
 
 ## 2. 当前状态
 
-- 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**209 passed, 3 skipped**。
-- 如实未做：六会话**完整**真实 live 运行（单次真实 Codex 会话冒烟已于 2026-09-22 通过，gpt-5.6-luna，证据 runs/diagnostics/model_smoke_20260922.json）；STRING 桥接/CytoNCA 计算/DAVID 正式提交未验证（可达性 2026-09-22 实测：STRING API 200、DAVID 首页 200、Cytoscape 在 D:/Tools，runs/diagnostics/dependency_smoke_20260922.json）；本机无研究数据。
+- 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**208 passed, 4 skipped**（其中 1 个 skip 是"真实页面样本只在本机 local/ 有"的环境敏感用例——合作者机器有该样本时为 209 passed, 3 skipped，差异属预期）。
+- 如实未做：六会话**完整**真实 live 运行（单次真实 Codex 会话冒烟已于 2026-09-22 通过，gpt-5.6-luna，证据 runs/diagnostics/model_smoke_20260922.json）；STRING 桥接/CytoNCA 计算/DAVID 正式提交未验证（可达性 2026-09-22 实测：STRING API 200、DAVID 首页 200、Cytoscape 在 D:/Tools，runs/diagnostics/dependency_smoke_20260922.json）；研究数据目前只在合作者机器（济川煎真实运行即在该机完成），其他开发机需另行同步。
 - 未实现：在线采集编排（agents/runtime.py 的浏览器采集路径预留）；四方组成出处待用户确认；疾病库覆盖取决于批次。
 
 ## 3. 关键资产位置
