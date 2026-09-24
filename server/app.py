@@ -278,6 +278,18 @@ def assist_status():
     return assist_manager.status()
 
 
+@app.get("/api/assist/storage-state")
+def assist_storage_state():
+    """本机采集器在用户验证后取回协助浏览器的登录/验证状态。"""
+    session = assist_manager.current()
+    if session is None or session.state == "closed":
+        raise HTTPException(409, "当前没有可用的协助会话")
+    try:
+        return session.storage_state()
+    except Exception as exc:
+        raise HTTPException(409, "无法读取协助浏览器状态：" + str(exc))
+
+
 @app.websocket("/ws/assist")
 async def assist_ws(websocket: WebSocket):
     host = websocket.headers.get("host") or websocket.url.netloc

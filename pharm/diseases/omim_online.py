@@ -50,7 +50,12 @@ def wait_for_assist(base_url, url, disease, meta, timeout=900):
         if status.get("state") in ("done", "closed"):
             meta["actions"].append({"action": "assist_completed", "disease": disease,
                                     "request_id": request_id, "at": now()})
-            return
+            try:
+                return _assist_json(base_url, "/api/assist/storage-state")
+            except Exception as exc:
+                meta["actions"].append({"action": "assist_state_unavailable", "disease": disease,
+                                        "reason": str(exc), "at": now()})
+                return None
         time.sleep(2)
     raise RuntimeError("等待用户完成 OMIM 人机验证超时：" + disease)
 
@@ -86,7 +91,9 @@ def collect_online(diseases, directory, headless=False, assist_base_url=None, ti
                 if response is None or (response.status and response.status >= 400) or any(x.lower() in title.lower() for x in CHALLENGE_TITLES):
                     page.screenshot(path=str(raw / ("challenge_" + _safe_name(disease) + ".png")))
                     meta["actions"].append({"action": "await_human_verification", "disease": disease, "url": page.url, "at": now()})
-                    wait_for_assist(assist_base_url, page.url or url, disease, meta, timeout=timeout)
+                    assist_state = wait_for_assist(assist_base_url, page.url or url, disease, meta, timeout=timeout)
+                    if assist_state and assist_state.get("cookies"):
+                        context.add_cookies(assist_state["cookies"])
                     page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(2000)
                 html_path = raw / ("search_" + _safe_name(disease) + ".html")

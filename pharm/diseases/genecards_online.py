@@ -205,7 +205,12 @@ def _wait_for_assist(base_url, url, disease, meta, timeout=900):
         if status.get("state") in ("done", "closed"):
             meta["actions"].append({"action": "assist_completed", "disease": disease,
                                     "request_id": request_id, "at": now()})
-            return
+            try:
+                return _assist_json(base_url, "/api/assist/storage-state")
+            except Exception as exc:
+                meta["actions"].append({"action": "assist_state_unavailable", "disease": disease,
+                                        "reason": str(exc), "at": now()})
+                return None
         time.sleep(2)
     raise RuntimeError("等待用户完成人机验证超时（15 分钟）：" + disease)
 
@@ -265,7 +270,9 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
                         page.screenshot(path=str(directory / "challenge.png"))
                         meta["actions"].append({"action": "await_human_verification",
                                                 "disease": disease, "title": title, "at": now()})
-                        _wait_for_assist(assist_base_url, page.url or url, disease, meta)
+                        assist_state = _wait_for_assist(assist_base_url, page.url or url, disease, meta)
+                        if assist_state and assist_state.get("cookies"):
+                            context.add_cookies(assist_state["cookies"])
                         # 登录流程结束后页面可能不在结果页，主动回到检索 URL
                         page.goto(url, wait_until="domcontentloaded", timeout=60000)
                         page.wait_for_timeout(2500)

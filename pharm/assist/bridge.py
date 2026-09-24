@@ -130,8 +130,9 @@ class AssistSession:
                 subs = list(self._subs)
             self._last_frame_at = time.monotonic()
             self._broadcast(("frame", meta, image), subs)
-        except Exception:
-            pass
+        except Exception as exc:
+            # 页面尚未完成导航或已关闭时允许下一轮重试；保留错误便于工作台诊断。
+            self.last_error = "截图兜底失败：" + str(exc)
 
     def _cleanup(self):
         for action in (
@@ -290,6 +291,17 @@ class AssistSession:
             raise RuntimeError("协助会话已关闭")
         reply = queue.Queue(maxsize=1)
         self._tasks.put((lambda: self._page.evaluate(expression), reply))
+        ok, value = reply.get(timeout=timeout)
+        if not ok:
+            raise value
+        return value
+
+    def storage_state(self, timeout=15):
+        """返回当前协助浏览器的 Playwright storage state，供原采集会话续用。"""
+        if self.state == "closed":
+            raise RuntimeError("协助会话已关闭")
+        reply = queue.Queue(maxsize=1)
+        self._tasks.put((lambda: self._context.storage_state(), reply))
         ok, value = reply.get(timeout=timeout)
         if not ok:
             raise value

@@ -6,6 +6,7 @@ def test_omim_assist_wait(monkeypatch):
         {"request_id": "omim-1"},
         {"state": "pending", "pending": {"request_id": "omim-1"}},
         {"state": "done", "pending": None},
+        {"cookies": [{"name": "cf_clearance", "value": "ok", "domain": ".omim.org", "path": "/"}]},
     ])
     monkeypatch.setattr(omim_online, "_assist_json", lambda *args, **kwargs: next(responses))
     monkeypatch.setattr(omim_online.time, "sleep", lambda _: None)

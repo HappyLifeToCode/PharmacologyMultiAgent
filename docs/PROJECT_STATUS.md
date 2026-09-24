@@ -15,7 +15,7 @@
 | 置信度 heuristic_v1 | 候选疾病四维组件（match_score/log 归一、input_coverage、disease_coverage、evidence_quality=known 占比+genecards 归一分值；权重 0.3/0.3/0.2/0.2，null 剔除归一）；固定顺序非排名；手算对拍测试；前端列展示+组件展开；结果显式区分唯一证据基因数与原始证据行数 | 公式本身的研究评审（属研究问题） |
 | 机制分析链路（analysis） | shared_targets→network→enrichment→analysis_review（workflow_version=4，v3 resume 拒绝）；POST /api/analysis（校验来源 run 与疾病）；交集空如实；缺省继承来源运行模式；fixture 端到端；归档 05_analysis/；Agent 序列 mock 验证 | STRING API 真实可达性、CytoNCA 真实桥接、DAVID 真实提交——均未在本轮验证（门禁保留：network_topology/david_enrichment 未确认即 blocked/partial） |
 | STRING/CytoNCA/DAVID 模块 | 恢复至 pharm/network/（string_local 本地优先+API 回选路、cytoscape 桥、metrics 度值核对）、pharm/enrich/david；integrations/cytonca_bridge 原样恢复；历史测试原样通过（63 项） | 真实服务/软件冒烟；正式研究参数确认 |
-| 人机协助 | /api/assist/* + WS /ws/assist；headed Chromium + CDP screencast 推流；输入回传；guidance；静态验证页超过 1 秒无重绘时自动截图兜底，避免内嵌画布黑屏；headed 失败显式 AssistUnavailable | 采集编排接入（预留） |
+| 人机协助 | /api/assist/* + WS /ws/assist；headed Chromium + CDP screencast 推流；输入回传；guidance；静态验证页超过 1 秒无重绘时自动截图兜底；验证完成后同步 cookies/storage state 回原采集器；headed 失败显式 AssistUnavailable | 采集编排接入（预留） |
 | Web 工作台 | 三栏工作台；候选疾病置信度列+组件展开；"机制分析"按钮与 analysis 阶段图；Agent 核验展示；真实浏览器验证（含 WS 帧像素级、置信度与分析全链截图） | 全新开发机完整安装验收 |
 | 测试与工程 | 209 passed / 3 skipped；fixture 产物标注 synthetic_engineering 且不进归档 | 真实模型/真实数据验收 |
 
@@ -25,7 +25,7 @@
 |---|---|---|
 | 多 Agent 核验未过完整真实运行 | 编排、提示词、降级与签名均有 mock 对拍；2026-09-22 单次真实会话冒烟通过（通道与 schema 验证），六会话完整 live 未跑 | 数据同步后一次完整真实 live 冒烟（agents=true），核对六个会话产物与降级行为 |
 | STRING/CytoNCA/DAVID 正式验证 | 模块与历史测试恢复；2026-09-22 可达性实测（STRING API v12.0 200、DAVID 首页 200、Cytoscape 3.10.0 在 D:/Tools）；正式桥接/提交未做 | 冒烟：STRING API 小样本、CytoNCA 桥三节点、DAVID 小列表提交；结果如实记录 |
-| 在线采集编排未完成 | GeneCards/OMIM 采集器已可自动登记当前页面、等待用户验证并继续，静态验证页画面兜底已修复；相关 22 项针对性测试通过 | 将采集器接入 discovery：自动启动、产物导入、索引重建与 resume |
+| 在线采集编排未完成 | GeneCards/OMIM 采集器已可自动登记当前页面、等待用户在右侧画布验证、同步验证状态并继续，静态验证页画面兜底已修复；相关 22 项针对性测试通过 | 将采集器接入 discovery：自动启动、产物导入、索引重建与 resume |
 | 四方组成出处 | 标准教材通用口径，标注 pending_user_confirmation | 用户确认组成与 canonical→BATMAN 候选名映射 |
 | 疾病覆盖范围 | 索引疾病集合完全取决于导入批次 | 合规宽覆盖批次来源 |
 | 本机无研究数据 | data/batman、索引批次均在团队机器 | 数据同步后跑真实 live 并人工抽检 |

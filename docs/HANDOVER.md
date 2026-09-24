@@ -17,7 +17,7 @@
 
 本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**。提交为 `1927fb6`（`修复人机协助静态页面黑屏`），已推送 `main`。
 
-当前边界保持不变：GeneCards/OMIM 采集器已经能够登记协助请求、等待用户完成验证并继续；discovery 主流水线尚未自动编排在线采集、产物导入和 resume，仍需后续实现。
+当前边界保持不变：GeneCards/OMIM 采集器已经能够登记协助请求、等待用户完成验证并继续；用户必须在右侧内嵌协助画布中操作，完成后验证 cookies/storage state 会同步回原采集器，避免原页面重复验证。discovery 主流水线尚未自动编排在线采集、产物导入和 resume，仍需后续实现。
 
 ## 1. 项目是什么
 
