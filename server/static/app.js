@@ -49,7 +49,7 @@ const state = {
   handoff: null,
   pollTimer: null,
   runRevision: null,
-  assist: { ws: null, state: "idle", available: null, pending: null },
+  assist: { ws: null, state: "idle", available: null, pending: null, frameSeq: 0 },
 };
 
 async function api(path, options) {
@@ -101,6 +101,12 @@ function taskBodyFromForm() {
     research_notes: $("notes-input").value,
     batman_threshold: parseFloat($("threshold-input").value),
     mode: $("mode-select").value,
+    online_collect: $("online-collect").checked,
+    online_diseases: $("online-diseases-input").value.split("\n").map((s) => s.trim()).filter(Boolean),
+    online_sources: [
+      $("source-genecards").checked ? "genecards" : null,
+      $("source-omim").checked ? "omim" : null,
+    ].filter(Boolean),
   };
   const formula = $("formula-select").value;
   if (formula) body.formula = formula;
@@ -155,6 +161,11 @@ function selectTask(task) {
   $("herbs-input").value = task.herbs.join("\n");
   $("threshold-input").value = task.batman_threshold;
   $("mode-select").value = task.mode || "live";
+  $("online-collect").checked = Boolean(task.online_collect);
+  $("online-diseases-input").value = (task.online_diseases || []).join("\n");
+  const onlineSources = task.online_sources || ["genecards", "omim"];
+  $("source-genecards").checked = onlineSources.includes("genecards");
+  $("source-omim").checked = onlineSources.includes("omim");
   $("notes-input").value = task.research_notes || "";
   $("selected-task-actions").hidden = false;
   $("run-task-message").textContent = "";
@@ -743,8 +754,11 @@ function connectAssistWs() {
       let message;
       try { message = JSON.parse(event.data); } catch (err) { return; }
       if (message.type === "frame") {
-        canvas.width = message.width || canvas.width;
-        canvas.height = message.height || canvas.height;
+        const width = message.width || canvas.width;
+        const height = message.height || canvas.height;
+        // 重复赋值会清空 canvas；只在尺寸真的变化时重设，避免画面闪烁。
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
       } else if (message.type === "guidance") {
         appendGuidance(message);
       } else if (message.type === "state") {
@@ -753,32 +767,34 @@ function connectAssistWs() {
         appendGuidance({ text: "输入被拒绝：" + message.message, ts: "" });
       }
     } else {
-      drawAssistFrame(event.data);
+      drawAssistFrame(event.data, ++state.assist.frameSeq);
     }
   };
   ws.onclose = () => { state.assist.ws = null; };
 }
 
-function drawAssistFrame(data) {
+function drawAssistFrame(data, seq) {
   const canvas = $("assist-canvas");
   const context = canvas.getContext("2d");
   const blob = data instanceof Blob ? data : new Blob([data], { type: "image/jpeg" });
   if (typeof createImageBitmap === "function") {
     createImageBitmap(blob).then((bitmap) => {
+      if (seq !== state.assist.frameSeq) { bitmap.close(); return; }
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close();
-    }).catch(() => drawAssistFrameWithImage(blob));
+    }).catch(() => drawAssistFrameWithImage(blob, seq));
     return;
   }
-  drawAssistFrameWithImage(blob);
+  drawAssistFrameWithImage(blob, seq);
 }
 
-function drawAssistFrameWithImage(blob) {
+function drawAssistFrameWithImage(blob, seq) {
   const canvas = $("assist-canvas");
   const context = canvas.getContext("2d");
   const url = URL.createObjectURL(blob);
   const image = new Image();
   image.onload = () => {
+    if (seq !== state.assist.frameSeq) { URL.revokeObjectURL(url); return; }
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
   };
@@ -832,13 +848,13 @@ function bindAssistPanel() {
   });
   const canvas = $("assist-canvas");
   let lastMove = 0;
-  for (const [dom, type] of [["mousedown", "mousedown"], ["mouseup", "mouseup"]]) {
-    canvas.addEventListener(dom, (event) => {
-      event.preventDefault();
-      canvas.focus();
-      sendAssist(Object.assign({ type }, relPos(event, canvas)));
-    });
-  }
+  // page.mouse.click 会在浏览器侧生成完整的按下/抬起序列；前端再额外发送
+  // mousedown、mouseup 会让 Cloudflare 复选框被重复触发，容易回到挑战页。
+  canvas.addEventListener("click", (event) => {
+    event.preventDefault();
+    canvas.focus();
+     sendAssist(Object.assign({ type: "click" }, relPos(event, canvas)));
+   });
   canvas.addEventListener("mousemove", (event) => {
     const now = Date.now();
     if (now - lastMove < 60) return;

@@ -26,6 +26,7 @@ from ..batman.formulas import resolve_batman_names
 from ..discovery import query as discovery
 from ..network import cytoscape, metrics as network_metrics, string_local
 from ..enrich import david
+from ..diseases import online_pipeline
 from ..agents import runtime
 from . import scheduler
 from .scheduler import execute_graph
@@ -43,9 +44,9 @@ LOCK = threading.RLock()
 ACTIVE = set()
 
 BATMAN_GUIDANCE = ("BATMAN 本地数据不可用：请将 v2.0 全量下载放入数据目录，或在 "
-                   "configs/batman_data.local.json 配置 data_dir；在线采集升级点尚未实现（后续阶段）")
+                   "configs/batman_data.local.json 配置 data_dir")
 INDEX_GUIDANCE = ("本地疾病索引不可用：请用合格导入批次执行 python -m pharm.discovery.query prepare "
-                  "建立索引；在线采集升级点尚未实现（后续阶段）")
+                  "建立索引；若启用在线采集，第三阶段会尝试创建本次运行专用索引")
 BATMAN_ASSIST = ("BATMAN 本地数据未配置。可在工作台启动在线采集协助会话，"
                  "由您在内嵌浏览器中完成人机验证后继续。")
 INDEX_ASSIST = ("本地疾病索引未准备。可在工作台启动在线采集协助会话，"
@@ -143,7 +144,7 @@ def _write_fixture_index(path):
     return metadata
 
 
-def _availability(task):
+def _availability(task, database_override=None):
     """检查 BATMAN 本地数据与疾病索引可用性；不可用项附升级点 guidance。"""
     result = {}
     try:
@@ -161,7 +162,7 @@ def _availability(task):
     except ValueError as exc:
         result["batman"] = {"available": False, "error": str(exc), "guidance": BATMAN_GUIDANCE}
     try:
-        database = discovery.database_path(ROOT)
+        database = Path(database_override) if database_override else discovery.database_path(ROOT)
         if not database.is_file():
             result["discovery_index"] = {"available": False, "database": str(database), "guidance": INDEX_GUIDANCE}
         else:
@@ -278,7 +279,7 @@ class Runner:
                 inputs["batman_data"] = self._batman_signature()
             if role in ("disease_reverse", "review"):
                 try:
-                    database = discovery.database_path(ROOT)
+                    database = Path(self.manifest.get("discovery_database") or discovery.database_path(ROOT))
                     inputs["discovery_db"] = digest(database) if database.is_file() else None
                 except ValueError as exc:
                     inputs["discovery_db"] = {"unavailable": str(exc)}
@@ -590,8 +591,31 @@ class Runner:
                     database = directory / "synthetic_index.sqlite"
                     _write_fixture_index(database)
                 else:
-                    index = _availability(self.task)["discovery_index"]
-                    if not index["available"]:
+                    index = _availability(self.task).get("discovery_index", {})
+                    if self.task.get("online_collect"):
+                        self.event(role, "online_collection.started",
+                                   "第三阶段自动采集疾病：%s（来源：%s）" % (
+                                       "、".join(self.task["online_diseases"]), "+".join(self.task["online_sources"])))
+                        try:
+                            herb_targets = read_json(self.directory / self.manifest["verified_targets"]["herb_targets"])
+                            base_database = index.get("database") if index.get("available") else None
+                            online = online_pipeline.collect_and_extend(
+                                self.task, directory / "online_collection", base_database, herb_targets)
+                            database = Path(online["database"])
+                            self.manifest["discovery_database"] = str(database)
+                            self.event(role, "online_collection.completed",
+                                       "在线采集与建库完成：GeneCards %d 行、OMIM %d 行，重复 %d 行" % (
+                                           online["counts"]["genecards"], online["counts"]["omim"],
+                                           online["counts"]["duplicates"]))
+                        except Exception as exc:
+                            guidance = "在线采集未完成，已保留中间产物；完成登录/人机验证后可恢复第三阶段。"
+                            self.event(role, "online_collection.error", str(exc))
+                            self.finish(role, {"status": "blocked", "summary": "在线采集未完成",
+                                               "blockers": [str(exc)],
+                                               "assist": {"available": True, "guidance": guidance},
+                                               "artifacts": ["online_collection"]}, directory)
+                            return
+                    elif not index["available"]:
                         self.event(role, "assist_requested", INDEX_ASSIST)
                         self.finish(role, {"status": "blocked",
                                            "summary": "本地疾病索引不可用，未执行反查（不以合成数据顶替）",
@@ -599,7 +623,8 @@ class Runner:
                                            "assist": {"available": True, "guidance": INDEX_ASSIST},
                                            "artifacts": []}, directory)
                         return
-                    database = discovery.database_path(ROOT)
+                    else:
+                        database = Path(self.manifest.get("discovery_database") or discovery.database_path(ROOT))
                 result, chunked = _reverse_lookup(database, genes)
                 result["evidence_type"] = targets["evidence_type"]
                 result["database"] = str(database)

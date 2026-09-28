@@ -29,6 +29,16 @@
         <option value="fixture">fixture（合成工程验证）</option>
       </select>
     </label>
+    <label class="inline-check"><input id="online-collect" type="checkbox"> 本次任务自动在线采集疾病数据</label>
+    <label>在线采集疾病范围（可选；留空时由药材靶点自动反查）
+      <textarea id="online-diseases-input" rows="4" spellcheck="false" placeholder="例如：Hyperthyroidism"></textarea>
+    </label>
+    <label>在线来源
+      <span class="source-checks">
+        <label><input id="source-genecards" type="checkbox" checked> GeneCards</label>
+        <label><input id="source-omim" type="checkbox" checked> OMIM</label>
+      </span>
+    </label>
     <label>研究说明
       <textarea id="notes-input" rows="3" spellcheck="false"></textarea>
     </label>

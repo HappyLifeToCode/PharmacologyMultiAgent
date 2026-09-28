@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import math
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -178,6 +179,137 @@ def prepare_batch(batch, database):
     if has_legacy:
         return build_database(batch, database)
     raise ValueError("批次目录缺少 associations.csv 或 genecards.csv/omim.csv：" + str(batch))
+
+
+def extend_database(database, additions, output_database, collection=None):
+    """复制现有索引并追加在线采集的 GeneCards/OMIM 关联。
+
+    原索引保持不变；输出为本次运行专用的新 SQLite 文件。相同的
+    disease/gene/source 记录只保留一条，新增数据的来源台账写入 metadata。
+    """
+    source_db = Path(database).resolve()
+    output_db = Path(output_database).resolve()
+    if not source_db.is_file():
+        raise ValueError("待扩展的疾病索引不存在：" + str(source_db))
+    if output_db.exists():
+        raise ValueError("在线扩展索引已存在，请为新运行使用新的路径：" + str(output_db))
+    output_db.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_db.with_name(output_db.name + "." + uuid4().hex + ".tmp")
+    counts = {"genecards": 0, "omim": 0, "duplicates": 0}
+    try:
+        with closing(sqlite3.connect(source_db)) as source:
+            with closing(sqlite3.connect(temporary)) as target:
+                source.backup(target)
+                metadata = _metadata(target)
+                existing = {(row[0], row[1], row[2]) for row in target.execute(
+                    "SELECT gene, disease, source FROM associations")}
+                for source_name, path in sorted((additions or {}).items()):
+                    if source_name not in ("genecards", "omim"):
+                        raise ValueError("不支持的在线来源：" + str(source_name))
+                    path = Path(path)
+                    rows = _read_rows(path, {"disease", "gene_symbol"} | ({"relevance_score"} if source_name == "genecards" else set()))
+                    for line, row in enumerate(rows, 2):
+                        disease = str(row.get("disease") or "").strip()
+                        gene = normalize_symbols([str(row.get("gene_symbol") or "").strip()])[0]
+                        if not disease or not gene:
+                            raise ValueError("在线 %s 数据第 %d 行缺少 disease/gene_symbol" % (source_name, line))
+                        score = None
+                        if source_name == "genecards":
+                            try:
+                                score = float(row.get("relevance_score"))
+                            except (TypeError, ValueError):
+                                raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
+                            if not math.isfinite(score) or score < 0:
+                                raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
+                        key = (gene, disease, source_name)
+                        if key in existing:
+                            counts["duplicates"] += 1
+                            continue
+                        target.execute(
+                            "INSERT INTO associations(gene,disease,source,source_row,score,record) VALUES (?,?,?,?,?,?)",
+                            (gene, disease, source_name, line, score,
+                             json.dumps(dict(row), ensure_ascii=False)))
+                        existing.add(key)
+                        counts[source_name] += 1
+                        if disease not in metadata["diseases"]:
+                            metadata["diseases"].append(disease)
+                metadata.setdefault("source_rows", {})
+                for name in ("genecards", "omim"):
+                    metadata["source_rows"][name] = int(metadata["source_rows"].get(name, 0)) + counts[name]
+                metadata.setdefault("online_collections", []).append(collection or {})
+                target.execute("DELETE FROM metadata")
+                target.execute("INSERT INTO metadata(value) VALUES (?)", (json.dumps(metadata, ensure_ascii=False),))
+                target.commit()
+        temporary.rename(output_db)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {"database": str(output_db), "counts": counts, "metadata": metadata}
+
+
+def build_online_database(additions, output_database, herb_relations, herbs, collection=None):
+    """Build a run-scoped index when no base disease index exists.
+
+    BATMAN remains the local source of herb-target rows; GeneCards/OMIM rows
+    are the online disease sources.  This deliberately does not modify the
+    configured global index and does not claim that the online associations
+    establish efficacy.
+    """
+    output_db = Path(output_database).resolve()
+    if output_db.exists():
+        raise ValueError("在线采集索引已存在，请为新运行使用新的路径：" + str(output_db))
+    records, counts, diseases = [], {"genecards": 0, "omim": 0, "duplicates": 0}, []
+    existing = set()
+    for source_name, path in sorted((additions or {}).items()):
+        if source_name not in ("genecards", "omim"):
+            raise ValueError("不支持的在线来源：" + str(source_name))
+        required = {"disease", "gene_symbol"}
+        if source_name == "genecards":
+            required.add("relevance_score")
+        rows = _read_rows(Path(path), required)
+        for line, row in enumerate(rows, 2):
+            disease = str(row.get("disease") or "").strip()
+            symbols, rejected = normalize_symbols([str(row.get("gene_symbol") or "").strip()])
+            if not disease or rejected:
+                raise ValueError("在线 %s 数据第 %d 行缺少或含有非法 gene_symbol" % (source_name, line))
+            gene = symbols[0]
+            score = None
+            if source_name == "genecards":
+                try:
+                    score = float(row.get("relevance_score"))
+                except (TypeError, ValueError):
+                    raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
+                if not math.isfinite(score) or score < 0:
+                    raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
+            key = (gene, disease, source_name)
+            if key in existing:
+                counts["duplicates"] += 1
+                continue
+            existing.add(key)
+            counts[source_name] += 1
+            if disease not in diseases:
+                diseases.append(disease)
+            records.append((gene, disease, source_name, line, score,
+                            json.dumps(dict(row), ensure_ascii=False)))
+    if not records:
+        raise ValueError("在线采集没有产生可建索引的疾病-基因关联")
+    herb_rows = []
+    for row in herb_relations or []:
+        herb_rows.append((str(row.get("herb") or ""), str(row.get("compound_id") or ""),
+                          str(row.get("gene_symbol") or ""), str(row.get("evidence") or ""),
+                          row.get("score")))
+    metadata = {
+        "schema_version": 1, "created_at": now(), "batch_name": "online_run",
+        "import_kind": "online_disease_with_local_batman",
+        "diseases": diseases, "declared_diseases": {name: diseases for name in additions or {}},
+        "herbs": list(herbs or []), "source_rows": {name: counts[name] for name in ("genecards", "omim")},
+        "herb_source_counts": {"relations": len(herb_rows), "unique_genes": len({r[2] for r in herb_rows})},
+        "selection": "all_valid_online_rows", "identifier_policy": "exact_symbol_no_alias_mapping",
+        "disease_identifier_policy": "source_query_labels_not_ontology_ids",
+        "provenance": {"online_collection": collection or {}, "batman": "local task output"},
+        "source_sha256": {}, "limitation": LIMITATION,
+    }
+    _create_database(output_db, metadata, records, herb_rows)
+    return {"database": str(output_db), "counts": counts, "metadata": metadata}
 
 
 def _connect(database):

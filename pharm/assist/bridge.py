@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import queue
 import threading
 import time
@@ -83,7 +84,15 @@ class AssistSession:
     def _run(self):
         try:
             self._pw = sync_playwright().start()
+            # 生产协助优先使用本机 Microsoft Edge，尽量接近用户实际通过验证的浏览器环境；
+            # 测试仍使用 Playwright bundled Chromium。
+            browser_channel = os.environ.get(
+                "PHARM_ASSIST_BROWSER",
+                "" if self._headless else "msedge",
+            ).strip()
             launch_kwargs = {"headless": self._headless}
+            if browser_channel and browser_channel.lower() not in ("chromium", "default"):
+                launch_kwargs["channel"] = browser_channel
             if not self._headless:
                 # 保留 headed Chromium（避免 Cloudflare 将其当作 headless），
                 # 但把原始窗口移到屏幕外；用户只在工作台 canvas 中操作。

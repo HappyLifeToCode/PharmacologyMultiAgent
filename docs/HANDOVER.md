@@ -1,7 +1,17 @@
 # 项目交接说明（给下一位协作者 / 大模型）
 
 > 目的：让没有本项目上下文的人（或 AI）能快速接手。阅读顺序：本文件 → docs/PROJECT_STATUS.md → docs/DATA_CONTRACT.md。
-> 更新日期：2026-09-24（协助画布 WebSocket 404 卡点已修复）。项目根目录即本文件所在仓库。
+> 更新日期：2026-09-28（同步同门提交 `e87b51d`；在线采集已接入第三阶段但靶点驱动疾病发现仍未完成）。项目根目录即本文件所在仓库。
+
+## 2026-09-28 当前接续状态
+
+已从 `origin/main` 拉取同门提交 `e87b51d`。该提交修复协助画布重复点击和 OMIM 验证完成状态误判；本地未提交的在线采集、索引扩展和前端配置修改已恢复并保留。
+
+当前真实边界：BATMAN-TCM v2.0 在本地，可生成药材—成分—靶点；GeneCards/OMIM 疾病索引在本机缺失或不足。在线采集编排已经放到 discovery 的第三阶段，能够在采集完成后生成本次运行专用索引，不覆盖全局索引；采集失败会保留产物并将阶段置为 blocked。
+
+关键卡点：现有 GeneCards/OMIM 采集器仍按疾病关键词读取。正式目标是从 BATMAN 靶点自动发现疾病，不能要求研究者预先输入疾病。因此，下一步必须核实并实现 GeneCards/OMIM 的基因→疾病接口、官方 API 或合规批量疾病目录；在此之前，疾病关键词只能作为限定范围工程测试入口，不能宣称完成全疾病反查。OMIM 授权、GeneCards 登录/反爬和真实站点端到端采集仍待复测。
+
+验证记录：调整 `TEMP/TMP` 到仓库可写目录后，协助、任务、引擎相关测试 38 项通过；全量测试在默认 Windows 临时目录下受到权限错误影响，不能把该环境错误当成代码通过或失败。
 
 ## 2026-09-24 协助画布 WebSocket 404 修复
 
@@ -21,7 +31,7 @@
 
 本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**；全量回归 **209 passed, 3 skipped**。相关提交 `1927fb6`、`282db0e`、`3d799df`、`2bc1c8f` 均已推送 `main`。
 
-当前边界保持不变：GeneCards/OMIM 采集器已经能够登记协助请求、等待用户完成验证并继续；用户必须在右侧内嵌协助画布中操作，完成后验证 cookies/storage state 会同步回原采集器，避免原页面重复验证。discovery 主流水线尚未自动编排在线采集、产物导入和 resume，仍需后续实现。
+当前边界保持不变：GeneCards/OMIM 采集器能够登记协助请求、等待用户完成验证并继续；用户必须在右侧内嵌协助画布中操作，完成后验证 cookies/storage state 会同步回原采集器，避免原页面重复验证。discovery 已有在线采集、产物导入和运行专用索引编排，但靶点驱动的疾病枚举和真实站点闭环仍需后续实现。
 
 ### 历史暂停点（已解决）：实际工作台 WebSocket 返回 404
 
@@ -37,7 +47,7 @@
 
 - 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**208 passed, 4 skipped**（其中 1 个 skip 是"真实页面样本只在本机 local/ 有"的环境敏感用例——合作者机器有该样本时为 209 passed, 3 skipped，差异属预期）。
 - 如实未做：六会话**完整**真实 live 运行（单次真实 Codex 会话冒烟已于 2026-09-22 通过，gpt-5.6-luna，证据 runs/diagnostics/model_smoke_20260922.json）；STRING 桥接/CytoNCA 计算/DAVID 正式提交未验证（可达性 2026-09-22 实测：STRING API 200、DAVID 首页 200、Cytoscape 在 D:/Tools，runs/diagnostics/dependency_smoke_20260922.json）；研究数据目前只在合作者机器（济川煎真实运行即在该机完成），其他开发机需另行同步。
-- 未实现：在线采集编排（agents/runtime.py 的浏览器采集路径预留）；四方组成出处待用户确认；疾病库覆盖取决于批次。
+- 未实现：靶点驱动的 GeneCards/OMIM 疾病枚举与真实站点闭环；四方组成出处待用户确认；疾病库覆盖取决于合规批次或官方接口。
 
 ## 3. 关键资产位置
 
@@ -107,5 +117,5 @@
 2. **STRING/CytoNCA/DAVID 正式冒烟**：可达性 2026-09-22 已核验（200/200/软件在）；小样本桥接与正式提交留证仍待做。
 3. **数据同步**：BATMAN v2.0 全量文件与疾病索引批次到本机 → 真实 live 验证 + 人工抽检。
 4. **四方组成确认**：formulas.py 的 source 标注 pending_user_confirmation，待用户/文献确认。
-5. **在线采集编排**（预留）：Agent 采集 → 人机协助接管 → 产物导入 → resume。
+5. **靶点驱动在线发现**：核实 GeneCards/OMIM 许可与基因→疾病接口或合规批量目录；实现靶点查询、证据导入、索引重建和 resume；疾病关键词仅保留为限定范围测试入口。
 6. push 到远程前全量 pytest。

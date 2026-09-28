@@ -17,7 +17,8 @@ MODES = ("live", "fixture")
 def prepare_task(body):
     if not isinstance(body, dict):
         raise ValueError("任务必须是 JSON 对象")
-    allowed = {"formula", "herbs", "research_notes", "batman_threshold", "mode", "agents"}
+    allowed = {"formula", "herbs", "research_notes", "batman_threshold", "mode", "agents",
+               "online_collect", "online_diseases", "online_sources"}
     if set(body) - allowed:
         raise ValueError("包含不支持的任务字段")
     formula = body.get("formula")
@@ -59,9 +60,31 @@ def prepare_task(body):
         raise ValueError("agents 须为布尔值")
     if mode == "fixture":
         agents = False  # fixture 是合成工程验证，永不调用模型
+    online_collect = body.get("online_collect", False)
+    if not isinstance(online_collect, bool):
+        raise ValueError("online_collect 须为布尔值")
+    online_diseases = body.get("online_diseases", [])
+    if not isinstance(online_diseases, list) or len(online_diseases) > 500:
+        raise ValueError("online_diseases 须为不超过 500 项的疾病关键词列表")
+    normalized_diseases, disease_seen = [], set()
+    for value in online_diseases:
+        if not isinstance(value, str) or not 1 <= len(value.strip()) <= 200 or any(ord(c) < 32 for c in value):
+            raise ValueError("online_diseases 每项需为 1—200 字的单行文本")
+        value = value.strip()
+        if value.casefold() not in disease_seen:
+            normalized_diseases.append(value)
+            disease_seen.add(value.casefold())
+    # online_diseases is an optional bounded test scope.  The production
+    # reverse-discovery path is target-driven and must not require the user to
+    # know the diseases in advance.
+    online_sources = body.get("online_sources", ["genecards", "omim"])
+    if not isinstance(online_sources, list) or not online_sources or any(source not in ("genecards", "omim") for source in online_sources):
+        raise ValueError("online_sources 只能包含 genecards、omim，且不能为空")
+    online_sources = list(dict.fromkeys(online_sources))
     task = {"formula": formula, "herbs": herbs, "research_notes": notes.strip(),
             "batman_threshold": float(threshold), "mode": mode, "composition": composition,
-            "agents": agents}
+            "agents": agents, "online_collect": online_collect,
+            "online_diseases": normalized_diseases, "online_sources": online_sources}
     key = hashlib.sha256(json.dumps(task, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return dict(task_id="web_" + key, **task)
 
