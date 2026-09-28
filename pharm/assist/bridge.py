@@ -27,6 +27,7 @@ import json
 import queue
 import threading
 import time
+from urllib.parse import urlparse
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -34,6 +35,7 @@ from playwright.sync_api import sync_playwright
 
 STATES = ("idle", "running", "waiting_human", "done", "closed")
 ACTIVE_STATES = ("running", "waiting_human")
+OMIM_CHALLENGE_TITLES = ("just a moment", "cloudflare", "attention required", "verify", "sign in")
 
 
 class AssistUnavailable(RuntimeError):
@@ -389,6 +391,10 @@ class AssistManager:
             session = self._session
         if session is None or session.state not in ACTIVE_STATES:
             raise RuntimeError("当前没有进行中的协助会话")
+        if urlparse(session.url).hostname in ("omim.org", "www.omim.org"):
+            title = session.evaluate("document.title").casefold()
+            if any(marker in title for marker in OMIM_CHALLENGE_TITLES):
+                raise RuntimeError("OMIM 页面仍在登录或人机验证中，不能标记完成；若反复出现，请使用有权限的普通浏览器人工导出")
         session.set_state("done")
         return session
 

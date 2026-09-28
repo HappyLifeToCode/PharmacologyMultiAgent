@@ -832,7 +832,7 @@ function bindAssistPanel() {
   });
   const canvas = $("assist-canvas");
   let lastMove = 0;
-  for (const [dom, type] of [["click", "click"], ["mousedown", "mousedown"], ["mouseup", "mouseup"]]) {
+  for (const [dom, type] of [["mousedown", "mousedown"], ["mouseup", "mouseup"]]) {
     canvas.addEventListener(dom, (event) => {
       event.preventDefault();
       canvas.focus();

@@ -1,6 +1,6 @@
 # 项目进度与问题清单
 
-更新：2026-09-24（协助画布 WebSocket 404 卡点已修复）。旧方向（药物×疾病交集）的进度记录已随重构废弃，见 Git 历史（commit `6779567` 之前）。
+更新：2026-09-28（OMIM 协助画布重复点击修复及完成状态门禁；真实站点仍待复测）。旧方向（药物×疾病交集）的进度记录已随重构废弃，见 Git 历史（commit `6779567` 之前）。
 
 ## 当前结论
 
@@ -15,9 +15,9 @@
 | 置信度 heuristic_v1 | 候选疾病四维组件（match_score/log 归一、input_coverage、disease_coverage、evidence_quality=known 占比+genecards 归一分值；权重 0.3/0.3/0.2/0.2，null 剔除归一）；固定顺序非排名；手算对拍测试；前端列展示+组件展开；结果显式区分唯一证据基因数与原始证据行数 | 公式本身的研究评审（属研究问题） |
 | 机制分析链路（analysis） | shared_targets→network→enrichment→analysis_review（workflow_version=4，v3 resume 拒绝）；POST /api/analysis（校验来源 run 与疾病）；交集空如实；缺省继承来源运行模式；fixture 端到端；归档 05_analysis/；Agent 序列 mock 验证 | STRING API 真实可达性、CytoNCA 真实桥接、DAVID 真实提交——均未在本轮验证（门禁保留：network_topology/david_enrichment 未确认即 blocked/partial） |
 | STRING/CytoNCA/DAVID 模块 | 恢复至 pharm/network/（string_local 本地优先+API 回选路、cytoscape 桥、metrics 度值核对）、pharm/enrich/david；integrations/cytonca_bridge 原样恢复；历史测试原样通过（63 项） | 真实服务/软件冒烟；正式研究参数确认 |
-| 人机协助 | API 请求/状态、后台 headed Chromium、截图兜底、cookies/storage state 回传均已实现并通过测试；**WS 404 已修复（websockets 补入 requirements + 启动缺包报错），真实 uvicorn 协议栈实测出帧（2026-09-24）** | 采集编排接入（预留） |
+| 人机协助 | API 请求/状态、后台 headed Chromium、截图兜底、cookies/storage state 回传均已实现并通过测试；**WS 404 已修复（2026-09-24）**；画布一次鼠标点击重复派发已修复，OMIM 已知验证页标题不能误报完成 | OMIM 真实站点仍待复测，自动化浏览器可能仍被网站拒绝；采集编排接入（预留） |
 | Web 工作台 | 三栏工作台；候选疾病置信度列+组件展开；"机制分析"按钮与 analysis 阶段图；Agent 核验展示；真实浏览器验证（含 WS 帧像素级、置信度与分析全链截图） | 全新开发机完整安装验收 |
-| 测试与工程 | 208 passed / 4 skipped（1 个 skip 为环境敏感用例"真实页面样本只在本机 local/"，有该样本的机器为 209/3，差异属预期）；fixture 产物标注 synthetic_engineering 且不进归档 | 真实模型/真实数据验收 |
+| 测试与工程 | 209 passed / 4 skipped（2026-09-28 本机；环境敏感用例的跳过数可能不同）；fixture 产物标注 synthetic_engineering 且不进归档 | 真实模型/真实数据验收 |
 
 ## 尚未解决的问题
 

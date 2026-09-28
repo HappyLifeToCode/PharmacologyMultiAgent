@@ -48,7 +48,7 @@ live 运行默认启用多 Agent 核验（任务 `agents=true`），需要可用
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前 202 项通过。测试不需要研究数据、真实模型或外网（多 Agent 编排用 mock 会话验证；人机协助测试使用 headless Chromium）。
+本机当前 209 项通过、4 项跳过。测试不需要研究数据、真实模型或外网（多 Agent 编排用 mock 会话验证；人机协助测试使用 headless Chromium）。
 
 ## 架构
 

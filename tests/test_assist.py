@@ -78,7 +78,8 @@ def test_screencast_frames_flow_with_ack(session):
 def test_input_injection_changes_input_value(session):
     subscriber = session.subscribe()
     ensure_frame(session, subscriber)
-    session.handle_input({"type": "click", "x": 0.2, "y": 0.03})
+    session.handle_input({"type": "mousedown", "x": 0.2, "y": 0.03})
+    session.handle_input({"type": "mouseup", "x": 0.2, "y": 0.03})
     session.handle_input({"type": "text", "text": "baishao"})
     wait_eval(session, "document.getElementById('t').value", "baishao")
     session.handle_input({"type": "key", "key": "Backspace"})
@@ -186,6 +187,20 @@ def test_agent_handoff_supplies_url_for_user_assistance(backend):
         assert completed.status_code == 200
         assert completed.json()["state"] == "done"
         assert client.post("/api/assist/stop").status_code == 200
+
+
+def test_omim_challenge_cannot_be_marked_complete(backend):
+    challenge_url = "data:text/html," + quote("<html><head><title>Just a moment...</title></head><body>Verify</body></html>")
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        assert client.post("/api/assist/start", json={"url": challenge_url}).status_code == 200
+        session = backend.assist_manager.current()
+        session.url = "https://www.omim.org/search?search=example"
+        blocked = client.post("/api/assist/complete")
+        assert blocked.status_code == 409
+        assert "仍在" in blocked.json()["detail"]
+        assert client.get("/api/assist/status").json()["state"] == "running"
+        session.evaluate("document.title = 'OMIM Search'")
+        assert client.post("/api/assist/complete").json()["state"] == "done"
 
 
 def ws_collect(ws, predicate, timeout=40):
