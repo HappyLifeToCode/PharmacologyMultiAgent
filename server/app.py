@@ -268,6 +268,8 @@ def assist_stop():
 def assist_complete():
     try:
         session = assist_manager.complete()
+        if session is None:
+            return {"state": "done", "url": None}
         return {"state": session.state, "url": session.current_url}
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))

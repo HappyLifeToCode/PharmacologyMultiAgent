@@ -11,7 +11,7 @@ import re
 import time
 from pathlib import Path
 from urllib.parse import quote
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ..core.common import now, write_json
@@ -27,16 +27,33 @@ def _assist_json(base_url, path, payload=None):
     try:
         with urlopen(request, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
+    except HTTPError:
+        raise
     except URLError as exc:
         raise RuntimeError("无法连接人机协助工作台（127.0.0.1:8766）。请先启动 server/app.py：" + str(exc)) from exc
 
 
 def wait_for_assist(base_url, url, disease, meta, timeout=900):
-    request = _assist_json(base_url, "/api/assist/request", {
+    # Clear a completed but not explicitly closed prior session before making
+    # a new request; otherwise the assist API correctly returns HTTP 409.
+    payload = {
         "url": url,
         "guidance": "请完成 OMIM 登录/人机验证；完成后点击‘验证完成，继续采集’。",
         "context": {"source": "omim", "disease": disease},
-    })
+    }
+    try:
+        request = _assist_json(base_url, "/api/assist/request", {
+            **payload,
+        })
+    except HTTPError as exc:
+        if exc.code != 409:
+            raise
+        current = _assist_json(base_url, "/api/assist/status")
+        if current.get("state") in ("done", "closed") and not current.get("pending"):
+            _assist_json(base_url, "/api/assist/stop", {})
+            request = _assist_json(base_url, "/api/assist/request", payload)
+        else:
+            raise
     request_id = request["request_id"]
     meta["actions"].append({"action": "assist_requested", "disease": disease,
                             "request_id": request_id, "at": now()})

@@ -51,7 +51,7 @@ def test_assist_handoff_waits_for_user_completion(monkeypatch):
     monkeypatch.setattr(genecards_online.time, "sleep", lambda _: None)
     meta = {"actions": []}
     genecards_online._wait_for_assist("http://127.0.0.1:8766", "https://www.genecards.org/search/results?q=X", "X", meta)
-    assert [path for path, _ in calls] == ["/api/assist/request", "/api/assist/status", "/api/assist/status", "/api/assist/storage-state"]
+    assert [path for path, _ in calls] == ["/api/assist/request", "/api/assist/status", "/api/assist/status"]
     assert meta["actions"][0]["action"] == "assist_requested"
     assert meta["actions"][1]["action"] == "assist_completed"
 

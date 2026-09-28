@@ -189,6 +189,25 @@ def test_agent_handoff_supplies_url_for_user_assistance(backend):
         assert client.post("/api/assist/stop").status_code == 200
 
 
+def test_same_context_assistance_completes_without_assist_browser(backend):
+    """GeneCards login is completed in the collector browser itself."""
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        response = client.post("/api/assist/request", json={
+            "url": "https://www.genecards.org/search/results?q=Alzheimer",
+            "guidance": "请在原采集器窗口登录后继续",
+            "context": {"source": "genecards", "same_context": True},
+        })
+        assert response.status_code == 200
+        assert client.get("/api/assist/status").json()["state"] == "pending"
+        completed = client.post("/api/assist/complete")
+        assert completed.status_code == 200
+        assert completed.json() == {"state": "done", "url": None}
+        assert client.get("/api/assist/status").json()["state"] == "done"
+        # No assist browser was started, so storage-state is intentionally
+        # unavailable; the collector keeps its own context untouched.
+        assert client.get("/api/assist/storage-state").status_code == 409
+
+
 def test_omim_challenge_cannot_be_marked_complete(backend):
     challenge_url = "data:text/html," + quote("<html><head><title>Just a moment...</title></head><body>Verify</body></html>")
     with TestClient(backend.app, base_url="http://localhost") as client:

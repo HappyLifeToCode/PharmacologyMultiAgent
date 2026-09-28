@@ -701,14 +701,19 @@ function updateAssistPanel() {
   const panel = $("assist-panel");
   const running = state.assist.state === "running" || state.assist.state === "waiting_human";
   const pending = state.assist.state === "pending" && state.assist.pending;
+  const sameContext = Boolean((pending || state.assist.pending || {}).context?.same_context);
   panel.hidden = !assist && !running && !pending;
   $("assist-launch").hidden = running;
   $("assist-live").hidden = !running;
   $("assist-complete").hidden = !running;
+  $("assist-same-complete").hidden = !sameContext;
+  $("assist-start").hidden = sameContext;
   if (assist) $("assist-guidance-text").textContent = assist.guidance || "";
   const source = pending || state.assist.pending;
   $("assist-source").textContent = source && source.url
-    ? "采集 Agent 已暂停在：" + source.url
+    ? ((source.context && source.context.same_context)
+      ? "请直接在原采集器浏览器窗口完成登录/验证：" + source.url
+      : "采集 Agent 已暂停在：" + source.url)
     : "等待采集 Agent 提供当前页面…";
   $("assist-start").disabled = !source || !source.url;
 }
@@ -816,6 +821,15 @@ function relPos(event, canvas) {
 }
 
 function bindAssistPanel() {
+  $("assist-same-complete").addEventListener("click", async () => {
+    try {
+      const result = await postJSON("/api/assist/complete", {});
+      setAssistState(result.state);
+      appendGuidance({text: "已通知原采集器继续执行。", ts: ""});
+    } catch (err) {
+      alert(err.message);
+    }
+  });
   $("assist-start").addEventListener("click", async () => {
     const guidance = state.assist.available ? state.assist.available.guidance : "";
     try {

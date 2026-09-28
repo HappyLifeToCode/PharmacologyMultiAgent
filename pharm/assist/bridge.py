@@ -37,6 +37,8 @@ from playwright.sync_api import sync_playwright
 STATES = ("idle", "running", "waiting_human", "done", "closed")
 ACTIVE_STATES = ("running", "waiting_human")
 OMIM_CHALLENGE_TITLES = ("just a moment", "cloudflare", "attention required", "verify", "sign in")
+GENECARDS_CHALLENGE_TITLES = ("just a moment", "cloudflare", "attention required",
+                              "verify your access", "datacenter")
 
 
 class AssistUnavailable(RuntimeError):
@@ -347,6 +349,7 @@ class AssistManager:
         self._lock = threading.Lock()
         self._session = None
         self._pending = None
+        self._manual_done = False
 
     def request(self, url, guidance=None, context=None):
         """由采集端登记当前页面，等待用户从工作台接管。"""
@@ -356,6 +359,7 @@ class AssistManager:
                 raise RuntimeError("已有进行中的协助会话，请先停止")
             if self._pending is not None:
                 raise RuntimeError("已有待处理的协助请求，请先启动或取消")
+            self._manual_done = False
             self._pending = {"request_id": uuid4().hex, "url": url,
                              "guidance": str(guidance or ""), "context": context or {},
                              "requested_at": _ts()}
@@ -390,6 +394,7 @@ class AssistManager:
         with self._lock:
             session = self._session
             self._pending = None
+            self._manual_done = False
         if session is not None:
             session.close()
         return session
@@ -398,12 +403,21 @@ class AssistManager:
         """用户确认验证完成，通知等待中的采集端继续。"""
         with self._lock:
             session = self._session
+            pending = self._pending
+            if session is None and pending is not None and (pending.get("context") or {}).get("same_context"):
+                self._pending = None
+                self._manual_done = True
+                return None
         if session is None or session.state not in ACTIVE_STATES:
             raise RuntimeError("当前没有进行中的协助会话")
-        if urlparse(session.url).hostname in ("omim.org", "www.omim.org"):
-            title = session.evaluate("document.title").casefold()
-            if any(marker in title for marker in OMIM_CHALLENGE_TITLES):
-                raise RuntimeError("OMIM 页面仍在登录或人机验证中，不能标记完成；若反复出现，请使用有权限的普通浏览器人工导出")
+        title = session.evaluate("document.title").casefold()
+        current_url = session.current_url.casefold()
+        hostname = (urlparse(session.url).hostname or urlparse(current_url).hostname or "").casefold()
+        if hostname in ("omim.org", "www.omim.org") and any(marker in title for marker in OMIM_CHALLENGE_TITLES):
+            raise RuntimeError("OMIM 页面仍在登录或人机验证中，不能标记完成；若反复出现，请使用有权限的普通浏览器人工导出")
+        if (hostname.endswith("genecards.org") or hostname.endswith("lifemapsc.com")) \
+                and any(marker in title for marker in GENECARDS_CHALLENGE_TITLES):
+            raise RuntimeError("GeneCards 页面仍在登录或人机验证中，不能标记完成；请先完成 Verify Your Access 页面后再试")
         session.set_state("done")
         return session
 
@@ -415,6 +429,8 @@ class AssistManager:
                         "guidance": ([{"text": self._pending["guidance"], "ts": self._pending["requested_at"]}]
                                      if self._pending["guidance"] else []),
                         "pending": dict(self._pending), "last_error": None}
+            if self._manual_done:
+                return {"state": "done", "url": None, "guidance": [], "pending": None, "last_error": None}
             return {"state": "idle", "url": None, "guidance": [], "pending": None}
         return {"state": session.state, "url": session.current_url,
                 "guidance": session.guidance_history, "pending": None,

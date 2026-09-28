@@ -15,7 +15,7 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ..core.common import ROOT, digest, now, write_json
@@ -108,7 +108,8 @@ def _collect_one_disease(page, disease, declared_hint, directory, pages_root,
     try:
         page.wait_for_selector(ROWS, timeout=45000)
     except Exception as exc:
-        raise _RetryableCollection("结果表未出现：" + str(exc))
+        raise _RetryableCollection("结果表未出现：url=%s title=%s；%s" % (
+            page.url, page.title(), str(exc)))
     html = page.content()
     declared = parse_declared_total(html)
     if declared is None:
@@ -181,17 +182,37 @@ def _assist_json(base_url, path, payload=None):
     try:
         with urlopen(request, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
+    except HTTPError:
+        raise
     except URLError as exc:
         raise RuntimeError("无法连接人机协助工作台（127.0.0.1:8766）。请先启动 server/app.py：" + str(exc)) from exc
 
 
 def _wait_for_assist(base_url, url, disease, meta, timeout=900):
     """将当前页面交给工作台，等待用户完成验证后再返回采集器。"""
-    request = _assist_json(base_url, "/api/assist/request", {
+    # A completed session remains allocated until explicitly stopped.  Reuse
+    # of the workbench must not turn that stale state into HTTP 409 for the
+    # next disease/run.
+    same_context = True
+    payload = {
         "url": url,
         "guidance": "请完成 GeneCards 人机验证；完成后点击‘验证完成，继续采集’。",
-        "context": {"source": "genecards", "disease": disease},
-    })
+        "context": {"source": "genecards", "disease": disease, "same_context": True,
+                    "instruction": "请直接在原采集器浏览器窗口完成登录/验证，不要启动新的协助浏览器。"},
+    }
+    try:
+        request = _assist_json(base_url, "/api/assist/request", {
+            **payload,
+        })
+    except HTTPError as exc:
+        if exc.code != 409:
+            raise
+        current = _assist_json(base_url, "/api/assist/status")
+        if current.get("state") in ("done", "closed") and not current.get("pending"):
+            _assist_json(base_url, "/api/assist/stop", {})
+            request = _assist_json(base_url, "/api/assist/request", payload)
+        else:
+            raise
     request_id = request["request_id"]
     meta["actions"].append({"action": "assist_requested", "disease": disease,
                             "request_id": request_id, "at": now()})
@@ -205,6 +226,13 @@ def _wait_for_assist(base_url, url, disease, meta, timeout=900):
         if status.get("state") in ("done", "closed"):
             meta["actions"].append({"action": "assist_completed", "disease": disease,
                                     "request_id": request_id, "at": now()})
+            # GeneCards is handed to the user in the collector's own
+            # persistent browser context.  There is no second assist browser
+            # whose cookies should be copied back; returning early preserves
+            # the authenticated page and its SSO state exactly as the user
+            # left it.
+            if same_context:
+                return None
             try:
                 return _assist_json(base_url, "/api/assist/storage-state")
             except Exception as exc:
@@ -213,6 +241,37 @@ def _wait_for_assist(base_url, url, disease, meta, timeout=900):
                 return None
         time.sleep(2)
     raise RuntimeError("等待用户完成人机验证超时（15 分钟）：" + disease)
+
+
+def _apply_assist_state(page, context, state):
+    """Restore cookies and localStorage from all origins used by SSO."""
+    if not isinstance(state, dict):
+        return
+    cookies = state.get("cookies")
+    if isinstance(cookies, list) and cookies:
+        context.add_cookies(cookies)
+    for origin in state.get("origins") or []:
+        if not isinstance(origin, dict) or not isinstance(origin.get("origin"), str):
+            continue
+        entries = origin.get("localStorage") or []
+        if not isinstance(entries, list) or not entries:
+            continue
+        try:
+            # localStorage is origin-scoped.  GeneCards may authenticate via
+            # auth.lifemapsc.com, so restoring only the current GeneCards
+            # origin loses the SSO token and redirects back to My Profile.
+            page.goto(origin["origin"], wait_until="domcontentloaded", timeout=30000)
+            page.evaluate("""entries => {
+                for (const item of entries) {
+                    if (item && typeof item.name === 'string') {
+                        localStorage.setItem(item.name, String(item.value ?? ''));
+                    }
+                }
+            }""", entries)
+        except Exception:
+            # Some authentication origins reject direct navigation; cookies
+            # are still useful and the original target URL is tried below.
+            continue
 
 
 def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
@@ -237,17 +296,29 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
             "queries": [], "actions": []}
     all_rows = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
-        # 登录态仅存本机 gitignore 目录，供下次免登录复用；不含密码
+        browser = None
+        # Use a dedicated persistent headed profile.  GeneCards authentication
+        # can bind cookies/localStorage to the browser profile and automation
+        # fingerprint; copying storage_state into a fresh context is not
+        # reliable for the SSO redirect used by auth.lifemapsc.com.
+        profile_dir = Path(os.environ.get(
+            "PHARM_GENE_CARDS_PROFILE",
+            str(ROOT / "local" / "browser-auth" / "genecards-profile")))
+        profile_dir.mkdir(parents=True, exist_ok=True)
         state_path = ROOT / "local" / "browser-auth" / "genecards_storage_state.json"
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        context_kwargs = {"viewport": {"width": 1440, "height": 1000}, "locale": "en-US"}
-        if state_path.is_file():
-            context_kwargs["storage_state"] = str(state_path)
-        context = browser.new_context(**context_kwargs)
-        page = context.new_page()
-        page.set_default_timeout(30000)
-        site_version = None
+        context_kwargs = {"viewport": {"width": 1440, "height": 1000}, "locale": "en-US",
+                          "accept_downloads": True}
+        browser_channel = os.environ.get("PHARM_GENE_CARDS_BROWSER", "msedge").strip()
+        if not headless and browser_channel:
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_dir), channel=browser_channel, headless=False, **context_kwargs)
+        else:
+            browser = playwright.chromium.launch(headless=headless)
+            # 登录态仅存本机 gitignore 目录，供下次免登录复用；不含密码
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            if state_path.is_file():
+                context_kwargs["storage_state"] = str(state_path)
+            context = browser.new_context(**context_kwargs)
         page = context.new_page()
         page.set_default_timeout(30000)
         site_version = None
@@ -262,20 +333,40 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
                 url = SEARCH_URL + quote(disease)
                 query_rows, page_no = None, 0
                 for attempt in (1, 2, 3):  # 间歇性 API 403/加载慢：整词重载重试；人机验证不重试
-                    response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    try:
+                        response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    except Exception as exc:
+                        # SSO may interrupt the requested navigation with a
+                        # redirect to Account/Profile.  Treat that as an auth
+                        # handoff instead of a fatal Playwright navigation error.
+                        if "lifemapsc.com" not in page.url.lower():
+                            raise
+                        response = None
+                        meta["actions"].append({"action": "auth_redirect",
+                                                "disease": disease, "url": page.url,
+                                                "reason": str(exc), "at": now()})
                     page.wait_for_timeout(2500)
                     title = page.title()
-                    if response is None or any(c in title for c in CHALLENGE_TITLES) \
+                    auth_redirect = ("lifemapsc.com" in page.url.lower()
+                                     or "my profile" in title.casefold())
+                    if response is None or auth_redirect or any(c in title for c in CHALLENGE_TITLES) \
                             or (response.status is not None and response.status != 200):
                         page.screenshot(path=str(directory / "challenge.png"))
                         meta["actions"].append({"action": "await_human_verification",
                                                 "disease": disease, "title": title, "at": now()})
                         assist_state = _wait_for_assist(assist_base_url, page.url or url, disease, meta)
-                        if assist_state and assist_state.get("cookies"):
-                            context.add_cookies(assist_state["cookies"])
+                        _apply_assist_state(page, context, assist_state)
                         # 登录流程结束后页面可能不在结果页，主动回到检索 URL
                         page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                        page.wait_for_timeout(2500)
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=15000)
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(5000)
+                        if "lifemapsc.com" in page.url.lower() or "my profile" in page.title().lower():
+                            raise RuntimeError(
+                                "GeneCards 登录后仍被重定向到认证 Profile 页面，登录态未被检索页接受；"
+                                "请在同一采集器窗口返回原始检索页后再继续。")
                         meta["actions"].append({"action": "human_verification_completed",
                                                 "disease": disease, "at": now()})
                     dismiss = page.get_by_role("button", name="Dismiss for this session")
@@ -292,6 +383,8 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
                                                 "attempt": attempt, "reason": str(exc), "at": now()})
                         if attempt == 3:
                             page.screenshot(path=str(directory / ("failed_%s.png" % disease)))
+                            (directory / ("failed_%s.html" % disease)).write_text(
+                                page.content(), encoding="utf-8")
                             raise RuntimeError("%s 三次采集均未完成（最后原因：%s）" % (disease, exc))
                 site_version = site_version or parse_site_version(page.content())
                 meta["queries"].append({"disease": disease, "declared_total": query_rows[1],
@@ -301,10 +394,13 @@ def collect_online(diseases, directory, headless=False, page_delay_ms=1800,
                 page.wait_for_timeout(page_delay_ms)
         finally:
             try:
-                context.storage_state(path=str(state_path))  # 仅本机复用登录态，不入库
+                if browser is not None:
+                    context.storage_state(path=str(state_path))  # 仅本机复用登录态，不入库
             except Exception:
                 pass
-            browser.close()
+            context.close()
+            if browser is not None:
+                browser.close()
     meta.update(finished_at=now(), site_version=site_version,
                 total_rows=len(all_rows))
     write_json(raw / "genecards_online.json", meta)
