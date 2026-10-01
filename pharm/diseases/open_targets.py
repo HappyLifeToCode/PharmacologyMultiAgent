@@ -1,7 +1,6 @@
 """Open Targets Platform disease/target association collection.
 
-The project-compatible path is disease -> target, matching GeneCards and
-OMIM's disease-first workflow.
+Supports disease -> target and BATMAN target -> candidate disease queries.
 """
 from __future__ import annotations
 
@@ -213,7 +212,7 @@ def collect_open_targets_by_diseases(diseases, output_dir, page_size: int = 1000
                                      min_score: float | None = None,
                                      mode: str | None = None,
                                      data_dir=None) -> dict:
-    """Collect disease -> target associations in the GeneCards-compatible direction."""
+    """Collect disease -> target associations in the Open Targets direction."""
     selected_mode = (mode or os.environ.get("PHARM_OPEN_TARGETS_MODE", "online")).strip().lower()
     if selected_mode not in ("online", "local"):
         raise ValueError("PHARM_OPEN_TARGETS_MODE 只能是 online 或 local")
@@ -474,7 +473,7 @@ def main(argv=None):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--genes", nargs="+", help="BATMAN target symbols for target-to-disease discovery")
     group.add_argument("--symbols-file", help="one BATMAN target symbol per line")
-    group.add_argument("--diseases", nargs="+", help="GeneCards-compatible disease keywords")
+    group.add_argument("--diseases", nargs="+", help="Open Targets disease keywords")
     group.add_argument("--disease-file", help="one disease keyword per line")
     parser.add_argument("--output", required=True, help="generic association batch directory")
     parser.add_argument("--page-size", type=int, default=1000)

@@ -46,11 +46,7 @@ ACTIVE = set()
 BATMAN_GUIDANCE = ("BATMAN 本地数据不可用：请将 v2.0 全量下载放入数据目录，或在 "
                    "configs/batman_data.local.json 配置 data_dir")
 INDEX_GUIDANCE = ("本地疾病索引不可用：请用合格导入批次执行 python -m pharm.discovery.query prepare "
-                  "建立索引；若启用在线采集，第三阶段会尝试创建本次运行专用索引")
-BATMAN_ASSIST = ("BATMAN 本地数据未配置。可在工作台启动在线采集协助会话，"
-                 "由您在内嵌浏览器中完成人机验证后继续。")
-INDEX_ASSIST = ("本地疾病索引未准备。可在工作台启动在线采集协助会话，"
-                "由您在内嵌浏览器中完成人机验证后继续。")
+                  "建立索引；若启用 Open Targets 查询，第三阶段会尝试创建本次运行专用索引")
 SYNTHETIC = "synthetic_engineering"
 
 # live + agents=true 时，程序计算完成后由对应 Agent 会话核验（结论不改变程序产物）。
@@ -81,12 +77,12 @@ def _bounded(value, max_items=20, _depth=0):
 
 FIXTURE_GENES = ["TP53", "EGFR", "AKT1", "TNF", "IL6", "VEGFA"]
 FIXTURE_ASSOCIATIONS = [
-    ("TP53", "Hyperthyroidism", "genecards", 2, 10.0),
-    ("VEGFA", "Hyperthyroidism", "omim", 2, None),
-    ("EGFR", "Hypothyroidism", "genecards", 2, 8.0),
-    ("AKT1", "Thyroid cancer", "genecards", 2, 7.5),
-    ("TNF", "Thyroid nodules", "omim", 2, None),
-    ("IL6", "Thyroiditis", "genecards", 2, 9.0),
+    ("TP53", "Hyperthyroidism", "synthetic_a", 2, 10.0),
+    ("VEGFA", "Hyperthyroidism", "synthetic_b", 2, None),
+    ("EGFR", "Hypothyroidism", "synthetic_a", 2, 8.0),
+    ("AKT1", "Thyroid cancer", "synthetic_a", 2, 7.5),
+    ("TNF", "Thyroid nodules", "synthetic_b", 2, None),
+    ("IL6", "Thyroiditis", "synthetic_a", 2, 9.0),
 ]
 
 
@@ -114,7 +110,7 @@ def _write_fixture_index(path):
     metadata = {
         "schema_version": 1, "created_at": now(), "batch_name": SYNTHETIC,
         "diseases": list(discovery.DISEASES), "herbs": [],
-        "source_rows": {"genecards": 4, "omim": 2},
+        "source_rows": {"synthetic_a": 4, "synthetic_b": 2},
         "selection": SYNTHETIC, "identifier_policy": "exact_symbol_no_alias_mapping",
         "disease_identifier_policy": "source_query_labels_not_ontology_ids",
         "provenance": {"synthetic": True, "note": "合成工程验证索引，非真实来源"},
@@ -491,11 +487,11 @@ class Runner:
             else:
                 batman = _availability(self.task)["batman"]
                 if not batman["available"]:
-                    self.event(role, "assist_requested", BATMAN_ASSIST)
+                    self.event(role, "data.unavailable", BATMAN_GUIDANCE)
                     self.finish(role, {"status": "blocked",
                                        "summary": "BATMAN 本地数据不可用，未生成靶点（不以合成数据顶替）",
                                        "blockers": [batman.get("guidance", BATMAN_GUIDANCE)],
-                                       "assist": {"available": True, "guidance": BATMAN_ASSIST},
+                                       "guidance": BATMAN_GUIDANCE,
                                        "artifacts": []}, directory)
                     return
                 candidates = {herb: resolve_batman_names(herb) for herb in self.task["herbs"]}
@@ -593,10 +589,10 @@ class Runner:
                 else:
                     index = _availability(self.task).get("discovery_index", {})
                     if self.task.get("online_collect"):
-                        scope = "、".join(self.task["online_diseases"]) or "未填写疾病范围"
+                        scope = "、".join(self.task.get("online_diseases") or []) or "使用 BATMAN 靶点发现候选疾病"
                         self.event(role, "online_collection.started",
-                                   "第三阶段自动采集疾病：%s（来源：%s）" % (
-                                       scope, "+".join(self.task["online_sources"])))
+                                   "第三阶段 Open Targets 查询：%s（来源：%s）" % (
+                                       scope, "+".join(self.task.get("online_sources", ["open_targets"]))))
                         try:
                             herb_targets = read_json(self.directory / self.manifest["verified_targets"]["herb_targets"])
                             base_database = index.get("database") if index.get("available") else None
@@ -607,24 +603,24 @@ class Runner:
                             counts = online["counts"]
                             source_summary = "、".join(
                                 "%s %d 行" % (name, counts.get(name, 0))
-                                for name in self.task["online_sources"])
+                                for name in self.task.get("online_sources", ["open_targets"]))
                             self.event(role, "online_collection.completed",
-                                       "在线采集与建库完成：%s，重复 %d 行" % (
+                                       "Open Targets 查询与建库完成：%s，重复 %d 行" % (
                                            source_summary, counts.get("duplicates", 0)))
                         except Exception as exc:
-                            guidance = "在线采集未完成，已保留中间产物；完成登录/人机验证后可恢复第三阶段。"
+                            guidance = "Open Targets 查询未完成，已保留中间产物；检查 API 连接或本地快照配置后恢复第三阶段。"
                             self.event(role, "online_collection.error", str(exc))
-                            self.finish(role, {"status": "blocked", "summary": "在线采集未完成",
+                            self.finish(role, {"status": "blocked", "summary": "Open Targets 查询未完成",
                                                "blockers": [str(exc)],
-                                               "assist": {"available": True, "guidance": guidance},
+                                               "guidance": guidance,
                                                "artifacts": ["online_collection"]}, directory)
                             return
                     elif not index["available"]:
-                        self.event(role, "assist_requested", INDEX_ASSIST)
+                        self.event(role, "data.unavailable", INDEX_GUIDANCE)
                         self.finish(role, {"status": "blocked",
                                            "summary": "本地疾病索引不可用，未执行反查（不以合成数据顶替）",
                                            "blockers": [index.get("guidance", INDEX_GUIDANCE)],
-                                           "assist": {"available": True, "guidance": INDEX_ASSIST},
+                                           "guidance": INDEX_GUIDANCE,
                                            "artifacts": []}, directory)
                         return
                     else:
@@ -649,7 +645,7 @@ class Runner:
                 findings.append("合成工程验证索引与靶点，非真实疾病关联")
             self.event(role, "tool.succeeded", summary)
             stage_artifacts = ["reverse/result.json", "reverse/candidates.csv", "reverse/evidence.csv", "reverse/report.md", "reverse/manifest.json"]
-            if self.task.get("online_collect"):
+            if self.task.get("online_collect") and self.manifest["mode"] != "fixture" and genes:
                 # Keep the online collection ledger visible and hash-checked;
                 # raw pages remain inside the archived attempt directory.
                 stage_artifacts.append("online_collection/online_collection.json")

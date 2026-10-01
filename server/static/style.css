@@ -156,28 +156,6 @@ th { background: #eef3f0; }
 #candidates-table tbody tr { cursor: pointer; }
 #candidates-table tbody tr:hover { background: #eef3f0; }
 #candidates-table tbody tr.selected { background: #d7e8e5; }
-.assist-guidance { background: #f3dfb2; border-left: 4px solid #bc7931; padding: 8px 10px; }
-.assist-body { display: flex; gap: 10px; align-items: flex-start; }
-#assist-canvas {
-  border: 1px solid #41565f;
-  border-radius: 4px;
-  max-width: 100%;
-  background: #20262b;
-  cursor: crosshair;
-}
-#assist-canvas:focus { outline: 2px solid #168d87; }
-#assist-guidance-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  width: 220px;
-  max-height: 480px;
-  overflow-y: auto;
-  font-size: 12px;
-}
-#assist-guidance-list li { border-bottom: 1px solid #eee9db; padding: 4px 0; overflow-wrap: anywhere; }
-#assist-guidance-list .meta { color: #8a9296; margin-right: 4px; }
-.assist-mark { background: #f3dfb2; padding: 0 4px; border-radius: 3px; }
 .badge.analysis { background: #5b4b8a; }
 .badge.confidence { background: #61777f; }
 .conf-cell { cursor: pointer; text-decoration: underline dotted; }

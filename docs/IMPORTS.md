@@ -1,152 +1,87 @@
 # 真实数据导入与批次格式
 
-疾病索引与 pipeline 只消费**本地批次**：在授权访问后获取原始导出，按以下两类格式之一整理。不生成替代数据；不完整、未确认的来源一律被拒绝而不是放行。
+更新：2026-10-01。GeneCards/OMIM 专用采集与导入已删除，新批次统一使用 `associations.csv`。历史 SQLite 索引仍可查询；原始导出与历史报告不删除。
 
-两类批次共用一套 provenance 校验纪律（`pharm/core/imports.py`）：
+## 通用疾病关联批次
 
-- `complete: true`、`mapping.confirmed: true` 只有核验后才能填写；
-- `source_url` 必须是 http(s) URL；`accessed_at` 必须是 ISO 日期（YYYY-MM-DD），不能用"待填写"或归档时间冒充；
-- `raw_files` 为相对批次目录的真实文件路径，必须存在且不得越出批次目录；
-- 建库时对批次文件做 SHA-256 快照，建库期间文件变动即失败；库 SHA-256 写入查询结果。
-- 基因符号只做格式校验（不等于 HGNC 权威映射）；非法符号按批次类型的规则处理并留档。
+```text
+associations.csv    必需 disease,gene_symbol；可选 score,source,extra
+provenance.json     sources.associations + mapping
+raw/               原始数据、查询响应或快照清单
+```
 
-## 批次类型一：GeneCards+OMIM 三源批次
-
-用于同时携带 BATMAN 药材关系与两库疾病关联的完整批次（可按药材反查）：
+可选同时携带 BATMAN：
 
 ```text
 herb_targets.csv    herb,compound_id,gene_symbol,score,evidence
-genecards.csv       disease,gene_symbol,relevance_score
-omim.csv            disease,gene_symbol
-provenance.json     sources.batman / sources.genecards / sources.omim + mapping
-raw/                原始导出与基因映射依据
+provenance.json     另含 sources.batman（herbs、threshold、threshold_confirmed）
 ```
 
-- `herb_targets.csv` 的 `evidence` 列取 `known` 或 `predicted`：known 为文献验证的二值证据，score 列必须留空、不参与阈值过滤；predicted 行 score 必填且按阈值过滤（严格大于）。行级校验拒绝非法行；药材名必须对应 provenance 声明的 herbs。
-- provenance 每个来源声明 `diseases`（查询范围）：CSV 行不得超出声明；声明了但零关联的疾病不进索引（如实）。
-- 多疾病 CSV 必须含 disease 列；单疾病旧文件可省略，程序按唯一声明补齐。GeneCards 同疾病/基因重复行拒绝（防重复分页）。
-- BATMAN 侧可用 `pharm/batman/local.py` 的 `generate_import` 从 v2.0 全量文件直接生成该批次（含 per-file SHA-256 清单），需要任务提供真实下载日期 `batman_accessed_at`。
+- `complete=true`、`mapping.confirmed=true` 仅在对应来源与映射已核验时填写。
+- `source_url` 为 http(s) URL；`accessed_at` 为实际访问 ISO 日期；`raw_files` 必须存在且不得越出批次目录。
+- 原始文件哈希记录于索引，输出库不覆盖旧版本。
+- 关联 `score` 可空，非空须为非负有限数；不同来源的分值不混成统一疗效分数。
+- 同疾病/基因/来源重复行拒绝；非法基因符号剔除并留档，不补造别名。
+- 疾病顺序按 CSV 首次出现；零有效关联的疾病不进索引；通用建库最多 500 种疾病。
+- BATMAN known 是文献验证的二值证据，score 留空；predicted 必须有分值，仅保留严格大于声明阈值者。
 
-## 批次类型二：通用 associations.csv 批次
+```powershell
+.\.venv\Scripts\python.exe -m pharm.discovery.query `
+  --db local/discovery/disease_index.sqlite prepare --batch <批次目录>
+```
 
-用于接入任意本地合规疾病-基因关联表（只可建疾病索引，不含药材关系）：
+## Open Targets 查询
+
+工作台“启用 Open Targets 数据查询”对应任务 `online_collect=true`，`online_sources` 仅支持 `["open_targets"]`。留空疾病范围时使用 BATMAN 靶点发现候选疾病；填写范围时执行疾病→靶点查询。结果写入本次运行专用 SQLite 文件，不覆盖全局索引。
+
+`PHARM_OPEN_TARGETS_MODE=online`（默认）调用 GraphQL API；`local` 读取本地 Parquet 快照。两者均不使用网页登录、验证码或协助画布。
+
+独立查询与建库：
+
+```powershell
+.\.venv\Scripts\python.exe -m pharm.diseases.open_targets collect `
+  --genes EGFR TP53 --output local/open_targets_target_pilot
+
+.\.venv\Scripts\python.exe -m pharm.diseases.open_targets collect `
+  --diseases "Hyperthyroidism" --output local/open_targets_disease_pilot
+
+.\.venv\Scripts\python.exe -m pharm.discovery.query `
+  --db local/open_targets_target_pilot/disease_index.sqlite `
+  prepare --batch local/open_targets_target_pilot
+```
+
+Open Targets 以疾病 ID 与标签组成 disease 键，Ensembl ID、疾病 ID 和可获得的数据源分数保存在 `extra`；API 原始完整分页保存于 `raw/open_targets_responses.jsonl`。
+
+第三阶段现存试验默认为每疾病或每靶点 Top-100、association score≥0.2，未改为正式研究规则。调整入口：`PHARM_OPEN_TARGETS_TOP_K`、`PHARM_OPEN_TARGETS_MIN_SCORE`、`PHARM_OPEN_TARGETS_PAGE_SIZE`、`PHARM_OPEN_TARGETS_REQUEST_DELAY`、`PHARM_OPEN_TARGETS_TIMEOUT`。直接 CLI 查询可显式指定 `--top-k-per-disease` 或 `--top-k-per-target`、`--min-score`；不传时不自动沿用主流程试验选择。实际执行规则始终记录于产物。
+
+## Open Targets 本地快照
 
 ```text
-associations.csv    必需列 disease,gene_symbol；可选列 score,source,extra
-provenance.json     sources.associations + mapping
+data/open_targets/26.09/
+  manifest.json
+  target/*.parquet
+  disease/*.parquet
+  association_overall_direct/*.parquet
 ```
 
-- `source` 缺省填 `associations`；`score` 必须是非负有限数值（可空）；`extra` 等其余列原样进记录。
-- 同疾病/基因/来源重复行拒绝（防重复导出页）；非法符号剔除并留档 `<索引名>.rejected_symbols.csv`，不补造；全批次零有效行拒绝建库；疾病数量上限 500。
-
-## 自动识别与建库
-
-```powershell
-.\.venv\Scripts\python.exe -m pharm.discovery.query --db local/discovery/disease_index.sqlite prepare --batch <批次目录>
-```
-
-批次目录有 `associations.csv` 走通用通道；有 `genecards.csv`/`omim.csv` 走三源通道；**两类文件共存时报错而不是猜测**。输出索引必须不存在（不覆盖）；来源修订建新版文件。
-
-## Open Targets 试验批次
-
-Open Targets 目前作为 GeneCards/OMIM 的可选来源进行对照测试。工作台的
-“在线来源”可单独勾选 Open Targets，并根据输入选择方向：填写疾病关键词时走
-与 GeneCards 一致的疾病 → 基因；只勾选 Open Targets 且疾病范围留空时，使用
-BATMAN 靶点 → 可能疾病，满足方剂反向疾病发现需求。导入 CSV 使用标准疾病 ID
-（例如 `MONDO_0005233 | non-small cell lung carcinoma`）作为 disease 键，
-Ensembl target ID、疾病 ID 和 datasource scores 保存在 `extra` 字段。
-
-测试时应明确记录选择规则；下面示例只取每个疾病得分最高的 100 个基因且分数不少于
-0.2，原始完整分页结果仍保留在 `raw/open_targets_responses.jsonl`：
-
-```powershell
-$env:PYTHONPATH = "D:\PharmacologyMultiAgent\local\python_packages;$env:PYTHONPATH"
-C:\Users\Ye\anaconda3\python.exe -m pharm.diseases.open_targets collect `
-  --diseases "Hyperthyroidism" "Rheumatoid arthritis" `
-  --output local\open_targets_disease_pilot `
-  --page-size 1000 `
-  --top-k-per-disease 100 `
-  --min-score 0.2
-
-C:\Users\Ye\anaconda3\python.exe -m pharm.discovery.query `
-  --db local\open_targets_disease_pilot\disease_index.sqlite `
-  prepare --batch local\open_targets_disease_pilot
-
-C:\Users\Ye\anaconda3\python.exe -m pharm.discovery.query `
-  --db local\open_targets_disease_pilot\disease_index.sqlite `
-  query --genes EGFR TP53 IL6 --output local\open_targets_disease_pilot\lookup
-```
-
-该试验批次验证的是本地导入和反查链路，不代表 Open Targets 与 GeneCards/OMIM
-结果等价。正式替换前还需完成基因映射覆盖率、疾病范围、候选重合率、版本和许可
-条款核验。
-
-工作台中勾选 Open Targets 时，填写疾病关键词会走疾病驱动模式；留空且只勾选
-Open Targets 会使用 BATMAN 阶段的全部唯一靶点进行可能疾病发现。GeneCards/OMIM
-仍必须填写疾病关键词。默认导入选择为疾病驱动时每个疾病 Top-100、靶点驱动时
-每个靶点 Top-100，association score 均不少于 0.2；完整分页仍写入原始响应。
-可在启动前用环境变量调整试验参数：
-`PHARM_OPEN_TARGETS_TOP_K`、`PHARM_OPEN_TARGETS_MIN_SCORE`、
-`PHARM_OPEN_TARGETS_PAGE_SIZE`、`PHARM_OPEN_TARGETS_REQUEST_DELAY`、
-`PHARM_OPEN_TARGETS_TIMEOUT`。
-
-### Open Targets 本地快照模式
-
-已下载的 Open Targets `26.09` 快照目录应包含 `target/`、`disease/` 和
-`association_overall_direct/` 三类 Parquet 数据，以及下载清单
-`manifest.json`。本地模式不访问 GraphQL，按输入疾病名称或 ID扫描完整
-direct 关联分区，再按同样的 `top_k_per_disease` 与 `min_score` 规则生成
-`associations.csv`。需要 `pyarrow`（已列入 `requirements.txt`）。
+`manifest.json` 记录 release 与 datasets 文件信息。需要 `pyarrow`（已列入 requirements）。
 
 ```powershell
 $env:PHARM_OPEN_TARGETS_MODE = "local"
 $env:PHARM_OPEN_TARGETS_DATA_DIR = "D:\PharmacologyMultiAgent\data\open_targets\26.09"
-C:\Users\Ye\anaconda3\python.exe -m pharm.diseases.open_targets collect `
-  --mode local `
-  --data-dir $env:PHARM_OPEN_TARGETS_DATA_DIR `
-  --diseases "Hyperthyroidism" `
-  --output local\open_targets_local_disease_pilot `
-  --top-k-per-disease 100 `
-  --min-score 0.2
+.\.venv\Scripts\python.exe -m pharm.diseases.open_targets collect `
+  --mode local --data-dir $env:PHARM_OPEN_TARGETS_DATA_DIR `
+  --genes EGFR TP53 --output local/open_targets_local_pilot
 ```
 
-也可以复制 `configs/open_targets_data.example.json` 为 Git 忽略的
-`configs/open_targets_data.local.json`，在其中填写 `data_dir`；环境变量优先于
-该本地配置。
+可用 `configs/open_targets_data.local.json` 指定 data_dir，模板在同目录；环境变量优先。`PHARM_OPEN_TARGETS_RELEASE` 可固定期望版本。
 
-本地快照保留发布版本、manifest SHA-256、关联分区清单、查询方向、未解析项和
-筛选阈值。三个基础数据集不提供 `datasourceScores`，因此该字段在本地
-模式中不伪造；如需分数据源分数，必须另行下载
-`association_by_datasource_direct`。本地模式使用 `association_overall_direct`
-的口径，不自动混入 indirect 关联；可用 `PHARM_OPEN_TARGETS_RELEASE` 固定期望
-的发布版本。靶点驱动模式只在“只选 Open Targets 且疾病范围为空”时由在线编排
-自动选择，不影响 GeneCards/OMIM 的疾病关键词流程。
+本地模式读取 `association_overall_direct`，不混入 indirect 关联。基础三类数据集没有 `datasourceScores`，因此不伪造；需要分源分数时另行准备相应官方数据集。
 
-## 导出辅助工具
+## 兼容与归档
 
-以下工具把人工取得的导出转换为批次所需 CSV，均核对完整性、不一致即报错（保留证据），不允许第一页冒充全表：
-
-```powershell
-# GeneCards：人工保存完整结果页 HTML（每页一个文件）后解析合并
-.\.venv\Scripts\python.exe -m pharm.diseases.genecards_export collect --disease "Rheumatoid arthritis" --pages page1.html page2.html --output local/gc-collect
-.\.venv\Scripts\python.exe -m pharm.diseases.genecards_export combine --inputs local/gc-collect/genecards_*.csv --output genecards.csv
-# GeneCards：转换登录后官方导出 CSV
-.\.venv\Scripts\python.exe -m pharm.diseases.genecards_export convert --files export1.csv --output genecards.csv
-# OMIM：转换 Gene Map 导出（xlsx/zip）
-.\.venv\Scripts\python.exe -m pharm.diseases.omim_export convert --files genemap2.xlsx --output omim.csv
-```
-
-OMIM 在线采集（只使用本人有权访问的页面；遇到登录/验证码会转入工作台协助）可调用：
-
-```powershell
-.\.venv\Scripts\python.exe -c "from pharm.diseases.omim_online import collect_online; collect_online(['Hyperthyroidism'], 'local/omim-online')"
-```
-
-采集器只保存授权页面提供的 Gene Map 导出文件和原始 HTML，不把搜索摘要当作 OMIM 基因关联；下载文件仍需用上面的 `omim_export convert` 转换并经过批次校验。
-
-`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。遇到人机验证时，它会通过 `/api/assist/request` 把当前页面交给工作台；用户应在右侧内嵌协助画布中完成验证，点击“验证完成，继续采集”后，协助浏览器的 cookies/storage state 会同步回原采集器，再回到原疾病关键词继续采集。静态验证页不触发重绘时，协助桥会自动截图作为画布兜底，避免用户看到黑屏。在线编排现已支持 GeneCards、OMIM 和 Open Targets；Open Targets 有疾病→基因和 BATMAN 靶点→疾病两种明确输入分支，可按 `PHARM_OPEN_TARGETS_MODE` 选择 GraphQL 或本地 26.09 快照，两种模式都不需要人机验证。
-
-## 导入后运行
-
-- 疾病索引更新后恢复运行：`scripts/run_tasks.py --resume <run_id>` 或工作台"恢复运行"。数据文件哈希是 input_signature 的一部分，索引/BATMAN 文件出现后签名变化，受阻阶段会自动重跑；成功阶段只在签名与产物哈希全一致时复用。
-- 归档：live 运行逐阶段归档到 `data/pharm/<方名或 custom_task_id>/01_preflight/`、`02_herb/`、`03_reverse/`、`04_review/`；partial/blocked 证据同样归档，归档不等于研究完成；fixture 禁止进入。重复归档只复用哈希一致的批次，变动拒绝覆盖。
+- 旧任务若指定已移除的在线来源，应保存为新任务；不回写旧任务或旧运行快照。
+- 旧 SQLite 的来源标签、原始分值仍可查询，旧库不会被改名为 Open Targets。
+- `relevance_score` 是现有证据输出字段名，为历史接口兼容保留；对 Open Targets 存放其原始 association score，不能解释为治疗概率。
+- `heuristic_v2` 去除旧库专用归一分值，沿用原权重；BATMAN known 占比是 evidence_quality 唯一来源，缺失时 null。原始关联分值仅展示。
+- live 逐阶段归档至 `data/pharm/<方名或 custom_task_id>/`；blocked/partial 也保留；fixture 不进入科研归档。

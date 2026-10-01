@@ -13,10 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ..core.common import ROOT, digest, now, read_json, write_json
-from ..core.imports import (
-    _load_provenance, _query_rows, _read_rows, _validate_mapping, _validate_source,
-    load_herb, source_inputs,
-)
+from ..core.imports import _read_rows
 from ..core.symbols import normalize_symbols
 
 # 早期五病甲状腺批次的固定范围，仅供旧 fixture 与兼容测试引用；
@@ -31,24 +28,23 @@ LIMITATION = (
     "本地索引仅收录批次导入的疾病-基因关联；关键词检索关联不等于确诊疾病的因果或治疗证据。"
     "使用全部合格导出记录，不新增疗效筛选阈值。"
     "匹配数和覆盖比例仅作描述，不代表治疗能力、显著性或疾病优先级；未命中不代表无关联。"
-    "候选疾病的 confidence 为程序计算的透明启发式（heuristic_v1），不是统计检验、疗效概率或疾病优先级。"
+    "候选疾病的 confidence 为程序计算的透明启发式（heuristic_v2），不是统计检验、疗效概率或疾病优先级。"
 )
 
-# 启发式置信度 heuristic_v1（程序计算，模型不碰数字；全部组件公开在此）：
+# 启发式置信度 heuristic_v2（程序计算，模型不碰数字；全部组件公开在此）：
 #   match_score       log1p(matched_count)/log1p(输入唯一靶点数)——按本次查询自身
 #                     规模归一，不做跨疾病相对比较，避免被误读为排名；
 #   input_coverage    现有字段（matched/输入靶点总数）；
 #   disease_coverage  现有字段（matched/该病索引靶点数），分母为 0 时组件为 null
 #                     并从加权中剔除（剩余权重归一）；
-#   evidence_quality  两个疾病级聚合的均值（各自无数据则剔除）：
+#   evidence_quality  BATMAN 文献验证证据占比（无数据则剔除）：
 #                     known 占比——该病匹配靶点中在索引 BATMAN 表内有 known
 #                     （文献验证）证据的比例，分母为有任何 BATMAN 记录的匹配靶点；
-#                     relevance 归一均值——该病 genecards 证据行 score 的均值 /
-#                     全索引最大 score（其他来源分值口径不明，不参与）。
+#                     疾病关联库的原始分值只展示，不跨数据库混合归一。
 # 全部组件不可用（零匹配）时 value=0.0。
 CONFIDENCE_WEIGHTS = {"match_score": 0.3, "input_coverage": 0.3,
                       "disease_coverage": 0.2, "evidence_quality": 0.2}
-CONFIDENCE_VERSION = "heuristic_v1"
+CONFIDENCE_VERSION = "heuristic_v2"
 CONFIDENCE_NOTE = "启发式置信度，非统计检验，仅供排序参考"
 
 
@@ -64,75 +60,9 @@ def database_path(root=ROOT):
 
 
 def build_database(batch, database):
-    """GeneCards+OMIM 三源批次 -> 本地只读索引。
-
-    疾病集合取批次 genecards.csv/omim.csv disease 列的实际值，顺序按文件内
-    首次出现（genecards.csv 先于 omim.csv），查询与目录输出沿用该固定顺序，
-    不是疗效排名。provenance 声明的疾病范围是查询范围记录：行不得超出声明，
-    声明了但零关联的疾病不进索引。
-    """
-    batch, database = Path(batch).resolve(), Path(database).resolve()
-    if database.exists():
-        raise ValueError("数据库已存在；请为新数据版本指定新的文件名")
-    provenance = _load_provenance(batch)
-    _validate_mapping(provenance, batch)
-    files = {"provenance.json"}
-    declared = {}
-    rows_by_source = {}
-    for source in ("batman", "genecards", "omim"):
-        declaration = _validate_source(provenance, source, batch)
-        _, names = source_inputs(batch, source)
-        files.update(names)
-        if source == "batman":
-            continue
-        scope = declaration.get("diseases")
-        if not isinstance(scope, list) or not scope or any(not isinstance(d, str) or not d.strip() for d in scope):
-            raise ValueError("provenance.sources.%s.diseases 必须为非空字符串列表" % source)
-        required = {"gene_symbol", "relevance_score"} if source == "genecards" else {"gene_symbol"}
-        declared[source] = [d.strip() for d in scope]
-        rows_by_source[source] = _query_rows(batch, source, required, declared[source])
-    hashes = {name: digest(batch / name) for name in sorted(files)}
-    herbs = provenance["sources"]["batman"]["herbs"]
-    herb_data = load_herb(batch, {"herbs": herbs})
-    records = []
-    counts = {}
-    for source, rows in rows_by_source.items():
-        counts[source] = len(rows)
-        for line, row in enumerate(rows, 2):
-            _, rejected = normalize_symbols([row["gene_symbol"]])
-            if rejected:
-                raise ValueError(f"{source}.csv:{line} 非法基因标识")
-            score = None
-            if source == "genecards":
-                score = float(row["relevance_score"])
-                if not math.isfinite(score) or score < 0:
-                    raise ValueError(f"{source}.csv:{line} 非法分值")
-            records.append((row["gene_symbol"], row["disease"], source, line, score,
-                            json.dumps(row, ensure_ascii=False)))
-    diseases = []
-    for source in ("genecards", "omim"):
-        for row in rows_by_source[source]:
-            if row["disease"] not in diseases:
-                diseases.append(row["disease"])
-    if len(diseases) > MAX_DISEASES:
-        raise ValueError("疾病数量超过上限 %d：%d" % (MAX_DISEASES, len(diseases)))
-    if hashes != {name: digest(batch / name) for name in hashes}:
-        raise ValueError("建立索引期间来源文件发生变化，请重新准备数据")
-    metadata = {
-        "schema_version": 1, "created_at": now(), "batch_name": batch.name,
-        "import_kind": "genecards_omim_batch",
-        "diseases": diseases, "declared_diseases": declared,
-        "herbs": herbs, "source_rows": counts,
-        "herb_source_counts": herb_data["source_counts"],
-        "selection": "all_valid_export_rows", "identifier_policy": "exact_symbol_no_alias_mapping",
-        "disease_identifier_policy": "source_query_labels_not_ontology_ids",
-        "provenance": provenance, "source_sha256": hashes, "limitation": LIMITATION,
-    }
-    _create_database(database, metadata, records, [
-        (row["herb"], row["compound_id"], row["gene_symbol"], row["evidence"], row["score"])
-        for row in herb_data["relations"]
-    ])
-    return metadata
+    """通用 associations.csv 批次建库，可选携带 BATMAN 药材关系。"""
+    from ..diseases.associations import build_associations_database
+    return build_associations_database(batch, database)
 
 
 def _create_database(database, metadata, records, herb_rows):
@@ -166,23 +96,15 @@ def _create_database(database, metadata, records, herb_rows):
 
 
 def prepare_batch(batch, database):
-    """自动识别批次类型建索引：associations.csv 走通用通道；genecards.csv/
-    omim.csv 走三源批次；两类文件共存时报错而不是猜测。"""
+    """仅导入通用 associations.csv 批次；旧 SQLite 索引仍可查询。"""
     batch = Path(batch)
-    has_generic = (batch / "associations.csv").is_file()
-    has_legacy = (batch / "genecards.csv").is_file() or (batch / "omim.csv").is_file()
-    if has_generic and has_legacy:
-        raise ValueError("批次目录同时包含 associations.csv 与 genecards.csv/omim.csv，无法识别批次类型，请分开存放")
-    if has_generic:
-        from ..diseases.associations import build_associations_database
-        return build_associations_database(batch, database)
-    if has_legacy:
-        return build_database(batch, database)
-    raise ValueError("批次目录缺少 associations.csv 或 genecards.csv/omim.csv：" + str(batch))
+    if not (batch / "associations.csv").is_file():
+        raise ValueError("批次目录缺少 associations.csv：" + str(batch))
+    return build_database(batch, database)
 
 
 def extend_database(database, additions, output_database, collection=None):
-    """复制现有索引并追加在线采集的 GeneCards/OMIM 关联。
+    """复制现有索引并追加在线采集的 Open Targets 关联。
 
     原索引保持不变；输出为本次运行专用的新 SQLite 文件。相同的
     disease/gene/source 记录只保留一条，新增数据的来源台账写入 metadata。
@@ -195,7 +117,7 @@ def extend_database(database, additions, output_database, collection=None):
         raise ValueError("在线扩展索引已存在，请为新运行使用新的路径：" + str(output_db))
     output_db.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_db.with_name(output_db.name + "." + uuid4().hex + ".tmp")
-    counts = {"genecards": 0, "omim": 0, "duplicates": 0}
+    counts = {"open_targets": 0, "duplicates": 0}
     try:
         with closing(sqlite3.connect(source_db)) as source:
             with closing(sqlite3.connect(temporary)) as target:
@@ -204,25 +126,19 @@ def extend_database(database, additions, output_database, collection=None):
                 existing = {(row[0], row[1], row[2]) for row in target.execute(
                     "SELECT gene, disease, source FROM associations")}
                 for source_name, path in sorted((additions or {}).items()):
-                    if source_name not in ("genecards", "omim", "open_targets"):
+                    if source_name not in ("open_targets",):
                         raise ValueError("不支持的在线来源：" + str(source_name))
                     path = Path(path)
-                    rows = _read_rows(path, {"disease", "gene_symbol"} | ({"relevance_score"} if source_name == "genecards" else set()))
+                    rows = _read_rows(path, {"disease", "gene_symbol"})
                     counts.setdefault(source_name, 0)
                     for line, row in enumerate(rows, 2):
                         disease = str(row.get("disease") or "").strip()
-                        gene = normalize_symbols([str(row.get("gene_symbol") or "").strip()])[0]
-                        if not disease or not gene:
+                        symbols, rejected = normalize_symbols([str(row.get("gene_symbol") or "").strip()])
+                        if not disease or rejected:
                             raise ValueError("在线 %s 数据第 %d 行缺少 disease/gene_symbol" % (source_name, line))
+                        gene = symbols[0]
                         score = None
-                        if source_name == "genecards":
-                            try:
-                                score = float(row.get("relevance_score"))
-                            except (TypeError, ValueError):
-                                raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
-                            if not math.isfinite(score) or score < 0:
-                                raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
-                        elif source_name == "open_targets" and str(row.get("score") or "").strip():
+                        if source_name == "open_targets" and str(row.get("score") or "").strip():
                             try:
                                 score = float(row.get("score"))
                             except (TypeError, ValueError):
@@ -258,7 +174,7 @@ def extend_database(database, additions, output_database, collection=None):
 def build_online_database(additions, output_database, herb_relations, herbs, collection=None):
     """Build a run-scoped index when no base disease index exists.
 
-    BATMAN remains the local source of herb-target rows; GeneCards/OMIM rows
+    BATMAN remains the local source of herb-target rows; Open Targets rows
     are the online disease sources.  This deliberately does not modify the
     configured global index and does not claim that the online associations
     establish efficacy.
@@ -266,14 +182,12 @@ def build_online_database(additions, output_database, herb_relations, herbs, col
     output_db = Path(output_database).resolve()
     if output_db.exists():
         raise ValueError("在线采集索引已存在，请为新运行使用新的路径：" + str(output_db))
-    records, counts, diseases = [], {"genecards": 0, "omim": 0, "duplicates": 0}, []
+    records, counts, diseases = [], {"open_targets": 0, "duplicates": 0}, []
     existing = set()
     for source_name, path in sorted((additions or {}).items()):
-        if source_name not in ("genecards", "omim", "open_targets"):
+        if source_name not in ("open_targets",):
             raise ValueError("不支持的在线来源：" + str(source_name))
         required = {"disease", "gene_symbol"}
-        if source_name == "genecards":
-            required.add("relevance_score")
         counts.setdefault(source_name, 0)
         rows = _read_rows(Path(path), required)
         for line, row in enumerate(rows, 2):
@@ -283,14 +197,7 @@ def build_online_database(additions, output_database, herb_relations, herbs, col
                 raise ValueError("在线 %s 数据第 %d 行缺少或含有非法 gene_symbol" % (source_name, line))
             gene = symbols[0]
             score = None
-            if source_name == "genecards":
-                try:
-                    score = float(row.get("relevance_score"))
-                except (TypeError, ValueError):
-                    raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
-                if not math.isfinite(score) or score < 0:
-                    raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
-            elif source_name == "open_targets" and str(row.get("score") or "").strip():
+            if source_name == "open_targets" and str(row.get("score") or "").strip():
                 try:
                     score = float(row.get("score"))
                 except (TypeError, ValueError):
@@ -363,7 +270,7 @@ def catalog(database):
 
 
 def _evidence_maps(connection):
-    """索引级证据质量参照：BATMAN known/predicted 基因集合 + genecards 最大分值。"""
+    """索引级证据质量参照：BATMAN known/predicted 基因集合。"""
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     known, predicted = set(), set()
     for table in ("herb_relations", "compound_targets"):
@@ -371,12 +278,10 @@ def _evidence_maps(connection):
             for gene, evidence in connection.execute(f"SELECT DISTINCT gene, evidence FROM {table}"):
                 (known if evidence == "known" else predicted).add(gene)
     predicted -= known  # 同一基因有 known 即按文献证据计
-    row = connection.execute("SELECT MAX(score) FROM associations").fetchone()
-    max_score = row[0] if row and row[0] else None
-    return known, predicted, max_score
+    return known, predicted
 
 
-def _confidence(candidate, input_count, known, predicted, max_score):
+def _confidence(candidate, input_count, known, predicted):
     matched = candidate["matched_genes"]
     components = {
         "match_score": (math.log1p(candidate["matched_count"]) / math.log1p(input_count)) if input_count else None,
@@ -387,10 +292,6 @@ def _confidence(candidate, input_count, known, predicted, max_score):
     with_batman = [gene for gene in matched if gene in known or gene in predicted]
     if with_batman:
         parts.append(sum(gene in known for gene in with_batman) / len(with_batman))
-    scores = [row["relevance_score"] for row in candidate["evidence"]
-              if row["source"] == "genecards" and row["relevance_score"] is not None]
-    if scores and max_score:
-        parts.append(min(1.0, (sum(scores) / len(scores)) / max_score))
     components["evidence_quality"] = sum(parts) / len(parts) if parts else None
     total_weight, accrued = 0.0, 0.0
     for name, weight in CONFIDENCE_WEIGHTS.items():
@@ -406,9 +307,9 @@ def _confidence(candidate, input_count, known, predicted, max_score):
 def apply_confidence(database, candidates, input_count):
     """为合并后的候选列表（如分块反查）补算置信度；query() 内部不走这里。"""
     with closing(_connect(database)) as connection:
-        known, predicted, max_score = _evidence_maps(connection)
+        known, predicted = _evidence_maps(connection)
     for candidate in candidates:
-        candidate["confidence"] = _confidence(candidate, input_count, known, predicted, max_score)
+        candidate["confidence"] = _confidence(candidate, input_count, known, predicted)
     return candidates
 
 
@@ -458,7 +359,7 @@ def query(database, *, herbs=None, genes=None):
             for row in connection.execute(
                 f"SELECT gene,disease,source,source_row,score,record FROM associations WHERE gene IN ({placeholders}) ORDER BY disease,gene,source,source_row", symbols)
         ]
-        known, predicted, max_score = _evidence_maps(connection)
+        known, predicted = _evidence_maps(connection)
     candidates, all_matched = [], set()
     for disease in metadata["diseases"]:
         rows = [row for row in evidence if row["disease"] == disease]
@@ -469,7 +370,7 @@ def query(database, *, herbs=None, genes=None):
             per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
             "disease": disease, "matched_genes": matched, "matched_count": len(matched),
-            # 一个基因可能在 GeneCards/OMIM 中对应多条原始证据；两者不能直接相等。
+            # 一个基因可能在 Open Targets 中对应多条原始证据；两者不能直接相等。
             "unique_evidence_gene_count": len(matched),
             "evidence_row_count": len(rows),
             "indexed_target_count": totals.get(disease, 0),
@@ -481,7 +382,7 @@ def query(database, *, herbs=None, genes=None):
     if "herb_catalog" in metadata:
         metadata["herb_catalog"] = [row for row in metadata["herb_catalog"] if row["herb"] in (herbs or [])]
     for candidate in candidates:
-        candidate["confidence"] = _confidence(candidate, len(symbols), known, predicted, max_score)
+        candidate["confidence"] = _confidence(candidate, len(symbols), known, predicted)
     return {
         "workflow": "five_disease_reverse_lookup_v1", "status": "succeeded", "scientific_complete": False,
         "created_at": now(), "limitation": LIMITATION, "input": {"herbs": herbs, "genes": symbols},

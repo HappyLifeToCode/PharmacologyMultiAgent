@@ -75,6 +75,20 @@ def test_task_requires_formula_or_herbs():
         prepare_task({})
 
 
+def test_new_tasks_default_to_open_targets():
+    task = prepare_task(body())
+    assert task["online_sources"] == ["open_targets"]
+    assert task["online_diseases"] == []
+    assert task["online_collect"] is False
+
+
+@pytest.mark.parametrize("source", ["genecards", "omim"])
+def test_retired_sources_cannot_be_saved(tmp_path, source):
+    with pytest.raises(ValueError, match="只支持 open_targets"):
+        save_task(dict(body(), online_collect=True, online_sources=[source]), tmp_path)
+    assert not (tmp_path / "tasks/tasks.local.jsonl").exists()
+
+
 @pytest.mark.parametrize("change", [{"formula":"../escape"}, {"formula":"CON"}, {"formula":"未知方"}, {"herbs":[]}, {"herbs":"白芍"}, {"herbs":["bad\nentry"]}, {"research_notes":"x"*4001}, {"diseases":["Hyperthyroidism"]}, {"import_batch":"../outside"}, {"model":"other"}, {"mode":"bogus"}, {"batman_threshold":"high"}])
 def test_invalid_tasks_are_not_persisted(tmp_path, change):
     with pytest.raises(ValueError):

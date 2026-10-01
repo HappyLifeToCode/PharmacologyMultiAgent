@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 
 from ..core.common import digest, now
-from ..core.imports import _load_provenance, _read_rows, _validate_mapping, _validate_source
+from ..core.imports import _load_provenance, _read_rows, _validate_mapping, _validate_source, load_herb
 from ..core.symbols import _valid_symbol
 from ..discovery.query import LIMITATION, MAX_DISEASES, _create_database
 
@@ -72,13 +72,24 @@ def build_associations_database(batch, database):
     files = {"provenance.json", "associations.csv"}
     files.update(declaration.get("raw_files", []))
     files.update(mapping.get("raw_files", []))
+    herbs, herb_rows, herb_counts = [], [], {}
+    if "batman" in provenance.get("sources", {}):
+        batman = _validate_source(provenance, "batman", batch)
+        herbs = batman.get("herbs")
+        herb_data = load_herb(batch, {"herbs": herbs})
+        herb_counts = herb_data["source_counts"]
+        files.add("herb_targets.csv")
+        files.update(batman.get("raw_files", []))
+        herb_rows = [(row["herb"], row["compound_id"], row["gene_symbol"],
+                      row["evidence"], row["score"]) for row in herb_data["relations"]]
     hashes = {name: digest(batch / name) for name in sorted(files)}
     if hashes != {name: digest(batch / name) for name in hashes}:
         raise ValueError("建立索引期间来源文件发生变化，请重新准备数据")
     metadata = {
         "schema_version": 1, "created_at": now(), "batch_name": batch.name,
         "import_kind": "generic_associations",
-        "diseases": diseases, "herbs": [],
+        "diseases": diseases, "herbs": herbs,
+        "herb_source_counts": herb_counts,
         "source_rows": {"associations": len(records)},
         "rejected_symbol_rows": len(rejected),
         "selection": "all_valid_association_rows",
@@ -86,7 +97,7 @@ def build_associations_database(batch, database):
         "disease_identifier_policy": "source_query_labels_not_ontology_ids",
         "provenance": provenance, "source_sha256": hashes, "limitation": LIMITATION,
     }
-    _create_database(database, metadata, records, [])
+    _create_database(database, metadata, records, herb_rows)
     if rejected:
         path = database.with_name(database.stem + ".rejected_symbols.csv")
         if path.exists():

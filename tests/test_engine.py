@@ -60,11 +60,11 @@ def test_fixture_end_to_end(root):
     assert result["evidence_type"] == "synthetic_engineering"
     assert result["matched_input_count"] == 6 and result["input_count"] == 6
     for candidate in result["candidates"]:
-        assert candidate["confidence"]["formula_version"] == "heuristic_v1"
+        assert candidate["confidence"]["formula_version"] == "heuristic_v2"
         assert 0.0 <= candidate["confidence"]["value"] <= 1.0
     assert 0.0 < manifest["metrics"]["max_confidence"] <= 1.0
     report = (run / "report.md").read_text(encoding="utf-8")
-    assert "置信度" in report and "heuristic_v1" in report
+    assert "置信度" in report and "heuristic_v2" in report
     assert "scientific_complete：false" in report and "关联≠疗效" in report or "局限" in report
     assert manifest["report"] == "report.md"
     # fixture 不进归档
@@ -84,12 +84,12 @@ def test_live_blocked_without_local_data(root):
     assert manifest["stages"]["disease_reverse"]["status"] == "blocked"
     # 没有靶点产物顶替
     assert not (root / "runs" / run_id / "herb_targets/attempt_01/targets.json").exists()
-    # blocked 携带人机协助升级点标记与事件
+    # blocked 提供本地数据配置指引，不再建议登录或验证码接管
     handoff = json.loads((root / "runs" / run_id / "herb_targets/attempt_01/handoff.json").read_text(encoding="utf-8"))
-    assert handoff["assist"]["available"] is True
-    assert "协助会话" in handoff["assist"]["guidance"]
+    assert "assist" not in handoff
+    assert "batman_data.local.json" in handoff["guidance"]
     events = (root / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
-    assert "assist_requested" in events
+    assert "data.unavailable" in events
     assert manifest["stages"]["review"]["status"] == "succeeded"
     assert (root / "runs" / run_id / "report.md").is_file()
     # live 的 blocked 证据也归档
@@ -138,6 +138,47 @@ def test_live_herb_unmatched_recorded(root, tmp_path):
     assert targets["provenance"]["accessed_at"] == "2026-09-17"
     assert manifest["stages"]["disease_reverse"]["status"] == "blocked"
     assert manifest["status"] == "partial"
+
+
+@pytest.mark.parametrize("collection_fails", [False, True])
+def test_live_third_stage_queries_open_targets_without_browser_assistance(root, tmp_path, monkeypatch, collection_fails):
+    data = _batman_data_dir(tmp_path)
+    calls = []
+
+    def collect(symbols, output_dir, **kwargs):
+        calls.append(symbols)
+        if collection_fails:
+            raise RuntimeError("Open Targets 本地快照未配置")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "associations.csv").write_text(
+            "disease,gene_symbol,score,source\n"
+            "MONDO_1 | Disease A,EGFR,0.8,open_targets\n", encoding="utf-8")
+        return {"associations": 1}
+
+    monkeypatch.setattr(engine.online_pipeline, "collect_open_targets_by_targets", collect)
+    task = {"task_id": "web_testopen", "formula": None, "herbs": ["白芍"],
+            "research_notes": "", "batman_threshold": 0.84, "mode": "live", "agents": False,
+            "batman_local_dir": str(data), "batman_accessed_at": "2026-09-17",
+            "online_collect": True, "online_diseases": [], "online_sources": ["open_targets"],
+            "workspace_id": common.workspace_identity(root)["workspace_id"]}
+    (root / "tasks").mkdir()
+    (root / "tasks" / "tasks.local.jsonl").write_text(json.dumps(task, ensure_ascii=False) + "\n", encoding="utf-8")
+    run_id = engine.start(task["task_id"], background=False)
+    manifest = common.read_json(root / "runs" / run_id / "manifest.json")
+    assert calls == [["EGFR", "TP53"]]
+    stage = manifest["stages"]["disease_reverse"]
+    handoff = common.read_json(root / "runs" / run_id / "disease_reverse/attempt_01/handoff.json")
+    assert "assist" not in handoff
+    if collection_fails:
+        assert stage["status"] == "blocked"
+        assert "API 连接或本地快照配置" in handoff["guidance"]
+    else:
+        assert stage["status"] == "succeeded"
+        assert manifest["status"] == "succeeded"
+        result = common.read_json(root / "runs" / run_id / manifest["verified_targets"]["disease_reverse"])
+        assert result["matched_input_count"] == 1
+        assert result["candidates"][0]["source_gene_counts"] == {"open_targets": 1}
+        assert any(p.endswith("online_collection.json") for p in stage["artifacts"])
 
 
 def test_reverse_lookup_chunks_over_query_limit(root, tmp_path):

@@ -39,6 +39,9 @@ def test_index_static_assets_and_formulas_catalog():
         page = client.get("/")
         assert page.status_code == 200
         assert "方剂反向疾病发现工作台" in page.text
+        assert "Open Targets" in page.text
+        assert "GeneCards" not in page.text and "OMIM" not in page.text
+        assert "assist-canvas" not in page.text
         assert client.get("/assets/app.js").status_code == 200
         assert client.get("/assets/style.css").status_code == 200
         # 旧页面与旧静态资源已下线
@@ -52,6 +55,19 @@ def test_index_static_assets_and_formulas_catalog():
         assert wenjing["source"] == "standard_reference_pending_user_confirmation"
         assert any(herb["canonical"] == "甘草" and herb["candidates"] == ["甘草", "炙甘草"]
                    for herb in wenjing["herbs"])
+
+
+def test_browser_collection_endpoints_are_removed():
+    from starlette.websockets import WebSocketDisconnect
+    import pytest
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        for name in ("start", "request", "stop", "complete"):
+            assert client.post("/api/assist/" + name, json={}).status_code == 404
+        for name in ("status", "storage-state"):
+            assert client.get("/api/assist/" + name).status_code == 404
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws/assist"):
+                pass
 
 
 def test_analysis_endpoint_and_pipeline_field(tmp_path, monkeypatch):

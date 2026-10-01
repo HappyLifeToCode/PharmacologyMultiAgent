@@ -4,32 +4,26 @@
 
 ## 能力与范围
 
-- 疾病集合**不固定**：取批次文件 disease 列的实际值，顺序按文件内首次出现（三源批次 genecards.csv 先于 omim.csv），上限 500；查询与目录输出沿用该固定顺序，不是疗效排名，零匹配如实显示。
+- 疾病集合**不固定**：取批次文件 disease 列的实际值，顺序按文件内首次出现，上限 500；查询与目录输出沿用该固定顺序，不是疗效排名，零匹配如实显示。
 - 关键词不是统一的疾病本体标识，检索命中不等于疾病因果或治疗证据；输出称为候选疾病关联。
 - 旧版索引文件（schema_version=1/2）仍可读可查；metadata 缺少疾病清单时回退到关联表 `SELECT DISTINCT disease`。
 
-## 两类导入批次
+## 通用导入批次
 
-### 1. GeneCards+OMIM 三源批次
+批次含 `associations.csv`（必需 `disease,gene_symbol`，可选 `score,source,extra`）与 `provenance.json`（sources.associations + mapping）。可选携带 `herb_targets.csv` 与 sources.batman 声明，导入药材关系后支持按药材查询。同疾病/基因/来源重复行拒绝，非法符号剔除并留档，零有效关联疾病不进索引。格式见 [导入说明](IMPORTS.md)。
 
-批次目录含 `herb_targets.csv`、`genecards.csv`、`omim.csv`、`provenance.json`（sources.batman/genecards/omim + mapping）及 `raw/`。provenance 声明的 diseases 是查询范围记录：行不得超出声明；声明了但零关联的疾病不进索引。批次同时把 BATMAN 药材-成分-靶点关系写入索引（供按药材查询）。
-
-### 2. 通用 associations.csv 批次
-
-批次目录含 `associations.csv`（必需列 `disease,gene_symbol`；可选 `score,source,extra`）+ `provenance.json`（sources.associations + mapping，校验纪律与三源批次一致）。用于接入任意本地合规疾病-基因关联表。规则：同疾病/基因/来源重复行拒绝（防重复导出页）；非法基因符号剔除并留档 `<索引名>.rejected_symbols.csv`，不补造；只有至少一个有效关联的疾病才进索引。
-
-**自动识别**：批次目录有 `associations.csv` 走通用通道，有 `genecards.csv`/`omim.csv` 走三源通道；两类文件共存时报错而不是猜测。批次格式与 provenance 字段详见 [导入说明](IMPORTS.md)。
+GeneCards/OMIM 专用导入入口已移除，既有 SQLite 索引仍可查询。
 
 ## 建库与查询
 
 ```powershell
-# 建索引（自动识别批次类型；--db 在子命令之前；输出文件必须不存在）
+# 建索引（通用批次；--db 在子命令之前；输出文件必须不存在）
 .\.venv\Scripts\python.exe -m pharm.discovery.query --db local/discovery/disease_index.sqlite prepare --batch <批次目录>
 
 # 按靶点反查（输出目录必须不存在）
 .\.venv\Scripts\python.exe -m pharm.discovery.query --db local/discovery/disease_index.sqlite query --genes TP53 EGFR --output local/discovery/my-lookup
 
-# 按已收录药材反查（仅三源批次或扩展索引含有药材关系时可用）
+# 按已收录药材反查（仅索引含有药材关系时可用）
 .\.venv\Scripts\python.exe -m pharm.discovery.query --db local/discovery/disease_index.sqlite query --herbs 白芍 炙甘草 --output local/discovery/my-herb-lookup
 
 # 全药材目录扩展：从 v1 索引 + 已登记哈希的 BATMAN 全量文件生成 schema_version=2 索引

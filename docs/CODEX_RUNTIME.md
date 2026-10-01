@@ -1,6 +1,6 @@
 # Codex CLI 执行配置
 
-> **现状（2026-09-22）**：多 Agent 核验层**已启用**——live + `agents=true`（live 默认）时，引擎在程序计算完成后启动六个独立 Codex 会话（协调/药材靶点/疾病发现/网络/富集/验收，提示词在 [agents/](../agents/README.md)）。因此 **live 多 Agent 模式必需可用的 Codex CLI 与 profile**；`agents=false` 的纯程序 live 与全部 fixture 运行不需要模型服务。仍属预留的是**在线采集编排**（Agent 驱动站点采集）。
+> **现状（2026-10-01）**：多 Agent 核验层**已启用**——live + `agents=true`（live 默认）时，引擎在程序计算完成后启动六个独立 Codex 会话（协调/药材靶点/疾病发现/网络/富集/验收，提示词在 [agents/](../agents/README.md)）。因此 **live 多 Agent 模式必需可用的 Codex CLI 与 profile**；`agents=false` 的纯程序 live 与全部 fixture 运行不需要模型服务。疾病数据由程序查询 Open Targets，旧站点采集与验证码接管已移除。
 
 ## 配置
 
@@ -27,7 +27,7 @@
 - 程序计算成功后启动对应角色会话；证据按计数+样例裁剪；Agent 报 failed 只把阶段降为 partial（程序产物保留）；会话错误记录 `agent_review.error`，阶段状态由程序结果决定。
 - `scripts/check_runtime.py` 可做模型/浏览器连通性握手（只读核验，不产生研究数据）。
 
-在线采集阶段的设计意图（预留）：Agent 经该适配器执行站点采集，遇人机验证时经人机协助桥（/api/assist/* + WS /ws/assist）指引用户在内嵌浏览器中接管，完成后继续。该编排尚未实现。
+疾病数据查询由 Open Targets API 或本地快照适配器执行。GeneCards/OMIM 在线采集与人机协助桥已移除；本适配器继续用于独立 Agent 核验，不再承担旧数据库登录与验证码接管。
 
 ## 接入要求（实现时遵守）
 

@@ -29,16 +29,9 @@
         <option value="fixture">fixture（合成工程验证）</option>
       </select>
     </label>
-    <label class="inline-check"><input id="online-collect" type="checkbox"> 本次任务自动在线采集疾病数据</label>
-    <label>在线采集疾病范围（GeneCards/OMIM 或 Open Targets 疾病驱动模式；只选 Open Targets 且留空时使用 BATMAN 靶点反查；每行一个）
+    <label class="inline-check"><input id="online-collect" type="checkbox"> 启用 Open Targets 数据查询（本地快照或 API）</label>
+    <label>限定疾病范围（可选；留空时使用 BATMAN 靶点发现候选疾病；每行一个）
       <textarea id="online-diseases-input" rows="4" spellcheck="false" placeholder="例如：Hyperthyroidism&#10;Rheumatoid arthritis"></textarea>
-    </label>
-    <label>在线来源
-      <span class="source-checks">
-        <label><input id="source-genecards" type="checkbox" checked> GeneCards</label>
-        <label><input id="source-omim" type="checkbox" checked> OMIM</label>
-        <label><input id="source-open-targets" type="checkbox"> Open Targets</label>
-      </span>
     </label>
     <label>研究说明
       <textarea id="notes-input" rows="3" spellcheck="false"></textarea>
@@ -84,7 +77,7 @@
         <thead><tr><th>疾病关键词</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th><th>操作</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="note">置信度为启发式（heuristic_v1），非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击置信度数值展开组件明细。</p>
+      <p class="note">置信度为程序启发式，非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击数值查看组件和计算版本。</p>
       <div id="evidence-panel" hidden>
         <h3 id="evidence-title"></h3>
         <table id="evidence-table">
@@ -96,29 +89,9 @@
       <p id="unmatched-genes" class="note"></p>
       <p id="unmatched-herbs" class="note"></p>
     </div>
-    <div id="assist-panel" hidden>
-      <h2>人机协助</h2>
-      <div id="assist-launch">
-        <p id="assist-guidance-text" class="assist-guidance"></p>
-        <p id="assist-source" class="assist-source">等待采集 Agent 提供当前页面…</p>
-        <button id="assist-start" class="primary" disabled>接管当前采集页面</button>
-        <button id="assist-same-complete" class="primary" hidden>我已在原采集器窗口完成登录，继续采集</button>
-      </div>
-      <div id="assist-live" hidden>
-        <div class="button-row">
-          <span>状态：<span id="assist-state" class="badge"></span></span>
-          <button id="assist-complete" class="primary">验证完成，继续采集</button>
-          <button id="assist-stop">结束会话</button>
-        </div>
-        <p class="note">点击画面取得焦点后可直接键入；滚轮滚动页面。</p>
-        <div class="assist-body">
-          <canvas id="assist-canvas" tabindex="0" width="1280" height="800"></canvas>
-          <ul id="assist-guidance-list"></ul>
-        </div>
-      </div>
-    </div>
+
   </section>
 </main>
-<script src="/assets/app.js?v=20260924-frame-fallback"></script>
+<script src="/assets/app.js?v=20261001-open-targets-only"></script>
 </body>
 </html>

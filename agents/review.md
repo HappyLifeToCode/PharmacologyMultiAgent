@@ -8,7 +8,7 @@ verification.json 的问题清单（应为空）、各阶段状态与摘要、me
 
 ## 核验清单
 
-- 各阶段状态与证据自洽；blocked/partial 阶段的缺口表述与 assist 指引一致。
+- 各阶段状态与证据自洽；blocked/partial 阶段的缺口表述与数据配置或恢复运行指引一致。
 - 程序验收问题清单为空；计数与 metrics 一致。
 - fixture 运行的合成标注完整；live 运行的 provenance（文件哈希、访问日期）齐备。
 - scientific_complete 恒为 false；关联≠疗效的声明在报告中存在。

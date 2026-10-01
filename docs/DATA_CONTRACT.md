@@ -17,7 +17,7 @@
 | disease_reverse | reverse/result.json、candidates.csv、evidence.csv、report.md、manifest.json | 逐疾病 matched/coverage/**confidence**/逐条证据、未命中靶点、索引 metadata、database 路径与 SHA-256；超 3000 靶点分块记录 chunking |
 | review | verification.json + 运行根 report.md | 程序核对结果；报告含候选疾病概览（含置信度）与局限声明 |
 
-**confidence 字段**（result.json 每候选）：`{value, components: {match_score, input_coverage, disease_coverage, evidence_quality}, formula_version: "heuristic_v1", note}`——程序计算的透明启发式，固定权重 0.3/0.3/0.2/0.2，组件 null 剔除归一，零匹配 value=0.0；非统计检验，固定顺序非排名。candidates.csv 与 report.md 含同名列与声明。
+**confidence 字段**（result.json 每候选）：`{value, components: {match_score, input_coverage, disease_coverage, evidence_quality}, formula_version: "heuristic_v2", note}`——程序计算的透明启发式，固定权重 0.3/0.3/0.2/0.2，组件 null 剔除归一，零匹配 value=0.0；非统计检验，固定顺序非排名。candidates.csv 与 report.md 含同名列与声明。
 
 ## analysis 四阶段产物
 
@@ -49,8 +49,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 | 文件 | 内容 |
 |---|---|
 | manifest.json | 见上"流水线与 manifest" |
-| handoff.json（每 attempt） | run_id、task_id、agent_role、recorded_at、status、summary、blockers、findings、artifacts 及哈希；可选 agent_review、assist 标记、confidence 相关产物索引 |
-| events.jsonl | timestamp、role、type、message；含 stage.*、agent.started/completed/error、assist_requested、agents.unavailable、run.completed |
+| handoff.json（每 attempt） | run_id、task_id、agent_role、recorded_at、status、summary、blockers、findings、artifacts 及哈希；可选 agent_review、guidance、confidence 相关产物索引 |
+| events.jsonl | timestamp、role、type、message；含 stage.*、agent.started/completed/error、data.unavailable、agents.unavailable、run.completed |
 
 同一时刻一个完整运行（`runs/.runner.lock`）；异常留下的锁先核验进程再处理。
 
@@ -62,9 +62,13 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 - `GET /api/formulas`：内置方剂组成与 BATMAN 候选名。
 - 产物下载 `GET /artifacts/{run_id}/{path}`：仅 manifest 登记且通过 public_artifact 白名单的文件；提示词、模型原始响应、私有日志不公开（Agent 会话仅 agent/execution.json 公开）。
 
-## 人机协助桥（WS /ws/assist）
+## Open Targets 查询任务与兼容
 
-协议全文见 `pharm/assist/bridge.py` 模块文档字符串。要点：下行 frame 文本帧+二进制 JPEG、guidance、state、error；上行相对坐标鼠标事件、wheel、key、text。状态机 running→waiting_human→done→closed；单会话（重复启动 409）；生产路径 headed，失败抛 AssistUnavailable 不降级。
+`online_collect`（布尔，默认 false）启用第三阶段数据查询；`online_sources` 仅支持 `["open_targets"]`；`online_diseases` 为可选范围，空列表使用 BATMAN 靶点。local 模式读快照，online 模式调用 GraphQL。原字段名称保留，local 不联网。
+
+旧数据库采集与 `/api/assist/*`、`/ws/assist` 已移除。旧任务启用不支持来源时明确 blocked；历史任务与运行不回写。
+
+`heuristic_v2` 沿用权重，evidence_quality 仅取 BATMAN known 占比；原始关联分值不参与评分，缺失组件剔除。历史 v1 报告保留原版本。
 
 ## 归档布局
 

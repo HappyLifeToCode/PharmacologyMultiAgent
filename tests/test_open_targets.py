@@ -52,7 +52,7 @@ def _write_local_open_targets_snapshot(root):
     }), encoding="utf-8")
 
 
-def test_collect_open_targets_by_disease_writes_genecards_compatible_rows(monkeypatch, tmp_path):
+def test_collect_open_targets_by_disease_writes_generic_associations(monkeypatch, tmp_path):
     responses = iter([
         {"search": {"hits": [{"id": "MONDO_1", "name": "Disease A", "entity": "disease"}]}},
         {"disease": {"id": "MONDO_1", "name": "Disease A",
@@ -91,13 +91,15 @@ def test_local_open_targets_by_disease_reads_parquet(tmp_path):
     assert metadata["source_rows"]["associations"] == 1
 
 
-def test_online_pipeline_requires_disease_keywords_for_genecards(tmp_path):
-    with pytest.raises(RuntimeError, match="GeneCards"):
+@pytest.mark.parametrize("source", ["genecards", "omim", "unavailable_source"])
+def test_pipeline_rejects_retired_sources_before_collection(tmp_path, source):
+    with pytest.raises(ValueError, match="已移除"):
         online_pipeline.collect_and_extend(
-            {"online_diseases": [], "online_sources": ["genecards"]},
+            {"online_diseases": [], "online_sources": [source]},
             tmp_path / "online",
             herb_targets={"genes": ["EGFR"], "relations": [], "herbs": ["白芍"]},
         )
+    assert not (tmp_path / "online").exists()
 
 
 def test_online_pipeline_collects_open_targets_by_disease(monkeypatch, tmp_path):
@@ -121,6 +123,35 @@ def test_online_pipeline_collects_open_targets_by_disease(monkeypatch, tmp_path)
     assert result["counts"]["duplicates"] == 0
     with sqlite3.connect(result["database"]) as connection:
         assert connection.execute("SELECT COUNT(*) FROM associations").fetchone()[0] == 1
+
+
+def test_open_targets_extension_preserves_existing_index(monkeypatch, tmp_path):
+    from pharm.discovery import query as discovery
+    from pharm.core.common import digest
+    base = tmp_path / "old.sqlite"
+    discovery._create_database(base, {
+        "schema_version": 1, "diseases": ["Old disease"], "herbs": [],
+        "source_rows": {"historical": 1}, "created_at": "2026-09-28",
+        "selection": "historical_import",
+    }, [("TP53", "Old disease", "historical", 2, None, "{}")], [])
+    before = digest(base)
+
+    def fake_collect(diseases, output_dir, **kwargs):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "associations.csv").write_text(
+            "disease,gene_symbol,score,source,extra\n"
+            "MONDO_1 | Disease A,EGFR,0.8,open_targets,{}\n"
+            "MONDO_1 | Disease A,EGFR,0.8,open_targets,{}\n", encoding="utf-8")
+        return {"associations": 2}
+
+    monkeypatch.setattr(online_pipeline, "collect_open_targets_by_diseases", fake_collect)
+    result = online_pipeline.collect_and_extend(
+        {"online_diseases": ["Disease A"]}, tmp_path / "collection", database=base)
+    assert result["counts"] == {"open_targets": 1, "duplicates": 1}
+    assert digest(base) == before
+    queried = discovery.query(result["database"], genes=["TP53", "EGFR"])
+    assert [c["matched_count"] for c in queried["candidates"]] == [1, 1]
+    assert queried["candidates"][0]["source_gene_counts"] == {"historical": 1}
 
 
 def test_collect_open_targets_by_target_writes_possible_diseases(monkeypatch, tmp_path):

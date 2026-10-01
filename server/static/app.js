@@ -5,7 +5,7 @@ const STAGES = {
   discovery: [
     ["preflight", "本地数据预检", "检查本地 BATMAN 库与疾病索引是否就位"],
     ["herb_targets", "药材靶点解析", "从本地 BATMAN-TCM 库查询药材成分与靶点"],
-    ["disease_reverse", "疾病反向查询", "用本地疾病索引（GeneCards/OMIM 官方导出批次构建）反查关联疾病"],
+    ["disease_reverse", "疾病反向查询", "用本地疾病索引或 Open Targets 查询关联疾病"],
     ["review", "程序验收与报告", "程序核对证据并生成报告"],
   ],
   analysis: [
@@ -23,7 +23,7 @@ const EVENT_KIND_LABELS = {
   "stage.started": "开始", "stage.completed": "完成", "stage.reused": "复用",
   "stage.auto_retry": "自动重试", "tool.started": "工具启动", "tool.succeeded": "工具完成",
   "tool.failed": "工具失败", "agent.started": "Agent 会话开始", "agent.completed": "Agent 会话完成",
-  "agent.error": "Agent 会话错误", "assist_requested": "协助请求", "agents.unavailable": "Agent 环境不可用",
+  "agent.error": "Agent 会话错误", "data.unavailable": "数据未配置", "agents.unavailable": "Agent 环境不可用",
   "run.failed": "运行失败", "run.completed": "运行结束", "archive.failed": "归档失败",
 };
 
@@ -49,7 +49,6 @@ const state = {
   handoff: null,
   pollTimer: null,
   runRevision: null,
-  assist: { ws: null, state: "idle", available: null, pending: null, frameSeq: 0 },
 };
 
 async function api(path, options) {
@@ -103,11 +102,7 @@ function taskBodyFromForm() {
     mode: $("mode-select").value,
     online_collect: $("online-collect").checked,
     online_diseases: $("online-diseases-input").value.split("\n").map((s) => s.trim()).filter(Boolean),
-    online_sources: [
-      $("source-genecards").checked ? "genecards" : null,
-      $("source-omim").checked ? "omim" : null,
-      $("source-open-targets").checked ? "open_targets" : null,
-    ].filter(Boolean),
+    online_sources: ["open_targets"],
   };
   const formula = $("formula-select").value;
   if (formula) body.formula = formula;
@@ -164,10 +159,10 @@ function selectTask(task) {
   $("mode-select").value = task.mode || "live";
   $("online-collect").checked = Boolean(task.online_collect);
   $("online-diseases-input").value = (task.online_diseases || []).join("\n");
-  const onlineSources = task.online_sources || ["genecards", "omim"];
-  $("source-genecards").checked = onlineSources.includes("genecards");
-  $("source-omim").checked = onlineSources.includes("omim");
-  $("source-open-targets").checked = onlineSources.includes("open_targets");
+  const retiredSources = (task.online_sources || []).filter((source) => source !== "open_targets");
+  if (task.online_collect && retiredSources.length) {
+    $("task-message").textContent = "此任务使用已移除的数据源。请保存为 Open Targets 新任务后运行；历史运行仍可查看。";
+  }
   $("notes-input").value = task.research_notes || "";
   $("selected-task-actions").hidden = false;
   $("run-task-message").textContent = "";
@@ -251,7 +246,6 @@ async function refreshRuns() {
         }
       }
     }
-    refreshAssistStatus();
     updateRunTaskButton();
   } catch (err) {
     // 后端重启或切换工作区后，不能继续显示上一轮缓存的运行数据。
@@ -446,7 +440,6 @@ async function renderStageDetail(manifest) {
   if (!stage) {
     detail.innerHTML = "<p class='placeholder'>该阶段尚未开始。</p>";
     $("result-panel").hidden = true;
-    updateAssistPanel();
     return;
   }
   detail.innerHTML = "";
@@ -476,10 +469,11 @@ async function renderStageDetail(manifest) {
     }
     detail.appendChild(list);
   }
-  if (state.handoff && state.handoff.assist && state.handoff.assist.available) {
-    const mark = document.createElement("p");
-    mark.innerHTML = "<span class='assist-mark'>可启动人机协助会话完成在线采集</span>";
-    detail.appendChild(mark);
+  if (state.handoff && state.handoff.guidance) {
+    const guidance = document.createElement("p");
+    guidance.className = "note";
+    guidance.textContent = state.handoff.guidance;
+    detail.appendChild(guidance);
   }
   if (state.handoff && state.handoff.agent_review) {
     detail.appendChild(renderAgentReview(state.handoff.agent_review));
@@ -511,7 +505,6 @@ async function renderStageDetail(manifest) {
     detail.appendChild(list);
   }
   await renderResults(manifest, stage, role);
-  updateAssistPanel();
 }
 
 async function renderResults(manifest, stage, role) {
@@ -694,207 +687,9 @@ function renderEvidence(candidate) {
     : "";
 }
 
-// ---------- 人机协助 ----------
-
-function updateAssistPanel() {
-  const assist = state.handoff && state.handoff.assist && state.handoff.assist.available
-    ? state.handoff.assist : null;
-  state.assist.available = assist;
-  const panel = $("assist-panel");
-  const running = state.assist.state === "running" || state.assist.state === "waiting_human";
-  const pending = state.assist.state === "pending" && state.assist.pending;
-  const sameContext = Boolean((pending || state.assist.pending || {}).context?.same_context);
-  panel.hidden = !assist && !running && !pending;
-  $("assist-launch").hidden = running;
-  $("assist-live").hidden = !running;
-  $("assist-complete").hidden = !running;
-  $("assist-same-complete").hidden = !sameContext;
-  $("assist-start").hidden = sameContext;
-  if (assist) $("assist-guidance-text").textContent = assist.guidance || "";
-  const source = pending || state.assist.pending;
-  $("assist-source").textContent = source && source.url
-    ? ((source.context && source.context.same_context)
-      ? "请直接在原采集器浏览器窗口完成登录/验证：" + source.url
-      : "采集 Agent 已暂停在：" + source.url)
-    : "等待采集 Agent 提供当前页面…";
-  $("assist-start").disabled = !source || !source.url;
-}
-
-async function refreshAssistStatus() {
-  try {
-    const status = await api("/api/assist/status");
-    state.assist.pending = status.pending;
-    setAssistState(status.state);
-    if ((status.state === "running" || status.state === "waiting_human")
-        && (!state.assist.ws || state.assist.ws.readyState > 1)) {
-      connectAssistWs();
-    }
-  } catch (err) { /* 下轮再试 */ }
-}
-
-function setAssistState(value) {
-  state.assist.state = value;
-  $("assist-state").textContent = value;
-  $("assist-state").className = "badge " + value;
-  updateAssistPanel();
-}
-
-function appendGuidance(entry) {
-  const list = $("assist-guidance-list");
-  const item = document.createElement("li");
-  const meta = document.createElement("span");
-  meta.className = "meta";
-  meta.textContent = entry.ts ? toLocalTime(entry.ts) : "";
-  item.appendChild(meta);
-  item.appendChild(document.createTextNode(entry.text || ""));
-  list.appendChild(item);
-}
-
-function connectAssistWs() {
-  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/assist");
-  state.assist.ws = ws;
-  ws.binaryType = "blob";
-  const canvas = $("assist-canvas");
-  const context = canvas.getContext("2d");
-  ws.onmessage = (event) => {
-    if (typeof event.data === "string") {
-      let message;
-      try { message = JSON.parse(event.data); } catch (err) { return; }
-      if (message.type === "frame") {
-        const width = message.width || canvas.width;
-        const height = message.height || canvas.height;
-        // 重复赋值会清空 canvas；只在尺寸真的变化时重设，避免画面闪烁。
-        if (canvas.width !== width) canvas.width = width;
-        if (canvas.height !== height) canvas.height = height;
-      } else if (message.type === "guidance") {
-        appendGuidance(message);
-      } else if (message.type === "state") {
-        setAssistState(message.state);
-      } else if (message.type === "error") {
-        appendGuidance({ text: "输入被拒绝：" + message.message, ts: "" });
-      }
-    } else {
-      drawAssistFrame(event.data, ++state.assist.frameSeq);
-    }
-  };
-  ws.onclose = () => { state.assist.ws = null; };
-}
-
-function drawAssistFrame(data, seq) {
-  const canvas = $("assist-canvas");
-  const context = canvas.getContext("2d");
-  const blob = data instanceof Blob ? data : new Blob([data], { type: "image/jpeg" });
-  if (typeof createImageBitmap === "function") {
-    createImageBitmap(blob).then((bitmap) => {
-      if (seq !== state.assist.frameSeq) { bitmap.close(); return; }
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      bitmap.close();
-    }).catch(() => drawAssistFrameWithImage(blob, seq));
-    return;
-  }
-  drawAssistFrameWithImage(blob, seq);
-}
-
-function drawAssistFrameWithImage(blob, seq) {
-  const canvas = $("assist-canvas");
-  const context = canvas.getContext("2d");
-  const url = URL.createObjectURL(blob);
-  const image = new Image();
-  image.onload = () => {
-    if (seq !== state.assist.frameSeq) { URL.revokeObjectURL(url); return; }
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    URL.revokeObjectURL(url);
-  };
-  image.onerror = () => URL.revokeObjectURL(url);
-  image.src = url;
-}
-
-function sendAssist(payload) {
-  const ws = state.assist.ws;
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
-}
-
-function relPos(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1),
-    y: Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1),
-  };
-}
-
-function bindAssistPanel() {
-  $("assist-same-complete").addEventListener("click", async () => {
-    try {
-      const result = await postJSON("/api/assist/complete", {});
-      setAssistState(result.state);
-      appendGuidance({text: "已通知原采集器继续执行。", ts: ""});
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-  $("assist-start").addEventListener("click", async () => {
-    const guidance = state.assist.available ? state.assist.available.guidance : "";
-    try {
-      const pending = state.assist.pending;
-      const result = await postJSON("/api/assist/start", { guidance, request_id: pending && pending.request_id });
-      setAssistState(result.state);
-      connectAssistWs();
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-  $("assist-stop").addEventListener("click", async () => {
-    try {
-      await postJSON("/api/assist/stop", {});
-    } catch (err) {
-      alert(err.message);
-    }
-    if (state.assist.ws) state.assist.ws.close();
-    setAssistState("closed");
-    $("assist-guidance-list").innerHTML = "";
-  });
-  $("assist-complete").addEventListener("click", async () => {
-    try {
-      const result = await postJSON("/api/assist/complete", {});
-      setAssistState(result.state);
-      appendGuidance({text: "已通知采集 Agent 继续执行。", ts: ""});
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-  const canvas = $("assist-canvas");
-  let lastMove = 0;
-  // page.mouse.click 会在浏览器侧生成完整的按下/抬起序列；前端再额外发送
-  // mousedown、mouseup 会让 Cloudflare 复选框被重复触发，容易回到挑战页。
-  canvas.addEventListener("click", (event) => {
-    event.preventDefault();
-    canvas.focus();
-     sendAssist(Object.assign({ type: "click" }, relPos(event, canvas)));
-   });
-  canvas.addEventListener("mousemove", (event) => {
-    const now = Date.now();
-    if (now - lastMove < 60) return;
-    lastMove = now;
-    sendAssist(Object.assign({ type: "mousemove" }, relPos(event, canvas)));
-  });
-  canvas.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    sendAssist({ type: "wheel", deltaX: event.deltaX, deltaY: event.deltaY });
-  }, { passive: false });
-  canvas.addEventListener("keydown", (event) => {
-    event.preventDefault();
-    if (event.key && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      sendAssist({ type: "text", text: event.key });
-    } else if (event.key) {
-      sendAssist({ type: "key", key: event.key });
-    }
-  });
-}
-
 // ---------- 启动 ----------
 
 async function boot() {
-  bindAssistPanel();
   $("save-task").addEventListener("click", () => saveTask(false));
   $("save-start").addEventListener("click", () => saveTask(true));
   $("run-task").addEventListener("click", runSelectedTask);

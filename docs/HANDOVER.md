@@ -1,121 +1,64 @@
-# 项目交接说明（给下一位协作者 / 大模型）
+# 项目交接说明
 
-> 目的：让没有本项目上下文的人（或 AI）能快速接手。阅读顺序：本文件 → docs/PROJECT_STATUS.md → docs/DATA_CONTRACT.md。
-> 更新日期：2026-09-28（同步同门提交 `e87b51d`；在线采集已接入第三阶段但靶点驱动疾病发现仍未完成）。项目根目录即本文件所在仓库。
+更新：2026-10-01。阅读顺序：本文件 → [项目进度](PROJECT_STATUS.md) → [数据契约](DATA_CONTRACT.md)。
 
-## 2026-09-28 当前接续状态
+## 最新决定与修改
 
-已从 `origin/main` 拉取同门提交 `e87b51d`。该提交修复协助画布重复点击和 OMIM 验证完成状态误判；本地未提交的在线采集、索引扩展和前端配置修改已恢复并保留。
+用户暂停新数据库选型，要求删除不可用的 GeneCards、OMIM 及其在线采集代码。基于同门提交 `0e4abd0`，已移除两库采集器、HTML/官方导出转换、专用导入与中位数过滤、协助浏览器桥、验证码画布及 `/api/assist/*`、`/ws/assist` 接口。前端与新任务仅支持 Open Targets 数据查询。
 
-当前真实边界：BATMAN-TCM v2.0 在本地，可生成药材—成分—靶点；GeneCards/OMIM 疾病索引在本机缺失或不足。在线采集编排已经放到 discovery 的第三阶段，能够在采集完成后生成本次运行专用索引，不覆盖全局索引；采集失败会保留产物并将阶段置为 blocked。
+保留 BATMAN 本地查询、Open Targets GraphQL API 与 Parquet 快照、通用 `associations.csv` 导入、双流水线、网络与富集功能。没有增加新数据库，也没有下载研究数据或改动正式研究阈值。
 
-关键卡点：现有 GeneCards/OMIM 采集器仍按疾病关键词读取。正式目标是从 BATMAN 靶点自动发现疾病，不能要求研究者预先输入疾病。因此，下一步必须核实并实现 GeneCards/OMIM 的基因→疾病接口、官方 API 或合规批量疾病目录；在此之前，疾病关键词只能作为限定范围工程测试入口，不能宣称完成全疾病反查。OMIM 授权、GeneCards 登录/反爬和真实站点端到端采集仍待复测。
+本地原始数据、登录资料、SQLite 索引与历史运行保持原样。旧 schema 1/2 索引仍可读，来源字段不会被改成 Open Targets；新建索引只走通用批次。旧任务若启用已删除的在线来源，会明确 blocked 并提示保存新任务，不静默切换数据来源。查看历史结果不需要恢复旧采集器。
 
-验证记录：调整 `TEMP/TMP` 到仓库可写目录后，协助、任务、引擎相关测试 38 项通过；全量测试在默认 Windows 临时目录下受到权限错误影响，不能把该环境错误当成代码通过或失败。
+清理移除了评分中的 GeneCards 专用归一分值组件；新计算标为 `heuristic_v2`，沿用原权重，`evidence_quality` 仅使用 BATMAN known 占比，无证据则 null 并剔除。Open Targets 原始分数保留展示，不自动变成疗效概率。历史 `heuristic_v1` 报告不重写。该启发式仍需研究评审，不是老师要求的临床治疗置信度。
 
-## 2026-09-24 协助画布 WebSocket 404 修复
+## 当前流程
 
-合作者实机发现的"画布黑屏、/ws/assist 返回 404"卡点已定位并修复：**uvicorn 的 WebSocket 支持依赖 `websockets` 包，此前未写入 requirements.txt**——开发机若用 `uvicorn` 裸装（无 websockets）则 WS 握手失败；测试走 TestClient 不经真实 WS，因此 200+ 项测试全绿也暴露不了。修复：`requirements.txt` 增加 `websockets>=15`；`server/app.py` 启动时缺包直接报错提示安装；`scripts/doctor.py` 检查列表同步。真实协议栈验证（2026-09-24，本机 8766 端口真实 uvicorn + websockets 客户端）：无会话连接收到 idle 状态 → 启动协助会话 → 收到 12KB JPEG 二进制帧（魔数校验通过）→ 正常关闭。另注：404 也可能来自旧进程加载旧代码——重启服务前核验进程路径与命令行。
+`discovery`：数据预检 → BATMAN 药材成分靶点解析 → 疾病查询 → 程序验收与报告。
 
-## 2026-09-23 济川煎反查口径修正
+- 未启用数据查询时读取已配置的本地 SQLite 疾病索引；缺索引明确 blocked。
+- `online_collect=true` 启用 Open Targets 查询。疾病范围为空时输入 BATMAN 唯一靶点；填写范围时按疾病查询靶点。
+- `PHARM_OPEN_TARGETS_MODE=local` 读取本地快照；默认 `online` 使用 GraphQL。字段名称 `online_collect` 为现有任务协议保留，本地模式不联网。
+- 查询结果生成本次运行专用索引；存在基础库时复制扩展，不覆盖基础库。查询失败保留中间产物，提示检查连接或快照配置后恢复。
+- 现有试验选择规则为 Top-100、score≥0.2；这是同门试验默认，不能宣称已确认的正式研究口径。
 
-济川煎真实运行 `2026-09-23T103851_0000_82015e` 的疾病反查程序产物本身保留完整：输入靶点 2337 个，命中唯一靶点 2178 个，未命中 159 个，证据行 7472 行。此前疾病发现 Agent 将 `matched_count`（去重后的唯一匹配基因数）与 GeneCards/OMIM 的原始 `evidence_row_count` 当作必须相等，导致多个疾病被误报不一致并使阶段降为 partial。
+`analysis`：选择候选疾病 → 共同靶点 → STRING/CytoNCA 网络与 DAVID 富集 → 验收。数据库关联、网络指标、富集与启发式分数均不等于临床疗效，`scientific_complete` 恒 false。
 
-现行口径在结果和 Agent 提示词中显式区分：`matched_count` 与 `unique_evidence_gene_count` 都是唯一基因数；`evidence_row_count` 是原始证据行数，同一基因对应多条来源记录时可以更大。Agent 只核对唯一基因数与程序记录，不再要求两种数量相等。历史运行不改写；修正后的新运行应重新生成。
+## 关键位置
 
-合作者机器 BATMAN 数据获取日期记录为 2026-09-18，Agent 默认超时 900 秒；STRING/CytoNCA/DAVID 仅完成可达性核验（2026-09-22：API/首页 200、软件在位），正式冒烟（桥接计算/真实提交）仍待做，更不代表正式科研验收，`scientific_complete` 继续为 false。
-
-## 2026-09-24 人机协助静态验证页修复
-
-人机协助桥 `pharm/assist/bridge.py` 已修复静态 Cloudflare/OMIM 验证页黑屏问题。此前桥接只依赖 CDP screencast 的重绘事件，页面停留在静态验证页时可能没有首帧；现在在超过 1 秒未收到 CDP 帧时，自动调用 Playwright 截图发布 JPEG 兜底帧，并在收到正常 screencast 帧后恢复按帧推送。生产 headed Chromium 原始窗口移到屏幕外，用户只在工作台 canvas 中操作。该改动只影响画面显示，不绕过验证码或改变采集权限。
-
-本次针对性验证：`tests/test_assist.py`、`tests/test_server.py`、`tests/test_genecards_online.py`、`tests/test_omim_online.py` 共 **22 passed**；全量回归 **209 passed, 3 skipped**。相关提交 `1927fb6`、`282db0e`、`3d799df`、`2bc1c8f` 均已推送 `main`。
-
-当前边界保持不变：GeneCards/OMIM 采集器能够登记协助请求、等待用户完成验证并继续；用户必须在右侧内嵌协助画布中操作，完成后验证 cookies/storage state 会同步回原采集器，避免原页面重复验证。discovery 已有在线采集、产物导入和运行专用索引编排，但靶点驱动的疾病枚举和真实站点闭环仍需后续实现。
-
-### 历史暂停点（已解决）：实际工作台 WebSocket 返回 404
-
-2026-09-24 实机测试中，`/api/assist/status` 能返回 `running`，后台 headed Chromium 也能启动且原始窗口已移到屏幕外；但浏览器连接 `ws://127.0.0.1:8766/ws/assist` 时收到 **404**，画布保持黑色。当日排查方向（uvicorn WebSocket 支持、进程加载路径）正确，根因与修复见本节开头——**websockets 包缺失**，现已修复并实测通过。
-
-## 1. 项目是什么
-
-中药复方反向疾病发现工具。输入方剂（内置四方：温经汤/半夏白术天麻汤/济川煎/桃核承气汤，或自由药材组合）→ BATMAN-TCM v2.0 本地全量文件解析药材—成分—靶点 → 本地 SQLite 疾病索引反查候选疾病关联（带启发式置信度 heuristic_v1）→ 程序验收。对候选疾病可发起**机制分析链路**（pipeline="analysis"）：共同靶点 → STRING/CytoNCA 网络 → DAVID 富集 → 验收。
-
-**多 Agent 编排**：live 运行默认六个独立 Codex 会话（agents/*.md）核验程序产物；程序做全部计算，Agent 只核验与解释，结论不改程序产物。旧方向（药物×疾病交集的多 Agent 主流程）已于 2026-09-22 重构废弃，见 Git 历史（commit `6779567` 之前）。
-
-## 2. 当前状态
-
-- 双流水线均完成并经端到端工程验证（fixture 全链、合成数据 live、mock Agent 会话）；`pytest tests/ -q`：**208 passed, 4 skipped**（其中 1 个 skip 是"真实页面样本只在本机 local/ 有"的环境敏感用例——合作者机器有该样本时为 209 passed, 3 skipped，差异属预期）。
-- 如实未做：六会话**完整**真实 live 运行（单次真实 Codex 会话冒烟已于 2026-09-22 通过，gpt-5.6-luna，证据 runs/diagnostics/model_smoke_20260922.json）；STRING 桥接/CytoNCA 计算/DAVID 正式提交未验证（可达性 2026-09-22 实测：STRING API 200、DAVID 首页 200、Cytoscape 在 D:/Tools，runs/diagnostics/dependency_smoke_20260922.json）；研究数据目前只在合作者机器（济川煎真实运行即在该机完成），其他开发机需另行同步。
-- 未实现：靶点驱动的 GeneCards/OMIM 疾病枚举与真实站点闭环；四方组成出处待用户确认；疾病库覆盖取决于合规批次或官方接口。
-
-## 3. 关键资产位置
-
-| 内容 | 位置 |
+| 能力 | 入口 |
 |---|---|
-| 双流水线 DAG | `pharm/pipeline/scheduler.py`（GRAPHS：discovery / analysis） |
-| 执行引擎 | `pharm/pipeline/engine.py`（Runner：签名/reuse/finish/八阶段函数/Agent 编排） |
-| 核验角色提示词 | `agents/*.md`（六角色；内容哈希进阶段签名） |
-| Codex 适配器 | `pharm/agents/runtime.py`（execute/prepare_home；RESULT_SCHEMA 含可选 confidence） |
-| 置信度 | `pharm/discovery/query.py`（CONFIDENCE_WEIGHTS/_evidence_maps/_confidence/apply_confidence） |
-| 网络模块 | `pharm/network/`（string_local 选路、cytoscape 桥、metrics 度值核对）、`integrations/cytonca_bridge/` |
-| 富集模块 | `pharm/enrich/david.py`（validate_config 门禁 + run_david） |
-| 四方组成 | `pharm/batman/formulas.py`（source 待确认） |
-| 人机协助 | `pharm/assist/bridge.py`（WS 协议见模块文档字符串） |
-| Web 工作台 | `server/app.py` + `server/static/{index.html,app.js,style.css}` |
-| BATMAN 数据（本机无） | 团队机器 `data/batman/v2.0/`；配置 `configs/batman_data.local.json` |
-| 疾病索引（本机无） | 默认 `local/discovery/disease_index.sqlite`；配置 `configs/discovery_data.local.json` |
-| STRING 本地数据（可选） | 配置 `configs/string_data.local.json`（模板 string_data.example.json）；未配置时 API 回退（触网） |
+| 任务与双流水线 | `pharm/pipeline/tasks.py`、`scheduler.py`、`engine.py` |
+| Open Targets API | `pharm/diseases/open_targets.py` |
+| Open Targets 本地快照 | `pharm/diseases/open_targets_local.py` |
+| 第三阶段数据查询编排 | `pharm/diseases/online_pipeline.py`（仅 Open Targets） |
+| 通用批次导入 | `pharm/diseases/associations.py`、`pharm/core/imports.py` |
+| SQLite 查询与证据 | `pharm/discovery/query.py` |
+| Agent 核验 | `pharm/agents/runtime.py`、`agents/*.md` |
+| 网络与富集 | `pharm/network/`、`pharm/enrich/`、`integrations/cytonca_bridge/` |
+| 工作台 | `server/app.py`、`server/static/` |
 
-## 4. 常用命令
+Python `playwright` 仍供独立 Agent 核验运行时配置浏览器 MCP；疾病数据查询与工作台不再启动浏览器。`websockets` 已从工作台必需依赖中删除。
+
+本次全量回归为 `192 passed, 3 skipped`，Open Targets 本地 Parquet 测试已实际运行；API 和模型采用测试替身，未执行真实科研分析。JavaScript 语法检查通过。浏览器工具的本机页面访问权限检查不可用，视觉实测未完成。
+
+## 启动与配置
 
 ```powershell
-# 测试（必过再提交）
-.\.venv\Scripts\python.exe -m pytest tests/ -q
-# 启动工作台（默认 127.0.0.1:8766）
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe server/app.py --port 8766
-# 命令行运行 / 断点续跑
+.\.venv\Scripts\python.exe -m pytest tests/ -q
 .\.venv\Scripts\python.exe scripts/run_tasks.py --task <task_id>
 .\.venv\Scripts\python.exe scripts/run_tasks.py --resume <run_id>
-# 建疾病索引（自动识别批次类型；--db 在子命令之前）
-.\.venv\Scripts\python.exe -m pharm.discovery.query --db local/discovery/disease_index.sqlite prepare --batch <批次目录>
-# 直接反查（不经过 pipeline）
-.\.venv\Scripts\python.exe -m pharm.discovery.query query --genes TP53 EGFR --output local/discovery/my-lookup
-# 机制分析（编程入口；Web 上点候选疾病行的"机制分析"按钮）
-#   engine.start(pipeline="analysis", analysis={"discovery_run_id": <run_id>, "disease": <候选疾病>})
-# 构建 CytoNCA 桥接插件（需要本机 Cytoscape 与 JDK）
-.\.venv\Scripts\python.exe scripts/build_cytonca_bridge.py --cytoscape-home <Cytoscape目录> --jdk-home <JDK目录> --output local/cytonca-bridge.jar
-# 离线 HTML 报告
-.\.venv\Scripts\python.exe scripts/export_report.py --run <run_id>
-# 环境检查（依赖/浏览器/profile 存在性，不验证权限）
-.\.venv\Scripts\python.exe scripts/doctor.py
 ```
 
-## 5. 硬性约定（违反会被程序拦截或评审打回）
+BATMAN：`configs/batman_data.local.json`；已建疾病索引：`configs/discovery_data.local.json`；Open Targets：`configs/open_targets_data.local.json`。模板均在 `configs/`。数据、个人任务、运行与认证目录不上传 Git。
 
-1. **不编造、不顶替**：缺数据 = blocked + guidance + 证据保留；fixture 全程标注 synthetic_engineering、不进归档、强制不调模型。
-2. **参数即身份**（task_id 哈希）；**代码即签名**：input_signature 含任务、runtime、`pharm/**/*.py`、数据文件与 `agents/*.md` 提示词哈希——改代码或改提示词后 resume 重跑属预期。
-3. **程序计算，Agent 核验**：Agent 结论不改程序产物；failed 只降级 partial；会话错误记 agent_review.error。
-4. **门禁**：STRING 拓扑（network_topology）与 DAVID（david_enrichment）未显式确认即 blocked/partial，不冒充完成；CytoNCA 未成功时度值来源如实标 NetworkX。
-5. **scientific_complete 恒 false**；置信度是启发式（heuristic_v1），非统计检验；固定顺序非疗效排名。
-6. 直推 `main`，**push 前跑 `pytest tests/ -q`**。
+## 接续事项
 
-## 6. 已知坑（都踩过，别再踩）
+1. 数据库选型目前暂停；待用户决定后再接入治疗证据源，不继续 GeneCards/OMIM 登录与验证码排查。
+2. 对 Open Targets 做真实快照或 API 的小样本抽检，记录 ID 映射覆盖、direct/indirect 范围与试验选择规则。工程测试不能代替科学验收。
+3. 多 Agent 完整真实运行、STRING/CytoNCA/DAVID 本机正式验证与四方组成来源确认仍需继续，不能因本次清理而宣布完成。
+4. 旧阶段记录可从 Git 历史与本地运行查阅，保留原始日期、计数和 partial/blocked 状态。
 
-- **sync Playwright 不允许跨线程**；CDP screencast 只在重绘时出帧且必须逐帧 ack；输入回传用 page.mouse/keyboard（裸 CDP 键码不可靠）。
-- **execute_graph 就绪顺序是注册表声明序**（曾按字母序导致 enrichment 先于 network）——新增流水线时注意节点声明顺序即调度顺序。
-- **analysis 缺省继承来源运行模式**：fixture 来源 → fixture 分析（证据类型一致，且演示不触网）；要 live 分析须显式 `mode="live"`。
-- **Agent 证据裁剪**：`_bounded` 计数+样例，大结果集不进 prompt；Agent 会话文件写 `<attempt>/agent/`，仅 execution.json 公开。
-- **fixture 强制 agents=false**：任务传 agents=true 也会被压为 false（测试断言）。
-- **DAVID max_list_size 默认 400**：交集大的分析需显式配置并接受分批/另行适配。
-- Windows 下杀毒可能造成文件占用：写 JSON/归档已带重试。
-- Agent 核验默认超时为 900 秒（15 分钟），可用环境变量 `PHARM_AGENT_TIMEOUT` 临时覆盖；超时会保留程序产物并将阶段标记为 `partial`。
-
-## 7. 待办（按优先级）
-
-1. **数据同步**：BATMAN v2.0 全量文件与疾病索引批次到本机 → 六会话完整真实 live 运行 + 人工抽检（单次会话冒烟 2026-09-22 已通过）。
-2. **STRING/CytoNCA/DAVID 正式冒烟**：可达性 2026-09-22 已核验（200/200/软件在）；小样本桥接与正式提交留证仍待做。
-3. **数据同步**：BATMAN v2.0 全量文件与疾病索引批次到本机 → 真实 live 验证 + 人工抽检。
-4. **四方组成确认**：formulas.py 的 source 标注 pending_user_confirmation，待用户/文献确认。
-5. **靶点驱动在线发现**：核实 GeneCards/OMIM 许可与基因→疾病接口或合规批量目录；实现靶点查询、证据导入、索引重建和 resume；疾病关键词仅保留为限定范围测试入口。
-6. push 到远程前全量 pytest。
+遵循用户后续指令在 main 工作，中文提交；推送前全量 pytest 通过。当前阶段不自行确定正式研究参数或签署人工复核。

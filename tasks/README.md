@@ -23,6 +23,9 @@
 | batman_threshold | BATMAN predicted 行筛选阈值（严格大于），默认 0.84 |
 | mode | live（本地数据反查）或 fixture（合成工程验证），默认 live |
 | agents | 多 Agent 核验开关：live 默认 true（需 Codex 环境），fixture 强制 false；false 为纯程序调试开关 |
+| online_collect | 是否启用 Open Targets 查询，默认 false；可使用 API 或本地快照 |
+| online_sources | 仅支持 ["open_targets"]，新任务默认此来源 |
+| online_diseases | 可选疾病范围；空列表使用药材靶点发现候选疾病 |
 | composition | 组成来源记录：formula / herbs_override / custom_herbs（由程序写入） |
 
 使用 UTF-8，每个任务占一行，不添加注释或尾逗号。保留数值、布尔值、数组和 null 的 JSON 类型。
@@ -35,3 +38,5 @@
 - 修改任务内容（任何字段）等于创建新任务（新 task_id）；已有运行的 manifest 冻结当时的任务快照，不回写。
 - 恢复运行使用冻结快照；恢复只复用输入、代码、数据与产物哈希全一致的成功阶段。补齐本地数据后恢复，受阻阶段会自动重跑。
 - 完整输入要求见 [导入说明](../docs/IMPORTS.md)，实现缺口见 [项目进度](../docs/PROJECT_STATUS.md)。
+
+旧在线来源任务需保存为新任务；运行快照和历史结果不回写。网页不再提供登录、验证码或协助画布。

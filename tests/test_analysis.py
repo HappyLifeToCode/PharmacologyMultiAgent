@@ -100,7 +100,7 @@ def _custom_index(path, disease, genes):
                 "identifier_policy": "exact", "disease_identifier_policy": "labels",
                 "provenance": {"synthetic": True}, "source_sha256": {}, "limitation": "test"}
     _create_database(path, metadata,
-                     [(gene, disease, "genecards", i + 2, 5.0, "{}") for i, gene in enumerate(genes)], [])
+                     [(gene, disease, "synthetic", i + 2, 5.0, "{}") for i, gene in enumerate(genes)], [])
 
 
 def _craft_source_run(root, targets_genes, disease, disease_genes):

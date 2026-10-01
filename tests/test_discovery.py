@@ -28,8 +28,7 @@ def batch(tmp_path):
     write_json(directory / "provenance.json", {
         "sources": {
             "batman": dict(source, herbs=["药材甲", "药材乙"], threshold=0.84, threshold_confirmed=True),
-            "genecards": dict(source, diseases=list(discovery.DISEASES)),
-            "omim": dict(source, diseases=list(discovery.DISEASES)),
+            "associations": dict(source, diseases=list(discovery.DISEASES)),
         }, "mapping": {"confirmed": True, "method": "synthetic exact symbol", "version": "fixture",
                        "raw_files": ["raw.txt"]},
     })
@@ -38,15 +37,13 @@ def batch(tmp_path):
         {"herb": "药材乙", "compound_id": "C2", "gene_symbol": "EGFR", "score": "0.9", "evidence": "predicted"},
         {"herb": "药材乙", "compound_id": "C3", "gene_symbol": "AKT1", "score": "0.8", "evidence": "predicted"},
     ])
-    write_csv(directory / "genecards.csv", ["disease", "gene_symbol", "relevance_score"], [
-        {"disease": discovery.DISEASES[0], "gene_symbol": "TP53", "relevance_score": 100},
-        {"disease": discovery.DISEASES[0], "gene_symbol": "EGFR", "relevance_score": 1},
-        {"disease": discovery.DISEASES[1], "gene_symbol": "TP53", "relevance_score": 2},
-        {"disease": discovery.DISEASES[2], "gene_symbol": "AKT1", "relevance_score": 3},
-    ])
-    write_csv(directory / "omim.csv", ["disease", "gene_symbol"], [
-        {"disease": discovery.DISEASES[0], "gene_symbol": "TP53"},
-        {"disease": discovery.DISEASES[0], "gene_symbol": "TP53"},
+    write_csv(directory / "associations.csv", ["disease", "gene_symbol", "score", "source"], [
+        {"disease": discovery.DISEASES[0], "gene_symbol": "TP53", "score": 100, "source": "synthetic_a"},
+        {"disease": discovery.DISEASES[0], "gene_symbol": "EGFR", "score": 1, "source": "synthetic_a"},
+        {"disease": discovery.DISEASES[1], "gene_symbol": "TP53", "score": 2, "source": "synthetic_a"},
+        {"disease": discovery.DISEASES[2], "gene_symbol": "AKT1", "score": 3, "source": "synthetic_a"},
+        {"disease": discovery.DISEASES[0], "gene_symbol": "TP53", "source": "synthetic_b"},
+        {"disease": discovery.DISEASES[0], "gene_symbol": "TP53", "source": "synthetic_c"},
     ])
     return directory
 
@@ -69,14 +66,14 @@ def test_query_counts_duplicates_cross_disease_and_zero_matches(database):
     assert first["matched_genes"] == ["EGFR", "TP53"]
     assert first["input_coverage"] == pytest.approx(2 / 3)
     assert first["disease_coverage"] == 1
-    assert first["source_gene_counts"] == {"genecards": 2, "omim": 1}
+    assert first["source_gene_counts"] == {"synthetic_a": 2, "synthetic_b": 1, "synthetic_c": 1}
     assert len(first["evidence"]) == 4
     assert any(row["relevance_score"] == 1 for row in first["evidence"])
     assert second["matched_count"] == 1
     assert third["disease_coverage"] == 0
     assert third["matched_count"] == 0
     assert result["scientific_complete"] is False
-    assert result["dataset"]["selection"] == "all_valid_export_rows"
+    assert result["dataset"]["selection"] == "all_valid_association_rows"
     assert result["database_sha256"] == before == digest(database)
     assert result["herb_relations"] == []
 
@@ -116,7 +113,7 @@ def test_missing_database_does_not_create_empty_file(tmp_path):
 def test_build_tracks_sources_and_refuses_overwrite(batch, database):
     result = discovery.query(database, genes=["TP53"])
     hashes = result["dataset"]["source_sha256"]
-    assert hashes["genecards.csv"] == digest(batch / "genecards.csv")
+    assert hashes["associations.csv"] == digest(batch / "associations.csv")
     assert "raw.txt" in hashes and "provenance.json" in hashes
     with pytest.raises(ValueError, match="已存在"):
         discovery.build_database(batch, database)
@@ -126,15 +123,15 @@ def test_build_tracks_sources_and_refuses_overwrite(batch, database):
 def test_build_rejects_invalid_sources(batch, tmp_path, problem):
     provenance = json.loads((batch / "provenance.json").read_text(encoding="utf-8"))
     if problem == "scope":
-        provenance["sources"]["omim"]["diseases"] = ["Other"]
+        provenance["sources"]["associations"]["diseases"] = ["Other"]
     elif problem == "incomplete":
-        provenance["sources"]["genecards"]["complete"] = False
+        provenance["sources"]["associations"]["complete"] = False
     elif problem == "missing_raw":
         (batch / "raw.txt").unlink()
     else:
-        extra = {"duplicate": "Hyperthyroidism,TP53,100\n", "nan": "Thyroiditis,BAX,nan\n",
-                 "unknown_disease": "Other,BAX,1\n"}[problem]
-        with (batch / "genecards.csv").open("a", encoding="utf-8") as stream:
+        extra = {"duplicate": "Hyperthyroidism,TP53,100,synthetic_a\n", "nan": "Thyroiditis,BAX,nan,synthetic_a\n",
+                 "unknown_disease": "Other,BAX,1,synthetic_a\n"}[problem]
+        with (batch / "associations.csv").open("a", encoding="utf-8") as stream:
             stream.write(extra)
     write_json(batch / "provenance.json", provenance)
     path = tmp_path / "invalid.sqlite"
@@ -296,28 +293,23 @@ def test_predicted_targets_ignores_numbers_in_spaced_chemical_name(tmp_path):
 
 
 def test_generalized_disease_set_from_batch_values(batch, tmp_path):
-    """疾病集合来自批次 disease 列实际值，首次出现序（genecards.csv 先于 omim.csv）。"""
+    """疾病集合来自 associations.csv 实际值，按首次出现顺序保留。"""
     provenance = json.loads((batch / "provenance.json").read_text(encoding="utf-8"))
     diseases = ["Disease Alpha", "Disease Beta", "Disease Gamma"]
-    for name in ("genecards", "omim"):
-        provenance["sources"][name]["diseases"] = diseases
+    provenance["sources"]["associations"]["diseases"] = diseases
     write_json(batch / "provenance.json", provenance)
-    write_csv(batch / "genecards.csv", ["disease", "gene_symbol", "relevance_score"], [
-        {"disease": "Disease Beta", "gene_symbol": "TP53", "relevance_score": 5},
-        {"disease": "Disease Alpha", "gene_symbol": "EGFR", "relevance_score": 9},
-    ])
-    write_csv(batch / "omim.csv", ["disease", "gene_symbol"], [
+    write_csv(batch / "associations.csv", ["disease", "gene_symbol", "score"], [
+        {"disease": "Disease Beta", "gene_symbol": "TP53", "score": 5},
+        {"disease": "Disease Alpha", "gene_symbol": "EGFR", "score": 9},
         {"disease": "Disease Gamma", "gene_symbol": "AKT1"},
     ])
     path = tmp_path / "wide.sqlite"
     metadata = discovery.build_database(batch, path)
-    assert metadata["import_kind"] == "genecards_omim_batch"
+    assert metadata["import_kind"] == "generic_associations"
     assert metadata["diseases"] == ["Disease Beta", "Disease Alpha", "Disease Gamma"]
     result = discovery.query(path, genes=["TP53", "AKT1", "TNF"])
     assert [c["disease"] for c in result["candidates"]] == ["Disease Beta", "Disease Alpha", "Disease Gamma"]
-    assert result["candidates"][0]["matched_count"] == 1
-    assert result["candidates"][1]["matched_count"] == 0  # 零匹配如实显示
-    assert result["candidates"][2]["matched_count"] == 1
+    assert [c["matched_count"] for c in result["candidates"]] == [1, 0, 1]
     catalog = discovery.catalog(path)
     assert [d["name"] for d in catalog["diseases"]] == ["Disease Beta", "Disease Alpha", "Disease Gamma"]
 
@@ -334,6 +326,19 @@ def test_legacy_index_without_diseases_field_falls_back_to_distinct(database):
     assert discovery.catalog(database)["diseases"][0]["name"] == "Hyperthyroidism"
 
 
+def test_historical_source_labels_stay_readable_without_collectors(database):
+    """Removed adapters do not remove or relabel existing local evidence."""
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE associations SET source='genecards' WHERE source='synthetic_a'")
+        connection.execute("UPDATE associations SET source='omim' WHERE source='synthetic_b'")
+    before = digest(database)
+    result = discovery.query(database, genes=["TP53"])
+    sources = result["candidates"][0]["source_gene_counts"]
+    assert sources["genecards"] == sources["omim"] == 1
+    assert any(row["relevance_score"] == 100 for row in result["candidates"][0]["evidence"])
+    assert digest(database) == before
+
+
 @pytest.fixture
 def assoc_batch(tmp_path):
     directory = tmp_path / "assoc_batch"
@@ -347,9 +352,9 @@ def assoc_batch(tmp_path):
                     "raw_files": ["raw.txt"]},
     })
     write_csv(directory / "associations.csv", ["disease", "gene_symbol", "score", "source", "extra"], [
-        {"disease": "Disease Alpha", "gene_symbol": "TP53", "score": "12.5", "source": "genecards", "extra": "row-1"},
-        {"disease": "Disease Alpha", "gene_symbol": "EGFR", "score": "", "source": "omim", "extra": ""},
-        {"disease": "Disease Beta", "gene_symbol": "TP53", "score": "3", "source": "genecards", "extra": ""},
+        {"disease": "Disease Alpha", "gene_symbol": "TP53", "score": "12.5", "source": "synthetic_a", "extra": "row-1"},
+        {"disease": "Disease Alpha", "gene_symbol": "EGFR", "score": "", "source": "synthetic_b", "extra": ""},
+        {"disease": "Disease Beta", "gene_symbol": "TP53", "score": "3", "source": "synthetic_a", "extra": ""},
     ])
     return directory
 
@@ -366,7 +371,7 @@ def test_generic_associations_build_query_catalog(assoc_batch, tmp_path):
     assert [c["disease"] for c in result["candidates"]] == ["Disease Alpha", "Disease Beta"]
     alpha = result["candidates"][0]
     assert alpha["matched_count"] == 1
-    assert alpha["source_gene_counts"] == {"genecards": 1}
+    assert alpha["source_gene_counts"] == {"synthetic_a": 1}
     assert alpha["evidence"][0]["record"]["extra"] == "row-1"
     assert alpha["evidence"][0]["relevance_score"] == 12.5
     assert result["candidates"][1]["matched_count"] == 1
@@ -399,7 +404,7 @@ def test_generic_batch_provenance_rejected(assoc_batch, problem):
 def test_generic_batch_duplicate_rows_rejected(assoc_batch, tmp_path):
     from pharm.diseases.associations import build_associations_database
     with (assoc_batch / "associations.csv").open("a", encoding="utf-8") as stream:
-        stream.write("Disease Alpha,TP53,12.5,genecards,row-dup\n")
+        stream.write("Disease Alpha,TP53,12.5,synthetic_a,row-dup\n")
     with pytest.raises(ValueError, match="重复行"):
         build_associations_database(assoc_batch, tmp_path / "dup.sqlite")
     assert not (tmp_path / "dup.sqlite").exists()
@@ -408,9 +413,9 @@ def test_generic_batch_duplicate_rows_rejected(assoc_batch, tmp_path):
 def test_generic_batch_invalid_symbols_archived_not_invented(assoc_batch, tmp_path):
     from pharm.diseases.associations import build_associations_database
     with (assoc_batch / "associations.csv").open("a", encoding="utf-8") as stream:
-        stream.write("Disease Beta,tp53lower,9,genecards,\n")
+        stream.write("Disease Beta,tp53lower,9,synthetic_a,\n")
         # Disease Gamma 只有非法符号行 → 零有效关联，不进索引
-        stream.write("Disease Gamma,BAD GENE,1,genecards,\n")
+        stream.write("Disease Gamma,BAD GENE,1,synthetic_a,\n")
     path = tmp_path / "generic.sqlite"
     metadata = build_associations_database(assoc_batch, path)
     assert metadata["rejected_symbol_rows"] == 2
@@ -434,22 +439,18 @@ def test_generic_batch_disease_cap(assoc_batch, tmp_path):
         build_associations_database(assoc_batch, tmp_path / "cap.sqlite")
 
 
-def test_prepare_batch_auto_detects_and_rejects_mixed(assoc_batch, batch, tmp_path):
+def test_prepare_batch_accepts_generic_and_requires_associations_file(assoc_batch, batch, tmp_path):
     metadata = discovery.prepare_batch(assoc_batch, tmp_path / "a.sqlite")
     assert metadata["import_kind"] == "generic_associations"
     metadata = discovery.prepare_batch(batch, tmp_path / "b.sqlite")
-    assert metadata["import_kind"] == "genecards_omim_batch"
-    (assoc_batch / "genecards.csv").write_text(
-        "disease,gene_symbol,relevance_score\nDisease Alpha,TP53,1\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="无法识别批次类型"):
-        discovery.prepare_batch(assoc_batch, tmp_path / "c.sqlite")
+    assert metadata["import_kind"] == "generic_associations"
     empty = tmp_path / "empty_batch"
     empty.mkdir()
-    with pytest.raises(ValueError, match="缺少"):
+    with pytest.raises(ValueError, match="缺少 associations.csv"):
         discovery.prepare_batch(empty, tmp_path / "d.sqlite")
 
 
-# ---- 启发式置信度（heuristic_v1） ----
+# ---- 启发式置信度（heuristic_v2） ----
 
 def test_confidence_present_with_components_and_version(database):
     result = discovery.query(database, genes=["TP53", "EGFR", "ZZZTEST"])
@@ -458,7 +459,7 @@ def test_confidence_present_with_components_and_version(database):
         assert 0.0 <= confidence["value"] <= 1.0
         assert set(confidence["components"]) == {"match_score", "input_coverage",
                                                  "disease_coverage", "evidence_quality"}
-        assert confidence["formula_version"] == "heuristic_v1"
+        assert confidence["formula_version"] == "heuristic_v2"
         assert "启发式" in confidence["note"]
 
 
@@ -479,24 +480,15 @@ def test_evidence_rows_are_distinct_from_unique_matched_genes(database):
 
 
 def test_confidence_matches_hand_calculated_values(database):
-    """对拍：手工按 heuristic_v1 公式计算的预期值。
-
-    索引：Hyperthyroidism 有 TP53(100)+EGFR(1)（genecards）与 TP53×2（omim），
-    Hypothyroidism 有 TP53(2)，Thyroid cancer 有 AKT1(3)；索引 BATMAN 表内
-    TP53=known、EGFR=predicted；genecards 最大分值 100。输入 TP53,EGFR。
-    """
+    """v2 保留原权重；证据质量仅取 BATMAN known 占比，关联分值只展示。"""
     import math
     result = discovery.query(database, genes=["TP53", "EGFR"])
     hyper, hypo, cancer = result["candidates"]
-    # Hyper：match=ln3/ln3=1，input_cov=1，disease_cov=2/2=1，
-    # quality=(known占比 1/2 + 分值均值 (100+1)/2/100) / 2 = 0.5025
     assert hyper["confidence"]["components"]["match_score"] == pytest.approx(1.0)
-    assert hyper["confidence"]["components"]["evidence_quality"] == pytest.approx(0.5025)
-    assert hyper["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 + 0.2 * 0.5025, abs=2e-4)
-    # Hypo：match=ln2/ln3，input_cov=0.5，disease_cov=1，quality=(1.0 + 2/100)/2=0.51
-    expected = (0.3 * math.log1p(1) / math.log1p(2) + 0.3 * 0.5 + 0.2 * 1.0 + 0.2 * 0.51)
+    assert hyper["confidence"]["components"]["evidence_quality"] == pytest.approx(0.5)
+    assert hyper["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 + 0.2 * 0.5, abs=2e-4)
+    expected = 0.3 * math.log1p(1) / math.log1p(2) + 0.3 * 0.5 + 0.2 + 0.2
     assert hypo["confidence"]["value"] == pytest.approx(expected, abs=2e-4)
-    # 零匹配：value=0.0，组件如实（quality 无数据为 None）
     assert cancer["matched_count"] == 0
     assert cancer["confidence"]["value"] == 0.0
     assert cancer["confidence"]["components"]["evidence_quality"] is None
@@ -505,7 +497,7 @@ def test_confidence_matches_hand_calculated_values(database):
 def test_confidence_excludes_null_disease_coverage():
     candidate = {"matched_genes": ["TP53"], "matched_count": 1, "input_coverage": 0.5,
                  "disease_coverage": None, "evidence": []}
-    confidence = discovery._confidence(candidate, 2, {"TP53"}, set(), None)
+    confidence = discovery._confidence(candidate, 2, {"TP53"}, set())
     assert confidence["components"]["disease_coverage"] is None
     # 剔除后按剩余权重归一：0.3*ln2/ln3 + 0.3*0.5 + 0.2*1.0（known 占比）除以 0.8
     import math
@@ -516,8 +508,8 @@ def test_confidence_excludes_null_disease_coverage():
 
 def test_confidence_known_evidence_outranks_predicted():
     base = {"matched_count": 1, "input_coverage": 0.5, "disease_coverage": 0.5, "evidence": []}
-    known = discovery._confidence({**base, "matched_genes": ["AAA"]}, 2, {"AAA"}, set(), None)
-    predicted = discovery._confidence({**base, "matched_genes": ["AAA"]}, 2, set(), {"AAA"}, None)
+    known = discovery._confidence({**base, "matched_genes": ["AAA"]}, 2, {"AAA"}, set())
+    predicted = discovery._confidence({**base, "matched_genes": ["AAA"]}, 2, set(), {"AAA"})
     assert known["components"]["evidence_quality"] == 1.0
     assert predicted["components"]["evidence_quality"] == 0.0
     assert known["value"] > predicted["value"]
@@ -530,19 +522,18 @@ def test_confidence_in_csv_and_report(database, tmp_path):
     header = (output / "candidates.csv").read_text(encoding="utf-8-sig").splitlines()[0]
     assert "confidence" in header.split(",")
     report = (output / "report.md").read_text(encoding="utf-8")
-    assert "置信度" in report and "heuristic_v1" in report
+    assert "置信度" in report and "heuristic_v2" in report
     assert "非统计检验" in report
 
 
 def test_confidence_on_generic_associations_index(assoc_batch, tmp_path):
-    """通用批次无 BATMAN 表：known 组件剔除，relevance 组件用 genecards 分值。"""
+    """缺少 BATMAN 证据时 quality 为 null；不同来源分值不会被混用。"""
     from pharm.diseases.associations import build_associations_database
     path = tmp_path / "generic.sqlite"
     build_associations_database(assoc_batch, path)
     result = discovery.query(path, genes=["TP53"])
     alpha, beta = result["candidates"]
-    # 单输入：match=1、input_cov=1；Alpha disease_cov=1/2，quality=12.5/12.5=1.0
-    assert alpha["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 * 0.5 + 0.2 * 1.0, abs=2e-4)
-    # Beta：disease_cov=1/1=1.0，quality=3/12.5=0.24
-    assert beta["confidence"]["components"]["evidence_quality"] == pytest.approx(0.24)
-    assert beta["confidence"]["value"] == pytest.approx(0.3 + 0.3 + 0.2 + 0.2 * 0.24, abs=2e-4)
+    assert alpha["confidence"]["components"]["evidence_quality"] is None
+    assert alpha["confidence"]["value"] == pytest.approx((0.3 + 0.3 + 0.2 * 0.5) / 0.8, abs=2e-4)
+    assert beta["confidence"]["components"]["evidence_quality"] is None
+    assert beta["confidence"]["value"] == 1.0
