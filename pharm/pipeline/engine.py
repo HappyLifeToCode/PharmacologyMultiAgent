@@ -593,9 +593,10 @@ class Runner:
                 else:
                     index = _availability(self.task).get("discovery_index", {})
                     if self.task.get("online_collect"):
+                        scope = "、".join(self.task["online_diseases"]) or "未填写疾病范围"
                         self.event(role, "online_collection.started",
                                    "第三阶段自动采集疾病：%s（来源：%s）" % (
-                                       "、".join(self.task["online_diseases"]), "+".join(self.task["online_sources"])))
+                                       scope, "+".join(self.task["online_sources"])))
                         try:
                             herb_targets = read_json(self.directory / self.manifest["verified_targets"]["herb_targets"])
                             base_database = index.get("database") if index.get("available") else None
@@ -603,10 +604,13 @@ class Runner:
                                 self.task, directory / "online_collection", base_database, herb_targets)
                             database = Path(online["database"])
                             self.manifest["discovery_database"] = str(database)
+                            counts = online["counts"]
+                            source_summary = "、".join(
+                                "%s %d 行" % (name, counts.get(name, 0))
+                                for name in self.task["online_sources"])
                             self.event(role, "online_collection.completed",
-                                       "在线采集与建库完成：GeneCards %d 行、OMIM %d 行，重复 %d 行" % (
-                                           online["counts"]["genecards"], online["counts"]["omim"],
-                                           online["counts"]["duplicates"]))
+                                       "在线采集与建库完成：%s，重复 %d 行" % (
+                                           source_summary, counts.get("duplicates", 0)))
                         except Exception as exc:
                             guidance = "在线采集未完成，已保留中间产物；完成登录/人机验证后可恢复第三阶段。"
                             self.event(role, "online_collection.error", str(exc))
@@ -644,8 +648,13 @@ class Runner:
             if self.manifest["mode"] == "fixture":
                 findings.append("合成工程验证索引与靶点，非真实疾病关联")
             self.event(role, "tool.succeeded", summary)
+            stage_artifacts = ["reverse/result.json", "reverse/candidates.csv", "reverse/evidence.csv", "reverse/report.md", "reverse/manifest.json"]
+            if self.task.get("online_collect"):
+                # Keep the online collection ledger visible and hash-checked;
+                # raw pages remain inside the archived attempt directory.
+                stage_artifacts.append("online_collection/online_collection.json")
             stage_result = {"status": "succeeded", "summary": summary, "blockers": [], "findings": findings,
-                            "artifacts": ["reverse/result.json", "reverse/candidates.csv", "reverse/evidence.csv", "reverse/report.md", "reverse/manifest.json"]}
+                            "artifacts": stage_artifacts}
             stage_result = self._maybe_agent_review(role, stage_result, directory, {
                 "input_count": result["input_count"], "matched_input_count": result["matched_input_count"],
                 "chunking": result.get("chunking", {"chunked": False}),

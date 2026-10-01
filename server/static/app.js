@@ -106,6 +106,7 @@ function taskBodyFromForm() {
     online_sources: [
       $("source-genecards").checked ? "genecards" : null,
       $("source-omim").checked ? "omim" : null,
+      $("source-open-targets").checked ? "open_targets" : null,
     ].filter(Boolean),
   };
   const formula = $("formula-select").value;
@@ -166,6 +167,7 @@ function selectTask(task) {
   const onlineSources = task.online_sources || ["genecards", "omim"];
   $("source-genecards").checked = onlineSources.includes("genecards");
   $("source-omim").checked = onlineSources.includes("omim");
+  $("source-open-targets").checked = onlineSources.includes("open_targets");
   $("notes-input").value = task.research_notes || "";
   $("selected-task-actions").hidden = false;
   $("run-task-message").textContent = "";

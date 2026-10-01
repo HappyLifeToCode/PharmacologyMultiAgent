@@ -30,13 +30,14 @@
       </select>
     </label>
     <label class="inline-check"><input id="online-collect" type="checkbox"> 本次任务自动在线采集疾病数据</label>
-    <label>在线采集疾病范围（可选；留空时由药材靶点自动反查）
-      <textarea id="online-diseases-input" rows="4" spellcheck="false" placeholder="例如：Hyperthyroidism"></textarea>
+    <label>在线采集疾病范围（GeneCards/OMIM 或 Open Targets 疾病驱动模式；只选 Open Targets 且留空时使用 BATMAN 靶点反查；每行一个）
+      <textarea id="online-diseases-input" rows="4" spellcheck="false" placeholder="例如：Hyperthyroidism&#10;Rheumatoid arthritis"></textarea>
     </label>
     <label>在线来源
       <span class="source-checks">
         <label><input id="source-genecards" type="checkbox" checked> GeneCards</label>
         <label><input id="source-omim" type="checkbox" checked> OMIM</label>
+        <label><input id="source-open-targets" type="checkbox"> Open Targets</label>
       </span>
     </label>
     <label>研究说明

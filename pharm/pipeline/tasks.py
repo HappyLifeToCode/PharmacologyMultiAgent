@@ -78,8 +78,8 @@ def prepare_task(body):
     # reverse-discovery path is target-driven and must not require the user to
     # know the diseases in advance.
     online_sources = body.get("online_sources", ["genecards", "omim"])
-    if not isinstance(online_sources, list) or not online_sources or any(source not in ("genecards", "omim") for source in online_sources):
-        raise ValueError("online_sources 只能包含 genecards、omim，且不能为空")
+    if not isinstance(online_sources, list) or not online_sources or any(source not in ("genecards", "omim", "open_targets") for source in online_sources):
+        raise ValueError("online_sources 只能包含 genecards、omim、open_targets，且不能为空")
     online_sources = list(dict.fromkeys(online_sources))
     task = {"formula": formula, "herbs": herbs, "research_notes": notes.strip(),
             "batman_threshold": float(threshold), "mode": mode, "composition": composition,

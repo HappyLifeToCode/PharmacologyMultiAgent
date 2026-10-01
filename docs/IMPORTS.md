@@ -47,6 +47,81 @@ provenance.json     sources.associations + mapping
 
 批次目录有 `associations.csv` 走通用通道；有 `genecards.csv`/`omim.csv` 走三源通道；**两类文件共存时报错而不是猜测**。输出索引必须不存在（不覆盖）；来源修订建新版文件。
 
+## Open Targets 试验批次
+
+Open Targets 目前作为 GeneCards/OMIM 的可选来源进行对照测试。工作台的
+“在线来源”可单独勾选 Open Targets，并根据输入选择方向：填写疾病关键词时走
+与 GeneCards 一致的疾病 → 基因；只勾选 Open Targets 且疾病范围留空时，使用
+BATMAN 靶点 → 可能疾病，满足方剂反向疾病发现需求。导入 CSV 使用标准疾病 ID
+（例如 `MONDO_0005233 | non-small cell lung carcinoma`）作为 disease 键，
+Ensembl target ID、疾病 ID 和 datasource scores 保存在 `extra` 字段。
+
+测试时应明确记录选择规则；下面示例只取每个疾病得分最高的 100 个基因且分数不少于
+0.2，原始完整分页结果仍保留在 `raw/open_targets_responses.jsonl`：
+
+```powershell
+$env:PYTHONPATH = "D:\PharmacologyMultiAgent\local\python_packages;$env:PYTHONPATH"
+C:\Users\Ye\anaconda3\python.exe -m pharm.diseases.open_targets collect `
+  --diseases "Hyperthyroidism" "Rheumatoid arthritis" `
+  --output local\open_targets_disease_pilot `
+  --page-size 1000 `
+  --top-k-per-disease 100 `
+  --min-score 0.2
+
+C:\Users\Ye\anaconda3\python.exe -m pharm.discovery.query `
+  --db local\open_targets_disease_pilot\disease_index.sqlite `
+  prepare --batch local\open_targets_disease_pilot
+
+C:\Users\Ye\anaconda3\python.exe -m pharm.discovery.query `
+  --db local\open_targets_disease_pilot\disease_index.sqlite `
+  query --genes EGFR TP53 IL6 --output local\open_targets_disease_pilot\lookup
+```
+
+该试验批次验证的是本地导入和反查链路，不代表 Open Targets 与 GeneCards/OMIM
+结果等价。正式替换前还需完成基因映射覆盖率、疾病范围、候选重合率、版本和许可
+条款核验。
+
+工作台中勾选 Open Targets 时，填写疾病关键词会走疾病驱动模式；留空且只勾选
+Open Targets 会使用 BATMAN 阶段的全部唯一靶点进行可能疾病发现。GeneCards/OMIM
+仍必须填写疾病关键词。默认导入选择为疾病驱动时每个疾病 Top-100、靶点驱动时
+每个靶点 Top-100，association score 均不少于 0.2；完整分页仍写入原始响应。
+可在启动前用环境变量调整试验参数：
+`PHARM_OPEN_TARGETS_TOP_K`、`PHARM_OPEN_TARGETS_MIN_SCORE`、
+`PHARM_OPEN_TARGETS_PAGE_SIZE`、`PHARM_OPEN_TARGETS_REQUEST_DELAY`、
+`PHARM_OPEN_TARGETS_TIMEOUT`。
+
+### Open Targets 本地快照模式
+
+已下载的 Open Targets `26.09` 快照目录应包含 `target/`、`disease/` 和
+`association_overall_direct/` 三类 Parquet 数据，以及下载清单
+`manifest.json`。本地模式不访问 GraphQL，按输入疾病名称或 ID扫描完整
+direct 关联分区，再按同样的 `top_k_per_disease` 与 `min_score` 规则生成
+`associations.csv`。需要 `pyarrow`（已列入 `requirements.txt`）。
+
+```powershell
+$env:PHARM_OPEN_TARGETS_MODE = "local"
+$env:PHARM_OPEN_TARGETS_DATA_DIR = "D:\PharmacologyMultiAgent\data\open_targets\26.09"
+C:\Users\Ye\anaconda3\python.exe -m pharm.diseases.open_targets collect `
+  --mode local `
+  --data-dir $env:PHARM_OPEN_TARGETS_DATA_DIR `
+  --diseases "Hyperthyroidism" `
+  --output local\open_targets_local_disease_pilot `
+  --top-k-per-disease 100 `
+  --min-score 0.2
+```
+
+也可以复制 `configs/open_targets_data.example.json` 为 Git 忽略的
+`configs/open_targets_data.local.json`，在其中填写 `data_dir`；环境变量优先于
+该本地配置。
+
+本地快照保留发布版本、manifest SHA-256、关联分区清单、查询方向、未解析项和
+筛选阈值。三个基础数据集不提供 `datasourceScores`，因此该字段在本地
+模式中不伪造；如需分数据源分数，必须另行下载
+`association_by_datasource_direct`。本地模式使用 `association_overall_direct`
+的口径，不自动混入 indirect 关联；可用 `PHARM_OPEN_TARGETS_RELEASE` 固定期望
+的发布版本。靶点驱动模式只在“只选 Open Targets 且疾病范围为空”时由在线编排
+自动选择，不影响 GeneCards/OMIM 的疾病关键词流程。
+
 ## 导出辅助工具
 
 以下工具把人工取得的导出转换为批次所需 CSV，均核对完整性、不一致即报错（保留证据），不允许第一页冒充全表：
@@ -69,7 +144,7 @@ OMIM 在线采集（只使用本人有权访问的页面；遇到登录/验证�
 
 采集器只保存授权页面提供的 Gene Map 导出文件和原始 HTML，不把搜索摘要当作 OMIM 基因关联；下载文件仍需用上面的 `omim_export convert` 转换并经过批次校验。
 
-`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。遇到人机验证时，它会通过 `/api/assist/request` 把当前页面交给工作台；用户应在右侧内嵌协助画布中完成验证，点击“验证完成，继续采集”后，协助浏览器的 cookies/storage state 会同步回原采集器，再回到原疾病关键词继续采集。静态验证页不触发重绘时，协助桥会自动截图作为画布兜底，避免用户看到黑屏。当前 discovery pipeline 尚未自动调用该在线采集器，接入入口仍需由后续在线采集编排触发。
+`pharm/diseases/genecards_online.py` 是在线检索采集模块（headed Chromium 逐页读取并核对声明总数；Cloudflare 拦 headless）。遇到人机验证时，它会通过 `/api/assist/request` 把当前页面交给工作台；用户应在右侧内嵌协助画布中完成验证，点击“验证完成，继续采集”后，协助浏览器的 cookies/storage state 会同步回原采集器，再回到原疾病关键词继续采集。静态验证页不触发重绘时，协助桥会自动截图作为画布兜底，避免用户看到黑屏。在线编排现已支持 GeneCards、OMIM 和 Open Targets；Open Targets 有疾病→基因和 BATMAN 靶点→疾病两种明确输入分支，可按 `PHARM_OPEN_TARGETS_MODE` 选择 GraphQL 或本地 26.09 快照，两种模式都不需要人机验证。
 
 ## 导入后运行
 

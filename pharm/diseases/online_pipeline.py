@@ -1,8 +1,8 @@
-"""主流水线使用的在线疾病数据采集编排。
+"""主流水线使用的疾病数据采集编排。
 
-在线采集只在任务显式启用时执行。当前采集器支持限定疾病关键词测试；正式的
-靶点驱动疾病枚举仍需接入 GeneCards/OMIM 的合规基因→疾病接口或疾病目录。
-采集器遇到登录/验证码会通过工作台协助，完成后把结果写入本次运行专用的疾病索引，不覆盖原索引。
+GeneCards/OMIM 始终按疾病关键词采集。Open Targets 在填写疾病范围时执行疾病→基因，
+只选择 Open Targets 且留空时执行 BATMAN 靶点→可能疾病；两种来源模式都写入本次
+运行专用的疾病索引，不覆盖原索引。
 """
 from __future__ import annotations
 
@@ -14,8 +14,9 @@ from ..discovery import query as discovery
 from .genecards_online import collect_online as collect_genecards
 from .omim_export import combine_gene_map_exports
 from .omim_online import collect_online as collect_omim
+from .open_targets import collect_open_targets_by_diseases, collect_open_targets_by_targets
 
-SUPPORTED_SOURCES = ("genecards", "omim")
+SUPPORTED_SOURCES = ("genecards", "omim", "open_targets")
 
 
 def collect_and_extend(task, output_dir, database=None, herb_targets=None):
@@ -26,16 +27,14 @@ def collect_and_extend(task, output_dir, database=None, herb_targets=None):
     """
     diseases = list(task.get("online_diseases") or [])
     sources = list(task.get("online_sources") or SUPPORTED_SOURCES)
-    if not diseases:
-        raise RuntimeError(
-            "当前 GeneCards/OMIM 页面采集器只支持按疾病关键词读取；"
-            "目标驱动的基因→疾病接口尚未具备可核验的官方批量入口，"
-            "不能用空关键词假装完成全疾病反查。请先导入合规疾病目录，"
-            "或使用限定范围测试模式。")
     if any(source not in SUPPORTED_SOURCES for source in sources):
-        raise ValueError("online_sources 只支持 genecards、omim")
+        raise ValueError("online_sources 只支持 genecards、omim、open_targets")
     if not sources:
         raise ValueError("online_sources 不能为空")
+    if not diseases and any(source in sources for source in ("genecards", "omim")):
+        raise RuntimeError(
+            "GeneCards 和 OMIM 按疾病关键词采集；请先填写疾病范围。"
+            "只选择 Open Targets 且留空时，才会使用 BATMAN 靶点反查可能疾病。")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +57,31 @@ def collect_and_extend(task, output_dir, database=None, herb_targets=None):
         additions["omim"] = omim_csv
         records.append({"source": "omim", "directory": str(omim_dir), "meta": meta,
                         "exports": [str(path) for path in exports]})
+    if "open_targets" in sources:
+        ot_dir = output_dir / "open_targets"
+        try:
+            top_k = int(os.environ.get("PHARM_OPEN_TARGETS_TOP_K", "100"))
+        except ValueError as exc:
+            raise ValueError("PHARM_OPEN_TARGETS_TOP_K 必须是正整数") from exc
+        try:
+            min_score = float(os.environ.get("PHARM_OPEN_TARGETS_MIN_SCORE", "0.2"))
+        except ValueError as exc:
+            raise ValueError("PHARM_OPEN_TARGETS_MIN_SCORE 必须是 0—1 数值") from exc
+        page_size = min(1000, max(1, int(os.environ.get("PHARM_OPEN_TARGETS_PAGE_SIZE", "1000"))))
+        request_delay = max(0.0, float(os.environ.get("PHARM_OPEN_TARGETS_REQUEST_DELAY", "0.05")))
+        if diseases:
+            meta = collect_open_targets_by_diseases(
+                diseases, ot_dir, page_size=page_size, request_delay=request_delay,
+                top_k_per_disease=top_k, min_score=min_score)
+        else:
+            if not herb_targets or not herb_targets.get("genes"):
+                raise RuntimeError("Open Targets 靶点驱动模式需要 BATMAN 阶段产出的基因靶点")
+            meta = collect_open_targets_by_targets(
+                herb_targets["genes"], ot_dir, page_size=page_size,
+                request_delay=request_delay, top_k_per_target=top_k,
+                min_score=min_score)
+        additions["open_targets"] = ot_dir / "associations.csv"
+        records.append({"source": "open_targets", "directory": str(ot_dir), "meta": meta})
 
     collection = {"started_at": now(), "diseases": diseases, "sources": sources,
                   "assist_url": assist_url, "records": records}

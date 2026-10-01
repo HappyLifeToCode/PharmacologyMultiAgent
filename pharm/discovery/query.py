@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from ..core.common import ROOT, digest, now, read_json, write_json
 from ..core.imports import (
-    _load_provenance, _query_rows, _validate_mapping, _validate_source,
+    _load_provenance, _query_rows, _read_rows, _validate_mapping, _validate_source,
     load_herb, source_inputs,
 )
 from ..core.symbols import normalize_symbols
@@ -204,10 +204,11 @@ def extend_database(database, additions, output_database, collection=None):
                 existing = {(row[0], row[1], row[2]) for row in target.execute(
                     "SELECT gene, disease, source FROM associations")}
                 for source_name, path in sorted((additions or {}).items()):
-                    if source_name not in ("genecards", "omim"):
+                    if source_name not in ("genecards", "omim", "open_targets"):
                         raise ValueError("不支持的在线来源：" + str(source_name))
                     path = Path(path)
                     rows = _read_rows(path, {"disease", "gene_symbol"} | ({"relevance_score"} if source_name == "genecards" else set()))
+                    counts.setdefault(source_name, 0)
                     for line, row in enumerate(rows, 2):
                         disease = str(row.get("disease") or "").strip()
                         gene = normalize_symbols([str(row.get("gene_symbol") or "").strip()])[0]
@@ -221,6 +222,13 @@ def extend_database(database, additions, output_database, collection=None):
                                 raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
                             if not math.isfinite(score) or score < 0:
                                 raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
+                        elif source_name == "open_targets" and str(row.get("score") or "").strip():
+                            try:
+                                score = float(row.get("score"))
+                            except (TypeError, ValueError):
+                                raise ValueError("在线 Open Targets 数据第 %d 行分值无效" % line)
+                            if not math.isfinite(score) or score < 0:
+                                raise ValueError("在线 Open Targets 数据第 %d 行分值无效" % line)
                         key = (gene, disease, source_name)
                         if key in existing:
                             counts["duplicates"] += 1
@@ -234,8 +242,9 @@ def extend_database(database, additions, output_database, collection=None):
                         if disease not in metadata["diseases"]:
                             metadata["diseases"].append(disease)
                 metadata.setdefault("source_rows", {})
-                for name in ("genecards", "omim"):
-                    metadata["source_rows"][name] = int(metadata["source_rows"].get(name, 0)) + counts[name]
+                for name in counts:
+                    if name != "duplicates":
+                        metadata["source_rows"][name] = int(metadata["source_rows"].get(name, 0)) + counts[name]
                 metadata.setdefault("online_collections", []).append(collection or {})
                 target.execute("DELETE FROM metadata")
                 target.execute("INSERT INTO metadata(value) VALUES (?)", (json.dumps(metadata, ensure_ascii=False),))
@@ -260,11 +269,12 @@ def build_online_database(additions, output_database, herb_relations, herbs, col
     records, counts, diseases = [], {"genecards": 0, "omim": 0, "duplicates": 0}, []
     existing = set()
     for source_name, path in sorted((additions or {}).items()):
-        if source_name not in ("genecards", "omim"):
+        if source_name not in ("genecards", "omim", "open_targets"):
             raise ValueError("不支持的在线来源：" + str(source_name))
         required = {"disease", "gene_symbol"}
         if source_name == "genecards":
             required.add("relevance_score")
+        counts.setdefault(source_name, 0)
         rows = _read_rows(Path(path), required)
         for line, row in enumerate(rows, 2):
             disease = str(row.get("disease") or "").strip()
@@ -280,6 +290,13 @@ def build_online_database(additions, output_database, herb_relations, herbs, col
                     raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
                 if not math.isfinite(score) or score < 0:
                     raise ValueError("在线 GeneCards 数据第 %d 行分值无效" % line)
+            elif source_name == "open_targets" and str(row.get("score") or "").strip():
+                try:
+                    score = float(row.get("score"))
+                except (TypeError, ValueError):
+                    raise ValueError("在线 Open Targets 数据第 %d 行分值无效" % line)
+                if not math.isfinite(score) or score < 0:
+                    raise ValueError("在线 Open Targets 数据第 %d 行分值无效" % line)
             key = (gene, disease, source_name)
             if key in existing:
                 counts["duplicates"] += 1
@@ -301,7 +318,8 @@ def build_online_database(additions, output_database, herb_relations, herbs, col
         "schema_version": 1, "created_at": now(), "batch_name": "online_run",
         "import_kind": "online_disease_with_local_batman",
         "diseases": diseases, "declared_diseases": {name: diseases for name in additions or {}},
-        "herbs": list(herbs or []), "source_rows": {name: counts[name] for name in ("genecards", "omim")},
+        "herbs": list(herbs or []),
+        "source_rows": {name: count for name, count in counts.items() if name != "duplicates"},
         "herb_source_counts": {"relations": len(herb_rows), "unique_genes": len({r[2] for r in herb_rows})},
         "selection": "all_valid_online_rows", "identifier_policy": "exact_symbol_no_alias_mapping",
         "disease_identifier_policy": "source_query_labels_not_ontology_ids",
