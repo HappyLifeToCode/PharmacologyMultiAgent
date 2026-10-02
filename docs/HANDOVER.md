@@ -18,7 +18,7 @@
 
 - 未启用数据查询时读取已配置的本地 SQLite 疾病索引；缺索引明确 blocked。
 - `online_collect=true` 启用 Open Targets 查询。疾病范围为空时输入 BATMAN 唯一靶点；填写范围时按疾病查询靶点。
-- `PHARM_OPEN_TARGETS_MODE=local` 读取本地快照；默认 `online` 使用 GraphQL。字段名称 `online_collect` 为现有任务协议保留，本地模式不联网。
+- `PHARM_OPEN_TARGETS_MODE=local` 读取本地快照；当前默认也是 `local`，只有显式指定 `online` 才使用 GraphQL。字段名称 `online_collect` 为现有任务协议保留，本地模式不联网。
 - 查询结果生成本次运行专用索引；存在基础库时复制扩展，不覆盖基础库。查询失败保留中间产物，提示检查连接或快照配置后恢复。
 - 现有试验选择规则为 Top-100、score≥0.2；这是同门试验默认，不能宣称已确认的正式研究口径。
 

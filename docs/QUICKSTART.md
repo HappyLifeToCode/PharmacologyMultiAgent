@@ -4,7 +4,7 @@
 
 两条流水线：discovery（本地数据预检 → 药材靶点解析 → 疾病反向查询 → 程序验收与报告）与 analysis（候选疾病的机制分析：共同靶点 → 网络 → 富集 → 验收）。计算全程确定性程序；live 默认启用六个 Codex 核验会话（多 Agent 编排，程序计算·Agent 核验）；本地数据缺失时阶段 blocked 并给出指引。
 
-第三阶段可查询 Open Targets：留空疾病范围时输入 BATMAN 靶点，填写范围时按疾病查询；`PHARM_OPEN_TARGETS_MODE=local` 读取快照，默认使用 GraphQL API。GeneCards/OMIM 与人机协助采集已移除。
+第三阶段可查询 Open Targets：留空疾病范围时输入 BATMAN 靶点，填写范围时按疾病查询；默认读取本地快照，设置 `PHARM_OPEN_TARGETS_MODE=online` 才调用 GraphQL API。GeneCards/OMIM 与人机协助采集已移除。
 
 ## 1. 启动页面
 

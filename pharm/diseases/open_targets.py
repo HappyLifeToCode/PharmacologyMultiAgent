@@ -213,7 +213,10 @@ def collect_open_targets_by_diseases(diseases, output_dir, page_size: int = 1000
                                      mode: str | None = None,
                                      data_dir=None) -> dict:
     """Collect disease -> target associations in the Open Targets direction."""
-    selected_mode = (mode or os.environ.get("PHARM_OPEN_TARGETS_MODE", "online")).strip().lower()
+    # Open Targets is now a local-only source for the main workflow.  Keep
+    # ``online`` available as an explicit opt-in for diagnostics, but never
+    # fall back to GraphQL when the caller has not selected a mode.
+    selected_mode = (mode or os.environ.get("PHARM_OPEN_TARGETS_MODE", "local")).strip().lower()
     if selected_mode not in ("online", "local"):
         raise ValueError("PHARM_OPEN_TARGETS_MODE 只能是 online 或 local")
     if selected_mode == "local":
@@ -345,7 +348,10 @@ def collect_open_targets_by_targets(symbols, output_dir, page_size: int = 1000,
                                     mode: str | None = None,
                                     data_dir=None) -> dict:
     """Collect BATMAN target -> disease associations for formula discovery."""
-    selected_mode = (mode or os.environ.get("PHARM_OPEN_TARGETS_MODE", "online")).strip().lower()
+    # Open Targets is now a local-only source for the main workflow.  Keep
+    # ``online`` available as an explicit opt-in for diagnostics, but never
+    # fall back to GraphQL when the caller has not selected a mode.
+    selected_mode = (mode or os.environ.get("PHARM_OPEN_TARGETS_MODE", "local")).strip().lower()
     if selected_mode not in ("online", "local"):
         raise ValueError("PHARM_OPEN_TARGETS_MODE 只能是 online 或 local")
     if selected_mode == "local":

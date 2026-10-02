@@ -64,7 +64,7 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ## Open Targets 查询任务与兼容
 
-`online_collect`（布尔，默认 false）启用第三阶段数据查询；`online_sources` 仅支持 `["open_targets"]`；`online_diseases` 为可选范围，空列表使用 BATMAN 靶点。local 模式读快照，online 模式调用 GraphQL。原字段名称保留，local 不联网。
+`online_collect`（布尔，默认 false）启用第三阶段数据查询；`online_sources` 仅支持 `["open_targets"]`；`online_diseases` 为可选范围，空列表使用 BATMAN 靶点。默认 local 模式读取快照，只有显式选择 online 才调用 GraphQL。原字段名称保留，local 不联网。
 
 旧数据库采集与 `/api/assist/*`、`/ws/assist` 已移除。旧任务启用不支持来源时明确 blocked；历史任务与运行不回写。
 

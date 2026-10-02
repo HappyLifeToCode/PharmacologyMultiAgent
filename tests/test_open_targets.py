@@ -67,7 +67,8 @@ def test_collect_open_targets_by_disease_writes_generic_associations(monkeypatch
                       ]}}},
     ])
     monkeypatch.setattr(open_targets, "_graphql", lambda *args, **kwargs: next(responses))
-    result = open_targets.collect_open_targets_by_diseases(["Disease A"], tmp_path, page_size=1)
+    result = open_targets.collect_open_targets_by_diseases(
+        ["Disease A"], tmp_path, page_size=1, mode="online")
     assert result["associations"] == 2
     assert result["resolved"] == 1
     rows = (tmp_path / "associations.csv").read_text(encoding="utf-8-sig")
@@ -89,6 +90,19 @@ def test_local_open_targets_by_disease_reads_parquet(tmp_path):
     assert "MONDO_1 | Disease A,EGFR,0.8" in rows
     metadata = build_associations_database(tmp_path / "out", tmp_path / "out.sqlite")
     assert metadata["source_rows"]["associations"] == 1
+
+
+def test_open_targets_defaults_to_local_snapshot(monkeypatch, tmp_path):
+    snapshot = tmp_path / "snapshot"
+    _write_local_open_targets_snapshot(snapshot)
+    monkeypatch.delenv("PHARM_OPEN_TARGETS_MODE", raising=False)
+    result = open_targets.collect_open_targets_by_diseases(
+        ["Disease A"], tmp_path / "out", top_k_per_disease=1,
+        min_score=0.2, data_dir=snapshot)
+    assert result["associations"] == 1
+    provenance = json.loads(
+        (tmp_path / "out" / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["sources"]["associations"]["mode"] == "local_snapshot"
 
 
 @pytest.mark.parametrize("source", ["genecards", "omim", "unavailable_source"])
@@ -169,7 +183,8 @@ def test_collect_open_targets_by_target_writes_possible_diseases(monkeypatch, tm
                      ]}}},
     ])
     monkeypatch.setattr(open_targets, "_graphql", lambda *args, **kwargs: next(responses))
-    result = open_targets.collect_open_targets_by_targets(["EGFR"], tmp_path, page_size=1)
+    result = open_targets.collect_open_targets_by_targets(
+        ["EGFR"], tmp_path, page_size=1, mode="online")
     assert result["associations"] == 2
     assert result["resolved"] == 1
     rows = (tmp_path / "associations.csv").read_text(encoding="utf-8-sig")

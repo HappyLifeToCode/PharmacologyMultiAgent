@@ -34,7 +34,7 @@ provenance.json     另含 sources.batman（herbs、threshold、threshold_confir
 
 工作台“启用 Open Targets 数据查询”对应任务 `online_collect=true`，`online_sources` 仅支持 `["open_targets"]`。留空疾病范围时使用 BATMAN 靶点发现候选疾病；填写范围时执行疾病→靶点查询。结果写入本次运行专用 SQLite 文件，不覆盖全局索引。
 
-`PHARM_OPEN_TARGETS_MODE=online`（默认）调用 GraphQL API；`local` 读取本地 Parquet 快照。两者均不使用网页登录、验证码或协助画布。
+`PHARM_OPEN_TARGETS_MODE=local`（默认）读取本地 Parquet 快照；只有显式指定 `online` 才调用 GraphQL API。两者均不使用网页登录、验证码或协助画布。
 
 独立查询与建库：
 
