@@ -525,9 +525,20 @@ async function renderResults(manifest, stage, role) {
     return;
   }
   panel.hidden = false;
+  const allCandidates = Array.isArray(result.candidates) ? result.candidates : [];
+  const candidates = allCandidates.filter(isDiseaseCandidate);
+  $("candidate-disease-count").textContent = String(candidates.length);
+  $("candidate-filter-note").textContent = allCandidates.length > candidates.length
+    ? `已隐藏 ${allCandidates.length - candidates.length} 个表型或测量性状实体；完整关联仍保留在运行产物中。`
+    : "当前结果未发现表型或测量性状实体。";
   const tbody = $("candidates-table").querySelector("tbody");
   tbody.innerHTML = "";
-  for (const candidate of result.candidates || []) {
+  if (!candidates.length) {
+    const empty = document.createElement("tr");
+    empty.innerHTML = "<td colspan='7' class='empty-cell'>当前结果没有可显示的疾病实体。</td>";
+    tbody.appendChild(empty);
+  }
+  for (const candidate of candidates) {
     const row = document.createElement("tr");
     const coverage = (value) => (value == null ? "—" : (value * 100).toFixed(1) + "%");
     const confidence = candidate.confidence || {};
@@ -663,6 +674,14 @@ async function startAnalysis(disease, button) {
     alert(err.message);
     button.disabled = false;
   }
+}
+
+function isDiseaseCandidate(candidate) {
+  if (candidate && candidate.entity_type) return candidate.entity_type === "disease";
+  const identifier = String((candidate && candidate.disease) || "").split("|", 1)[0].trim().toUpperCase();
+  if (!identifier.includes("_")) return true; // historical local indexes use plain names
+  const prefix = identifier.split("_", 1)[0];
+  return ["MONDO", "ORPHANET", "DOID"].includes(prefix);
 }
 
 function renderEvidence(candidate) {

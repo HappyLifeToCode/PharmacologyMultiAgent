@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 import pharm.diseases.open_targets as open_targets
+import pharm.diseases.open_targets_local as open_targets_local
 import pharm.diseases.online_pipeline as online_pipeline
 from pharm.diseases.associations import build_associations_database
 
@@ -103,6 +104,17 @@ def test_open_targets_defaults_to_local_snapshot(monkeypatch, tmp_path):
     provenance = json.loads(
         (tmp_path / "out" / "provenance.json").read_text(encoding="utf-8"))
     assert provenance["sources"]["associations"]["mode"] == "local_snapshot"
+
+
+@pytest.mark.parametrize(
+    ("identifier", "parents", "expected"),
+    [("MONDO_0004975", [], "disease"),
+     ("EFO_0000180", ["MONDO_0005109"], "disease"),
+     ("EFO_0004338", ["EFO_0004324"], "phenotype"),
+     ("OBA_2052609", ["OBA_VT0005416"], "phenotype")],
+)
+def test_open_targets_entity_type_classification(identifier, parents, expected):
+    assert open_targets_local._entity_type_from_ontology(identifier, parents) == expected
 
 
 @pytest.mark.parametrize("source", ["genecards", "omim", "unavailable_source"])

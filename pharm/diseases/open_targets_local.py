@@ -135,6 +135,43 @@ def _load_diseases(data_dir: Path, entries: list[dict]) -> dict[str, str]:
     return diseases
 
 
+def _entity_type_from_ontology(disease_id: str, parents=None) -> str:
+    """Classify Open Targets entities for the workbench display.
+
+    MONDO/Orphanet entries are disease ontology terms. EFO terms are kept as
+    diseases only when their ontology parents point into a disease ontology;
+    measurements, traits, and other ontology entities remain phenotypes.
+    This is a display classification, not a treatment claim.
+    """
+    value = str(disease_id or "").strip()
+    prefix = value.split("_", 1)[0].casefold()
+    if prefix in {"mondo", "orphanet", "doid"}:
+        return "disease"
+    for parent in parents or []:
+        parent_prefix = str(parent).split("_", 1)[0].casefold()
+        if prefix == "efo" and parent_prefix in {"mondo", "orphanet", "doid"}:
+            return "disease"
+    return "phenotype"
+
+
+def _load_disease_entity_types(data_dir: Path, entries: list[dict]) -> dict[str, str]:
+    """Read the ontology fields needed to separate diseases from traits."""
+    parquet = _parquet()
+    entity_types: dict[str, str] = {}
+    for entry in entries:
+        reader = parquet.ParquetFile(data_dir / entry["dataset"] / entry["file"])
+        columns = ["id"]
+        if "parents" in reader.schema.names:
+            columns.append("parents")
+        for batch in reader.iter_batches(columns=columns, batch_size=100_000):
+            for row in batch.to_pylist():
+                disease_id = str(row.get("id") or "").strip()
+                if disease_id:
+                    entity_types[disease_id] = _entity_type_from_ontology(
+                        disease_id, row.get("parents"))
+    return entity_types
+
+
 def _clean_diseases(diseases):
     clean = []
     seen = set()
@@ -211,6 +248,7 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
     manifest, grouped = _load_manifest(local_dir)
     targets, _aliases, _approved_symbols = _load_targets(local_dir, grouped["target"])
     diseases_by_id = _load_diseases(local_dir, grouped["disease"])
+    disease_entity_types = _load_disease_entity_types(local_dir, grouped["disease"])
     resolved, unresolved = _resolve_local_diseases(clean_diseases, diseases_by_id)
     if not resolved:
         raise RuntimeError("Open Targets 本地数据未解析任何疾病关键词")
@@ -273,6 +311,7 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
                 "query": disease["query"],
                 "disease_id": disease_id,
                 "disease_name": disease["name"],
+                "entity_type": disease_entity_types.get(disease_id, "phenotype"),
                 "target_id": target_id,
                 "ensembl_id": target_id,
                 "approved_symbol": target["approved_symbol"],
@@ -388,6 +427,7 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
     manifest, grouped = _load_manifest(local_dir)
     targets, aliases, approved_symbols = _load_targets(local_dir, grouped["target"])
     diseases_by_id = _load_diseases(local_dir, grouped["disease"])
+    disease_entity_types = _load_disease_entity_types(local_dir, grouped["disease"])
 
     resolved = []
     unresolved = []
@@ -471,6 +511,7 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
                 "approved_symbol": targets[target_id]["approved_symbol"],
                 "disease_id": disease_id,
                 "disease_name": disease_name,
+                "entity_type": disease_entity_types.get(disease_id, "phenotype"),
                 "aggregation_type": row.get("aggregationType"),
                 "aggregation_value": row.get("aggregationValue"),
                 "association_score": row.get("associationScore"),

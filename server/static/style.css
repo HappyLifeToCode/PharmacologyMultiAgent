@@ -148,6 +148,39 @@ button.primary:hover { background: #0f7a74; }
 table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 th, td { border: 1px solid #d8d2c0; padding: 3px 7px; text-align: left; }
 th { background: #eef3f0; }
+.candidate-section {
+  margin: 10px 0 12px;
+  border: 1px solid #d8d2c0;
+  border-radius: 5px;
+  background: #fff;
+}
+.candidate-section > summary {
+  padding: 7px 10px;
+  cursor: pointer;
+  color: #152f3e;
+  font-weight: 600;
+  background: #eef3f0;
+  user-select: none;
+}
+.candidate-section > summary:hover { background: #e3ece8; }
+.section-count {
+  display: inline-block;
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 10px;
+  color: #fff;
+  background: #168d87;
+  font-size: 12px;
+  text-align: center;
+}
+.candidate-table-scroll {
+  max-height: 420px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.candidate-table-scroll table { min-width: 660px; }
+.candidate-section > .note { margin: 6px 10px; }
+.empty-cell { padding: 14px; color: #8a9296; text-align: center; }
 .blocker-list { color: #8a4b16; font-size: 13px; margin: 6px 0; padding-left: 20px; }
 .blocker-list li { padding: 1px 0; }
 .artifact-list { list-style: none; padding: 0; font-size: 13px; margin: 6px 0; }

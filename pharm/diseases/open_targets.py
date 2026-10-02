@@ -22,6 +22,12 @@ GRAPHQL_URL = os.environ.get(
     "https://api.platform.opentargets.org/api/v4/graphql",
 )
 SOURCE_URL = "https://platform.opentargets.org/"
+
+
+def _entity_type_from_id(identifier: str) -> str:
+    """Conservative entity label for explicit GraphQL-mode results."""
+    prefix = str(identifier or "").strip().split("_", 1)[0].casefold()
+    return "disease" if prefix in {"mondo", "orphanet", "doid"} else "phenotype"
 TARGET_SEARCH_QUERY = """
 query SearchTarget($queryString: String!) {
   search(queryString: $queryString, entityNames: ["target"]) {
@@ -282,6 +288,7 @@ def collect_open_targets_by_diseases(diseases, output_dir, page_size: int = 1000
                 "query": query,
                 "disease_id": disease["disease_id"],
                 "disease_name": disease["name"],
+                "entity_type": _entity_type_from_id(disease["disease_id"]),
                 "target_id": target_id,
                 "approved_symbol": symbol,
                 "association_score": score,
@@ -416,6 +423,7 @@ def collect_open_targets_by_targets(symbols, output_dir, page_size: int = 1000,
                 "direction": "target_to_disease",
                 "disease_name": disease_name,
                 "disease_id": disease_id,
+                "entity_type": _entity_type_from_id(disease_id),
                 "ensembl_id": target["ensembl_id"],
                 "approved_symbol": metadata.get("approvedSymbol") or symbol,
                 "association_score": score,

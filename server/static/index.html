@@ -72,12 +72,17 @@
     <h2>阶段详情</h2>
     <div id="stage-detail"><p class="placeholder">在中间栏选择一个阶段查看详情。</p></div>
     <div id="result-panel" hidden>
-      <h2>候选疾病</h2>
-      <table id="candidates-table">
-        <thead><tr><th>疾病关键词</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th><th>操作</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="note">置信度为程序启发式，非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击数值查看组件和计算版本。</p>
+      <details id="candidate-disease-section" class="candidate-section" open>
+        <summary>候选疾病 <span id="candidate-disease-count" class="section-count">0</span></summary>
+        <div class="candidate-table-scroll">
+          <table id="candidates-table">
+            <thead><tr><th>疾病</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="candidate-filter-note" class="note"></p>
+        <p class="note">此处仅显示来源本体标记为疾病的实体。置信度为程序启发式，非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击数值查看组件和计算版本。</p>
+      </details>
       <div id="evidence-panel" hidden>
         <h3 id="evidence-title"></h3>
         <table id="evidence-table">
@@ -92,6 +97,6 @@
 
   </section>
 </main>
-<script src="/assets/app.js?v=20261001-open-targets-only"></script>
+<script src="/assets/app.js?v=20261002-disease-list"></script>
 </body>
 </html>

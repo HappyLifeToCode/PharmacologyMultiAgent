@@ -313,6 +313,28 @@ def apply_confidence(database, candidates, input_count):
     return candidates
 
 
+def _candidate_entity_type(disease: str, rows: list[dict]) -> str:
+    """Return the source ontology classification for a candidate entity."""
+    for row in rows:
+        record = row.get("record") or {}
+        extra = record.get("extra") if isinstance(record, dict) else None
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except json.JSONDecodeError:
+                extra = None
+        if isinstance(extra, dict) and extra.get("entity_type") in {"disease", "phenotype"}:
+            return extra["entity_type"]
+    identifier = str(disease).split("|", 1)[0].strip().casefold()
+    prefix = identifier.split("_", 1)[0]
+    if prefix in {"mondo", "orphanet", "doid"}:
+        return "disease"
+    if prefix in {"efo", "oba", "hp", "go", "obi", "otar", "pato", "gsso"}:
+        return "phenotype"
+    # Historical local indexes use plain disease names without ontology IDs.
+    return "disease"
+
+
 def query(database, *, herbs=None, genes=None):
     if (herbs is None) == (genes is None):
         raise ValueError("请选择药材或输入靶点，两种输入方式只能选一种")
@@ -365,11 +387,13 @@ def query(database, *, herbs=None, genes=None):
         rows = [row for row in evidence if row["disease"] == disease]
         matched = sorted({row["gene_symbol"] for row in rows})
         all_matched.update(matched)
+        entity_type = _candidate_entity_type(disease, rows)
         per_source = {}
         for row in rows:
             per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
-            "disease": disease, "matched_genes": matched, "matched_count": len(matched),
+            "disease": disease, "entity_type": entity_type,
+            "matched_genes": matched, "matched_count": len(matched),
             # 一个基因可能在 Open Targets 中对应多条原始证据；两者不能直接相等。
             "unique_evidence_gene_count": len(matched),
             "evidence_row_count": len(rows),
@@ -401,7 +425,7 @@ def save_result(result, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / "result.json", result)
-    columns = ["disease", "matched_count", "unique_evidence_gene_count", "evidence_row_count",
+    columns = ["disease", "entity_type", "matched_count", "unique_evidence_gene_count", "evidence_row_count",
                "indexed_target_count", "input_coverage", "disease_coverage", "confidence"]
     with (output / "candidates.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")
