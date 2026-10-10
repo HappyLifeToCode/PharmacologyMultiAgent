@@ -66,6 +66,16 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 `online_collect`（布尔，默认 false）启用第三阶段数据查询；`online_sources` 仅支持 `["open_targets"]`；`online_diseases` 为可选范围，空列表使用 BATMAN 靶点。默认 local 模式读取快照，只有显式选择 online 才调用 GraphQL。原字段名称保留，local 不联网。
 
+### Open Targets 疾病实体与候选分层（2026-10 确认）
+
+- `disease_id`（Open Targets 原始 ID）是疾病实体主键；`disease_name` 仅用于展示；`exactSynonyms` 仅用于别名搜索与展示，不改变实体身份。
+- MONDO 只作为可选 `mondo_id` 映射字段（direct / dbxref / conflict / unmapped），不设为所有疾病的主键；没有 MONDO 映射的 EFO、HP、OBA、Orphanet 等实体必须保留。26.09 审计：45,896 条记录无 MONDO 冲突、无多记录共指（见 `local/open_targets_mondo_audit_20261009/`）。
+- 不按英文名称相似度自动合并疾病（heart failure 与 congestive heart failure、breast cancer 与 breast carcinoma 为不同 ID，必须并存）。
+- 父子疾病仅标记关系（`parent_candidate_ids` / `child_candidate_ids`），不合并分数，不删除任一实体。
+- 候选分层：完整层（全部候选与全部原始 direct association）→ 基础层（associationScore > 0.2）→ 严格层（>= 0.6）→ 展示层（entity_type == disease 后排序取 Top-50）；排序字段依次为 strict_supported、strict_support_target_count、support_target_count、max_association_score、score_sum、disease_id；Top-50 在 disease_id 聚合与实体过滤之后生成。
+- `top_k_per_target` / `top_k_per_disease` / `min_score` 只用于候选展示与排序，不删除完整层原始关联；启用这些过滤的批次 provenance 必须标记 `complete=false` 且 `raw_rows_complete=false`，不得称为完整层。
+- `associationScore` 是 Open Targets 关联强度分数，不是疗效概率，也不是临床适应症证据。
+
 旧数据库采集与 `/api/assist/*`、`/ws/assist` 已移除。旧任务启用不支持来源时明确 blocked；历史任务与运行不回写。
 
 `heuristic_v2` 沿用权重，evidence_quality 仅取 BATMAN known 占比；原始关联分值不参与评分，缺失组件剔除。历史 v1 报告保留原版本。

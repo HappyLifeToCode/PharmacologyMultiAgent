@@ -335,6 +335,146 @@ def _candidate_entity_type(disease: str, rows: list[dict]) -> str:
     return "disease"
 
 
+def _candidate_identity(disease: str, rows: list[dict]) -> dict:
+    """Extract Open Targets identity metadata without changing the source key."""
+    source_id, separator, source_name = str(disease).partition(" | ")
+    identity = {
+        "disease_id": source_id.strip() if separator else str(disease).strip(),
+        "disease_name": source_name.strip() if separator else str(disease).strip(),
+        "canonical_disease_id": source_id.strip() if separator else str(disease).strip(),
+        "canonical_name": source_name.strip() if separator else str(disease).strip(),
+        "aliases": [], "mondo_id": None, "mondo_mapping": None,
+        "ontology": None, "parents": [], "ancestors": [],
+    }
+    for row in rows:
+        record = row.get("record") or {}
+        extra = record.get("extra") if isinstance(record, dict) else None
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except json.JSONDecodeError:
+                extra = None
+        if not isinstance(extra, dict):
+            continue
+        for key in ("disease_id", "disease_name", "canonical_disease_id", "canonical_name",
+                    "mondo_id", "mondo_mapping", "ontology"):
+            if extra.get(key) not in (None, ""):
+                identity[key] = extra[key]
+        for key in ("aliases", "parents", "ancestors"):
+            values = extra.get(key)
+            if isinstance(values, list):
+                identity[key] = sorted({str(value) for value in values if str(value).strip()})
+        break
+    return identity
+
+
+def _association_score(row: dict):
+    value = row.get("relevance_score")
+    if value in (None, ""):
+        record = row.get("record") or {}
+        extra = record.get("extra") if isinstance(record, dict) else None
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except json.JSONDecodeError:
+                extra = None
+        if isinstance(extra, dict):
+            value = extra.get("association_score")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def build_candidate_layers(candidates, *, base_score=0.2, strict_score=0.6, top_n=50):
+    """Build transparent Open Targets candidate layers after raw evidence lookup."""
+    enriched = []
+    for candidate in candidates:
+        scores = [score for score in (_association_score(row) for row in candidate.get("evidence", []))
+                  if score is not None]
+        base_rows = [row for row in candidate.get("evidence", [])
+                     if (score := _association_score(row)) is not None and score > base_score]
+        strict_rows = [row for row in candidate.get("evidence", [])
+                       if (score := _association_score(row)) is not None and score >= strict_score]
+        item = dict(candidate)
+        item["max_association_score"] = max(scores) if scores else None
+        item["score_sum"] = round(sum(scores), 12) if scores else 0.0
+        item["support_target_count"] = len({row.get("gene_symbol") for row in base_rows})
+        item["strict_support_target_count"] = len({row.get("gene_symbol") for row in strict_rows})
+        item["strict_supported"] = bool(strict_rows)
+        enriched.append(item)
+    # 基础层/严格层不按实体类型过滤；disease 过滤只发生在最终展示层（top）
+    base = [item for item in enriched if item["support_target_count"] > 0]
+    strict = [item for item in enriched if item["strict_supported"]]
+    ranking = lambda item: (
+        -int(item["strict_supported"]),
+        -item["strict_support_target_count"],
+        -item["support_target_count"],
+        -(item["max_association_score"] or 0.0),
+        -item["score_sum"],
+        str(item.get("disease_id") or item.get("disease")),
+    )
+    # Top-N 在 disease_id 聚合（上游候选已是聚合态）与实体过滤之后生成
+    top = sorted((item for item in base if item.get("entity_type") == "disease"),
+                 key=ranking)[:max(1, int(top_n))]
+    return {
+        "complete": enriched,
+        "base": sorted(base, key=ranking),
+        "strict": sorted(strict, key=ranking),
+        "top": top,
+        "rules": {"complete": "全部候选与全部原始 evidence；Top-K/min_score 仅用于展示排序，不删除 direct association",
+                  "base_score": "> %.6g" % base_score,
+                  "strict_score": ">= %.6g" % strict_score,
+                  "top_n": int(top_n),
+                  "top_entity_filter": "entity_type == disease",
+                  "identity_key": "disease_id",
+                  "name_policy": "name_and_exactSynonyms_are_display_metadata",
+                  "hierarchy_policy": "parent/child 只标记关系，不合并分数，不删除实体"},
+    }
+
+
+def build_candidate_hierarchy(candidates):
+    """Mark parent/child relations between candidates via parents/ancestors.
+
+    Relations are recorded only; scores are never merged and no entity is
+    dropped (heart failure vs congestive heart failure stay separate when
+    their disease IDs differ).
+    """
+    by_id = {}
+    for candidate in candidates:
+        disease_id = str(candidate.get("disease_id") or "").strip()
+        if disease_id and disease_id not in by_id:
+            by_id[disease_id] = candidate
+    relations = []
+    for candidate in candidates:
+        disease_id = str(candidate.get("disease_id") or "").strip()
+        parent_set = {str(v).strip() for v in (candidate.get("parents") or []) if str(v).strip()}
+        ancestor_set = parent_set | {str(v).strip() for v in (candidate.get("ancestors") or []) if str(v).strip()}
+        parent_hits = sorted(pid for pid in parent_set if pid in by_id and pid != disease_id)
+        ancestor_hits = sorted(aid for aid in ancestor_set if aid in by_id and aid != disease_id)
+        candidate["parent_candidate_ids"] = parent_hits
+        child_hits = [other_id for other_id, other in by_id.items()
+                      if other_id != disease_id and disease_id in
+                      ({str(v).strip() for v in (other.get("parents") or [])} |
+                       {str(v).strip() for v in (other.get("ancestors") or [])})]
+        candidate["child_candidate_ids"] = sorted(child_hits)
+        candidate["related_candidate_ids"] = sorted(set(ancestor_hits) | set(child_hits))
+        candidate["is_parent_child_related"] = bool(candidate["related_candidate_ids"])
+        if parent_hits or child_hits:
+            relations.append({
+                "disease_id": disease_id,
+                "disease_name": candidate.get("disease_name") or candidate.get("disease"),
+                "parent_candidate_ids": parent_hits,
+                "child_candidate_ids": sorted(child_hits),
+                "source": {"parents": sorted(parent_set), "ancestors": sorted(ancestor_set)},
+            })
+    return {"identity_key": "disease_id",
+            "policy": "relations recorded from Open Targets parents/ancestors; "
+                      "no score merging, no entity deletion",
+            "relation_count": len(relations), "relations": relations}
+
+
 def query(database, *, herbs=None, genes=None):
     if (herbs is None) == (genes is None):
         raise ValueError("请选择药材或输入靶点，两种输入方式只能选一种")
@@ -388,11 +528,12 @@ def query(database, *, herbs=None, genes=None):
         matched = sorted({row["gene_symbol"] for row in rows})
         all_matched.update(matched)
         entity_type = _candidate_entity_type(disease, rows)
+        identity = _candidate_identity(disease, rows)
         per_source = {}
         for row in rows:
             per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
         candidates.append({
-            "disease": disease, "entity_type": entity_type,
+            "disease": disease, "entity_type": entity_type, **identity,
             "matched_genes": matched, "matched_count": len(matched),
             # 一个基因可能在 Open Targets 中对应多条原始证据；两者不能直接相等。
             "unique_evidence_gene_count": len(matched),
@@ -407,12 +548,16 @@ def query(database, *, herbs=None, genes=None):
         metadata["herb_catalog"] = [row for row in metadata["herb_catalog"] if row["herb"] in (herbs or [])]
     for candidate in candidates:
         candidate["confidence"] = _confidence(candidate, len(symbols), known, predicted)
+    layers = build_candidate_layers(candidates)
+    # 层级关系标记在 enriched 项上原地写入，complete/base/strict/top 共享同一批字典
+    layers["hierarchy"] = build_candidate_hierarchy(layers["complete"])
     return {
         "workflow": "five_disease_reverse_lookup_v1", "status": "succeeded", "scientific_complete": False,
         "created_at": now(), "limitation": LIMITATION, "input": {"herbs": herbs, "genes": symbols},
         "input_count": len(symbols), "matched_input_count": len(all_matched),
         "unmatched_genes": sorted(set(symbols) - all_matched), "herb_relations": relations,
-        "candidates": candidates, "dataset": metadata, "database_sha256": database_hash,
+        "candidates": candidates, "candidate_layers": layers,
+        "dataset": metadata, "database_sha256": database_hash,
         "stages": [
             {"id": "input_targets", "status": "succeeded", "count": len(symbols)},
             {"id": "local_reverse_lookup", "status": "succeeded", "count": len(evidence)},
@@ -425,13 +570,41 @@ def save_result(result, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / "result.json", result)
-    columns = ["disease", "entity_type", "matched_count", "unique_evidence_gene_count", "evidence_row_count",
-               "indexed_target_count", "input_coverage", "disease_coverage", "confidence"]
+    columns = ["disease", "disease_id", "disease_name", "canonical_disease_id", "canonical_name",
+               "mondo_id", "mondo_mapping", "ontology", "entity_type", "matched_count",
+               "unique_evidence_gene_count", "evidence_row_count", "indexed_target_count",
+               "input_coverage", "disease_coverage", "confidence"]
     with (output / "candidates.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")
         writer.writeheader()
         for candidate in result["candidates"]:
             writer.writerow({**candidate, "confidence": candidate.get("confidence", {}).get("value")})
+    layers = result.get("candidate_layers") or {}
+    layer_columns = columns + ["strict_supported", "strict_support_target_count",
+                               "support_target_count", "max_association_score", "score_sum",
+                               "parent_candidate_ids", "child_candidate_ids",
+                               "related_candidate_ids", "is_parent_child_related"]
+
+    def _layer_row(candidate):
+        row = {**candidate, "confidence": candidate.get("confidence", {}).get("value")}
+        for key in ("parent_candidate_ids", "child_candidate_ids", "related_candidate_ids"):
+            value = row.get(key)
+            row[key] = "|".join(value) if isinstance(value, list) else ""
+        return row
+
+    for filename, key in (("candidates_complete.csv", "complete"),
+                          ("candidates_base.csv", "base"),
+                          ("candidates_strict.csv", "strict"),
+                          ("candidates_top50.csv", "top")):
+        with (output / filename).open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, layer_columns, extrasaction="ignore")
+            writer.writeheader()
+            for candidate in layers.get(key, []):
+                writer.writerow(_layer_row(candidate))
+    if layers.get("hierarchy"):
+        write_json(output / "candidate_hierarchy.json",
+                   {**layers["hierarchy"], "rules": layers.get("rules")})
+
     columns = ["disease", "gene_symbol", "source", "source_file", "source_row", "relevance_score"]
     with (output / "evidence.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, columns, extrasaction="ignore")

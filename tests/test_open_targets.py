@@ -89,8 +89,19 @@ def test_local_open_targets_by_disease_reads_parquet(tmp_path):
     assert result["resolved"] == 1
     rows = (tmp_path / "out" / "associations.csv").read_text(encoding="utf-8-sig")
     assert "MONDO_1 | Disease A,EGFR,0.8" in rows
-    metadata = build_associations_database(tmp_path / "out", tmp_path / "out.sqlite")
-    assert metadata["source_rows"]["associations"] == 1
+    # top_k/min_score 只用于展示与排序，启用后不得声称完整层完整：
+    # provenance 必须标记 complete=false，且严格导入校验应拒绝该批次
+    provenance = result["provenance"]
+    assert provenance["sources"]["associations"]["complete"] is False
+    assert provenance["sources"]["associations"]["selection"]["raw_rows_complete"] is False
+    with pytest.raises(ValueError, match="complete"):
+        build_associations_database(tmp_path / "out", tmp_path / "out.sqlite")
+    # 不过滤的采集保留全量 direct association，可通过导入校验
+    result = open_targets.collect_open_targets_by_diseases(
+        ["Disease A"], tmp_path / "out_full", mode="local", data_dir=snapshot)
+    assert result["provenance"]["sources"]["associations"]["complete"] is True
+    metadata = build_associations_database(tmp_path / "out_full", tmp_path / "out_full.sqlite")
+    assert metadata["source_rows"]["associations"] == result["associations"]
 
 
 def test_open_targets_defaults_to_local_snapshot(monkeypatch, tmp_path):
