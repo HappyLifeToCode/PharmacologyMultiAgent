@@ -35,12 +35,18 @@ def collect_and_extend(task, output_dir, database=None, herb_targets=None):
     records = []
     if "open_targets" in sources:
         ot_dir = output_dir / "open_targets"
+        # 完整层默认不做 top_k/min_score 过滤（筛选只发生在候选分层）；
+        # 环境变量仅用于显式试验，启用后批次 provenance 标记 complete=false
+        top_k_raw = os.environ.get("PHARM_OPEN_TARGETS_TOP_K", "").strip()
+        min_score_raw = os.environ.get("PHARM_OPEN_TARGETS_MIN_SCORE", "").strip()
         try:
-            top_k = int(os.environ.get("PHARM_OPEN_TARGETS_TOP_K", "100"))
+            top_k = int(top_k_raw) if top_k_raw else None
         except ValueError as exc:
             raise ValueError("PHARM_OPEN_TARGETS_TOP_K 必须是正整数") from exc
+        if top_k is not None and top_k < 1:
+            raise ValueError("PHARM_OPEN_TARGETS_TOP_K 必须是正整数")
         try:
-            min_score = float(os.environ.get("PHARM_OPEN_TARGETS_MIN_SCORE", "0.2"))
+            min_score = float(min_score_raw) if min_score_raw else None
         except ValueError as exc:
             raise ValueError("PHARM_OPEN_TARGETS_MIN_SCORE 必须是 0—1 数值") from exc
         page_size = min(1000, max(1, int(os.environ.get("PHARM_OPEN_TARGETS_PAGE_SIZE", "1000"))))
