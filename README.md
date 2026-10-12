@@ -1,6 +1,6 @@
 # Pharmacology Multi-Agent
 
-中药复方 → BATMAN 本地成分/靶点 → 本地疾病索引反查候选疾病的可追溯研究工具。输入一个方剂（或自由药材组合），程序在本地数据中解析药材—成分—靶点关系，再用本地 SQLite 疾病索引反查"哪些疾病与这些靶点有关联"，输出候选疾病与逐条证据及透明启发式置信度。对候选疾病可继续做机制分析：共同靶点 → STRING/CytoNCA 网络 → DAVID 富集 → 验收。
+中药复方 → BATMAN 本地成分/靶点 → 本地疾病索引反查候选疾病的可追溯研究工具。输入一个方剂（或自由药材组合），程序在本地数据中解析药材—成分—靶点关系，再用本地 SQLite 疾病索引反查"哪些疾病与这些靶点有关联"，输出候选疾病与逐条证据及透明启发式置信度。工作台顶部另提供正向 Agent 对话框，可直接输入药材调用本地 BATMAN、Open Targets 和 Monarch 查询候选疾病。对候选疾病可继续做机制分析：共同靶点 → STRING/CytoNCA 网络 → DAVID 富集 → 验收。
 
 核心原则：**能本地化的全部本地化**——主链路是确定性程序；本地数据缺失时明确 blocked 并给出指引，不用合成数据顶替。**多 Agent 编排层**：live 运行默认启用六个独立 Codex 会话（协调/药材靶点/疾病发现/网络/富集/验收），程序做全部计算，Agent 只做核验与解释、结论不改程序产物。第三阶段默认查询 Open Targets 本地快照，只有显式指定 `online` 才调用 GraphQL；结果生成运行专用疾病索引；GeneCards/OMIM 采集与人机协助已于 2026-10-01 移除。
 
@@ -29,6 +29,8 @@ python -m venv .venv
 
 打开 [本机工作台](http://127.0.0.1:8766)。服务仅监听本机。也可使用 `scripts/start_demo.ps1`。
 
+工作台顶部的“正向 Agent：药材 → 候选疾病”对话框支持输入一个或多个药材，设置返回数量后直接查询。结果展示候选疾病、匹配靶点、来源证据和 `heuristic_v2` 排序分数；该分数不是治疗有效率或疗效概率。点击候选行可查看逐条 Open Targets/Monarch 证据。
+
 ### 3. 用 fixture 验证流程（无需数据）
 
 左侧"新建任务"选择一个内置方剂（如温经汤），运行方式选 **fixture（合成工程验证）**，点击"保存并启动"。数秒后四阶段全部 succeeded：中间栏阶段图变绿，点击"疾病反向查询"节点可在右栏看到候选疾病表与逐条证据。fixture 使用固定合成集合，全程不访问外网、不产生药理结论。
@@ -48,7 +50,7 @@ live 运行默认启用多 Agent 核验（任务 `agents=true`），需要可用
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-测试不需要研究数据、真实模型或外网；多 Agent 编排用 mock 会话，Open Targets API 用合成响应、本地模式用合成 Parquet 验证。最新结果见项目进度。
+测试不需要研究数据、真实模型或外网；多 Agent 编排用 mock 会话，Open Targets API 用合成响应、本地模式用合成 Parquet 验证。最近一次全量回归为 208 passed、3 skipped；最新结果见项目进度。
 
 ## 架构
 
@@ -86,7 +88,8 @@ pharm/            全部运行时代码
   core/           公共基础（路径/IO、归档、导入校验、符号校验）
   agents/         Codex 会话适配器（多 Agent 核验层）
   batman/         BATMAN 本地数据查询、全药材目录扩展、内置四方剂组成表
-  diseases/       Open Targets API/快照查询与通用关联批次建库
+  diseases/       Open Targets API/快照、Monarch 本地证据与通用关联批次建库
+  agent/          正向药材→靶点→候选疾病查询
   discovery/      疾病索引（建库/查询/目录）与反向查询
   network/        STRING 本地/API 网络、CytoNCA 桥、NetworkX 度值核对
   enrich/         DAVID 网页接口富集适配

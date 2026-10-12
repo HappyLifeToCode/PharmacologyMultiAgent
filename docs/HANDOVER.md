@@ -1,5 +1,19 @@
 # 项目交接说明
 
+## 2026-10-12 最新接续
+
+当前优先链路是“药材 → BATMAN 靶点 → 候选疾病”。正向 Agent 已实现并接入工作台顶部对话框：输入药材后调用 `POST /api/agent/forward`，读取本地 BATMAN、Open Targets 26.09 和 Monarch 2026-10-07 数据，展示候选疾病、匹配靶点、来源证据和 `heuristic_v2` 排序分数。
+
+启动命令仍为：
+
+```powershell
+.\.venv\Scripts\python.exe server/app.py --port 8766
+```
+
+本次正向查询相关文件为 `pharm/agent/forward.py`、`pharm/diseases/monarch_local.py`、`server/static/` 和 `tests/test_forward_agent.py`。全量测试为 208 passed、3 skipped，JavaScript 语法检查通过。当前结果是候选关联，不提供治疗有效率或临床疗效证据；浏览器视觉交互仍需人工验收。
+
+当前 `main` 与 `origin/main` 已同步到 `59f803f`。接续前先检查 `git status`，保留用户未提交修改；GitHub 推送需显式使用本机代理 `127.0.0.1:7890`，除非用户另行配置 Git 代理。
+
 更新：2026-10-02。阅读顺序：本文件 → [项目进度](PROJECT_STATUS.md) → [数据契约](DATA_CONTRACT.md)。
 
 ## 最新决定与修改

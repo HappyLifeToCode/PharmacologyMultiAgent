@@ -60,7 +60,14 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 - `POST /api/run`：task_id + 可选 mode。
 - `POST /api/analysis`：`{discovery_run_id, disease, research_notes?, agents?, string_source?, string_local_dir?, network_topology?, david_enrichment?}`；校验来源 run 存在、是 discovery、disease_reverse succeeded、disease 在候选清单内。
 - `GET /api/formulas`：内置方剂组成与 BATMAN 候选名。
+- `POST /api/agent/forward`：正向 Agent 对话查询，输入 `{"herbs":["白芍"],"top_k":10,"batman_threshold":0.84}`；`herbs` 为 1—30 个名称，`top_k` 为 1—100，返回本次查询的 `run_id`、BATMAN 靶点、候选疾病、来源证据和 `heuristic_v2` 组件。结果写入 `local/agent/forward/<run_id>/`，不进入旧 discovery manifest。
 - 产物下载 `GET /artifacts/{run_id}/{path}`：仅 manifest 登记且通过 public_artifact 白名单的文件；提示词、模型原始响应、私有日志不公开（Agent 会话仅 agent/execution.json 公开）。
+
+### 正向 Agent 结果边界
+
+- Open Targets 的 `associationScore`、Monarch 的 ClinGen/OMIM 证据和 BATMAN 的 known/predicted 关系分别保留，不跨来源相加。
+- `confidence` 是透明启发式候选排序分数，包含匹配靶点数、输入覆盖率和 BATMAN 证据质量；它不是统计检验、治疗有效率或疗效概率。
+- 正向查询当前不接入临床治疗证据、网络分析或富集分析；`scientific_complete` 保持 `false`。
 
 ## Open Targets 查询任务与兼容
 
