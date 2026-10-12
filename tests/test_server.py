@@ -39,6 +39,8 @@ def test_index_static_assets_and_formulas_catalog():
         page = client.get("/")
         assert page.status_code == 200
         assert "方剂反向疾病发现工作台" in page.text
+        assert "正向 Agent：药材 → 候选疾病" in page.text
+        assert "forward-herbs-input" in page.text
         assert "Open Targets" in page.text
         assert "GeneCards" not in page.text and "OMIM" not in page.text
         assert "assist-canvas" not in page.text

@@ -68,6 +68,145 @@ function escapeText(value) {
   return String(value == null ? "" : value);
 }
 
+// ---------- 顶部对话框：正向候选疾病 ----------
+
+function parseForwardHerbs(value) {
+  const seen = new Set();
+  return String(value || "").split(/[\n,，、;；]+/)
+    .map((item) => item.trim())
+    .filter((item) => {
+      const key = item.toLocaleLowerCase();
+      if (!item || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function forwardSourceLabel(source) {
+  return ({
+    open_targets: "Open Targets",
+    monarch_clingen: "Monarch · ClinGen",
+    monarch_omim: "Monarch · OMIM",
+  })[source] || source || "未标注来源";
+}
+
+function forwardPercent(value) {
+  return value == null || !Number.isFinite(Number(value)) ? "—" : (Number(value) * 100).toFixed(1) + "%";
+}
+
+function renderForwardEvidence(candidate) {
+  const panel = $("forward-evidence-panel");
+  panel.hidden = false;
+  $("forward-evidence-title").textContent = candidate.disease + " · 逐条证据";
+  const tbody = $("forward-evidence-table").querySelector("tbody");
+  tbody.innerHTML = "";
+  const rows = Array.isArray(candidate.evidence) ? candidate.evidence.slice(0, 100) : [];
+  for (const evidence of rows) {
+    const tr = document.createElement("tr");
+    const cells = [document.createElement("td"), document.createElement("td"),
+      document.createElement("td"), document.createElement("td")];
+    cells[0].textContent = evidence.gene_symbol || "";
+    cells[1].textContent = forwardSourceLabel(evidence.source);
+    cells[2].textContent = evidence.relevance_score == null ? "—" : String(evidence.relevance_score);
+    const record = evidence.record || {};
+    const detail = [];
+    if (record.predicate) detail.push("关系：" + record.predicate);
+    if (record.knowledge_level) detail.push("知识等级：" + record.knowledge_level);
+    if (record.association_score != null) detail.push("原始关联分值：" + record.association_score);
+    cells[3].textContent = detail.join("；") || "来源记录已保留";
+    cells.forEach((cell) => tr.appendChild(cell));
+    tbody.appendChild(tr);
+  }
+  $("forward-evidence-note").textContent = (candidate.evidence || []).length > 100
+    ? "仅显示前 100 行，完整证据已保存在本次查询产物中。"
+    : "";
+}
+
+function renderForwardResult(result) {
+  const panel = $("forward-result");
+  const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+  panel.hidden = false;
+  $("forward-summary").textContent = "已解析 " + (result.input_genes || []).length
+    + " 个 BATMAN 靶点，返回前 " + candidates.length + " 个候选疾病（全部候选 "
+    + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个）。";
+  $("forward-limitation").textContent = result.limitation || "候选关联不等于疗效或治疗推荐。";
+  const unmatched = [];
+  if ((result.unmatched_herbs || []).length) unmatched.push("未命中药材：" + result.unmatched_herbs.join("、"));
+  if ((result.unmatched_genes || []).length) unmatched.push("未命中疾病关联的靶点：" + result.unmatched_genes.join("、"));
+  $("forward-unmatched").textContent = unmatched.join("；");
+  const tbody = $("forward-candidates-table").querySelector("tbody");
+  tbody.innerHTML = "";
+  $("forward-evidence-panel").hidden = true;
+  for (const [index, candidate] of candidates.entries()) {
+    const tr = document.createElement("tr");
+    const confidence = candidate.confidence || {};
+    const sourceCounts = candidate.source_gene_counts || {};
+    const sources = Object.keys(sourceCounts).map((source) => forwardSourceLabel(source) + "（" + sourceCounts[source] + "）");
+    const values = [String(index + 1), candidate.disease || "", confidence.value == null ? "—" : Number(confidence.value).toFixed(2),
+      String(candidate.matched_count == null ? 0 : candidate.matched_count), forwardPercent(candidate.input_coverage),
+      sources.join("、") || "—", String(candidate.evidence_row_count == null ? (candidate.evidence || []).length : candidate.evidence_row_count)];
+    values.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      tr.appendChild(cell);
+    });
+    tr.addEventListener("click", () => {
+      tbody.querySelectorAll("tr").forEach((row) => row.classList.remove("selected"));
+      tr.classList.add("selected");
+      renderForwardEvidence(candidate);
+    });
+    tbody.appendChild(tr);
+  }
+  if (!candidates.length) {
+    const tr = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    cell.className = "empty-cell";
+    cell.textContent = "没有可显示的候选疾病。";
+    tr.appendChild(cell);
+    tbody.appendChild(tr);
+  }
+}
+
+async function submitForwardQuery() {
+  const message = $("forward-message");
+  const button = $("forward-submit");
+  message.textContent = "";
+  const herbs = parseForwardHerbs($("forward-herbs-input").value);
+  const topK = Number($("forward-top-k").value);
+  if (!herbs.length) {
+    message.textContent = "请输入至少一个药材名称。";
+    return;
+  }
+  if (!Number.isInteger(topK) || topK < 1 || topK > 100) {
+    message.textContent = "返回数量必须是 1—100 的整数。";
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "查询中…";
+  try {
+    const response = await postJSON("/api/agent/forward", { herbs, top_k: topK });
+    renderForwardResult(response.result || {});
+    message.textContent = "查询完成，运行编号：" + (response.run_id || "未记录");
+  } catch (err) {
+    $("forward-result").hidden = true;
+    message.textContent = err.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "查询候选疾病";
+  }
+}
+
+function setupForwardChat() {
+  $("forward-submit").addEventListener("click", submitForwardQuery);
+  $("forward-herbs-input").addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      submitForwardQuery();
+    }
+  });
+}
+
 // ---------- 左栏：任务 ----------
 
 async function loadFormulas() {
@@ -709,6 +848,7 @@ function renderEvidence(candidate) {
 // ---------- 启动 ----------
 
 async function boot() {
+  setupForwardChat();
   $("save-task").addEventListener("click", () => saveTask(false));
   $("save-start").addEventListener("click", () => saveTask(true));
   $("run-task").addEventListener("click", runSelectedTask);

@@ -10,6 +10,45 @@ h1 { font-size: 24px; margin: 0 0 4px; }
 h2 { font-size: 17px; margin: 18px 0 8px; border-bottom: 1px solid #cfc9b8; padding-bottom: 4px; }
 h3 { font-size: 15px; margin: 12px 0 6px; }
 .note { color: #61777f; font-size: 13px; }
+.forward-chat {
+  margin: 0 22px 14px;
+  padding: 12px 14px;
+  background: #fffdf7;
+  border: 1px solid #b9d4cd;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(21, 47, 62, 0.05);
+}
+.forward-chat-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.forward-chat-heading h2 { margin-top: 0; }
+.forward-chat-heading p { margin: 0; }
+.forward-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 120px auto;
+  align-items: end;
+  gap: 10px;
+}
+.forward-form label { margin: 0; }
+.forward-form button { margin-bottom: 1px; white-space: nowrap; }
+.forward-summary { margin: 10px 0 6px; color: #41565f; }
+.forward-table-scroll {
+  max-height: 420px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.forward-table-scroll table { min-width: 760px; }
+#forward-candidates-table tbody tr { cursor: pointer; }
+#forward-candidates-table tbody tr:hover { background: #eef3f0; }
+#forward-candidates-table tbody tr.selected { background: #d7e8e5; }
+#forward-evidence-panel { margin-top: 10px; }
+#forward-evidence-table { table-layout: fixed; }
+#forward-evidence-table th:nth-child(1), #forward-evidence-table td:nth-child(1) { width: 100px; }
+#forward-evidence-table th:nth-child(2), #forward-evidence-table td:nth-child(2) { width: 150px; }
+#forward-evidence-table td { overflow-wrap: anywhere; }
 .layout {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr) minmax(0, 1.1fr);
@@ -18,6 +57,12 @@ h3 { font-size: 15px; margin: 12px 0 6px; }
 }
 @media (max-width: 1080px) {
   .layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .forward-chat { margin-left: 12px; margin-right: 12px; }
+  .forward-form { grid-template-columns: 1fr 100px; }
+  .forward-form .forward-herbs-field { grid-column: 1 / -1; }
+  .forward-form button { grid-column: 1 / -1; }
 }
 .column {
   background: #fffdf7;

@@ -4,6 +4,8 @@
 
 更新：2026-10-12。Monarch Initiative（KG 2026-10-07，官方 SHA-256 校验通过）作为 OMIM 功能替代来源接入：新增 `pharm/diseases/monarch.py`，默认关闭（`PHARM_MONARCH_ENABLED` / 任务 `monarch_enabled`），仅对 Top-50 候选补充基因—疾病、HPO 表型、遗传方式与 PMID/ECO 证据，产物独立保存并登记 manifest/下载白名单；不参与 Open Targets 分数与排序，无 MONDO 映射记录保留。6 靶点回归验证见 `local/monarch_omim_replacement_validation_20261012/`。UI 尚未展示 Monarch 证据。测试 205 passed / 3 skipped。
 
+更新：2026-10-12。正向 Agent 已接入工作台顶部对话框：输入药材名称后调用 `/api/agent/forward`，展示候选疾病、启发式置信度、匹配靶点、来源计数和逐条证据；支持多药材、逗号/换行分隔及 `top_k` 1—100。该界面显示的是候选关联，不提供治疗有效率或疗效概率。正向查询使用本地 BATMAN、Open Targets 和 Monarch 适配器；合并后全量测试为 208 passed / 3 skipped，JavaScript 语法检查通过。旧反向工作流的 Monarch 证据 UI 仍未展示。
+
 ## 当前结论
 
 主链路为“方剂/药材 → BATMAN 本地成分与靶点 → 本地索引或 Open Targets 候选疾病 → 验收报告”。机制分析链路为“候选疾病 → 共同靶点 → 网络/富集 → 验收”。本次只清理代码与入口，未新增数据库，未重新执行真实科研分析。
@@ -20,7 +22,7 @@
 | 启发式置信度 | `heuristic_v2`，沿用原权重；去除旧库专用分值归一；证据质量为 BATMAN known 占比，缺失剔除；原始关联分值只展示 | 研究评审；治疗证据与概率校准方案尚未确定 |
 | 多 Agent 核验 | 程序计算、独立会话核验、日志与产物签名 | 完整真实 live 验收 |
 | 网络/富集 | STRING 本地/API、CytoNCA 桥、NetworkX 核对、DAVID 接口 | 本机正式分析冒烟与研究参数确认 |
-| 工作台 | 保留任务、运行、恢复、阶段与候选疾病、报告下载；候选列表独立可展开/滚动，仅显示疾病实体，表型和测量性状保留在产物中但不放入疾病列表 | 真实数据交互验收 |
+| 工作台 | 保留任务、运行、恢复、阶段与候选疾病、报告下载；新增正向 Agent 对话框，展示候选疾病及逐条来源证据；候选列表独立可展开/滚动，仅显示疾病实体 | 真实数据交互验收、药材别名/歧义选择、旧反向流程的 Monarch 证据展示 |
 
 ## 本次清理
 

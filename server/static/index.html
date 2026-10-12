@@ -11,6 +11,45 @@
   <h1>方剂反向疾病发现工作台</h1>
   <p class="note">本地确定性流水线：方剂 → BATMAN 本地靶点 → 本地疾病索引反查。关键词关联≠疗效；scientific_complete 恒为 false。</p>
 </header>
+<section class="forward-chat" id="panel-forward">
+  <div class="forward-chat-heading">
+    <div>
+      <h2>正向 Agent：药材 → 候选疾病</h2>
+      <p class="note">输入药材名称，查询 BATMAN 靶点与本地 Open Targets、Monarch 证据交集。</p>
+    </div>
+    <span class="badge confidence">候选关联</span>
+  </div>
+  <div class="forward-form">
+    <label class="forward-herbs-field">药材名称（每行一个，也可用逗号分隔）
+      <textarea id="forward-herbs-input" rows="2" spellcheck="false" placeholder="例如：白芍&#10;炙甘草"></textarea>
+    </label>
+    <label>返回数量
+      <input id="forward-top-k" type="number" min="1" max="100" value="10">
+    </label>
+    <button id="forward-submit" class="primary">查询候选疾病</button>
+  </div>
+  <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。按 Ctrl+Enter 可提交查询。</p>
+  <p id="forward-message" class="message"></p>
+  <div id="forward-result" hidden>
+    <p id="forward-summary" class="forward-summary"></p>
+    <div class="forward-table-scroll">
+      <table id="forward-candidates-table">
+        <thead><tr><th>#</th><th>候选疾病</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>来源</th><th>证据行</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="forward-limitation" class="note"></p>
+    <p id="forward-unmatched" class="note"></p>
+    <div id="forward-evidence-panel" hidden>
+      <h3 id="forward-evidence-title"></h3>
+      <table id="forward-evidence-table">
+        <thead><tr><th>基因</th><th>来源</th><th>关联分值</th><th>证据说明</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="forward-evidence-note" class="note"></p>
+    </div>
+  </div>
+</section>
 <main class="layout">
   <section class="column" id="panel-task">
     <h2>新建任务</h2>
@@ -97,6 +136,6 @@
 
   </section>
 </main>
-<script src="/assets/app.js?v=20261002-disease-list"></script>
+<script src="/assets/app.js?v=20261012-forward-agent"></script>
 </body>
 </html>
