@@ -70,18 +70,6 @@ function escapeText(value) {
 
 // ---------- 顶部对话框：正向候选疾病 ----------
 
-function parseForwardHerbs(value) {
-  const seen = new Set();
-  return String(value || "").split(/[\n,，、;；]+/)
-    .map((item) => item.trim())
-    .filter((item) => {
-      const key = item.toLocaleLowerCase();
-      if (!item || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
 function forwardSourceLabel(source) {
   return ({
     open_targets: "Open Targets",
@@ -126,6 +114,31 @@ function renderForwardResult(result) {
   const panel = $("forward-result");
   const candidates = Array.isArray(result.candidates) ? result.candidates : [];
   panel.hidden = false;
+  const input = result.input || {};
+  const resolved = Array.isArray(result.resolved_herbs) ? result.resolved_herbs : [];
+  if (input.formula) {
+    $("forward-input-summary").textContent = "已识别方剂「" + input.formula + "」，自动展开 "
+      + (input.herbs || []).length + " 味药材：" + (input.herbs || []).join("、") + "。";
+  } else {
+    $("forward-input-summary").textContent = "输入药材：" + (input.herbs || []).join("、");
+  }
+  const composition = $("forward-composition");
+  composition.hidden = !resolved.length;
+  const herbRows = $("forward-herbs-table").querySelector("tbody");
+  herbRows.innerHTML = "";
+  for (const herb of resolved) {
+    const row = document.createElement("tr");
+    const values = [herb.canonical, (herb.batman_candidates || []).join(" / "),
+      herb.matched ? herb.batman_name : "未命中", String(herb.compound_count || 0), String(herb.relation_count || 0)];
+    values.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    });
+    herbRows.appendChild(row);
+  }
+  $("forward-composition-note").textContent = input.formula_source === "standard_reference_pending_user_confirmation"
+    ? "组成沿用内置参考表，来源尚待研究者确认；加减方请直接输入实际药材组合。" : "";
   $("forward-summary").textContent = "已解析 " + (result.input_genes || []).length
     + " 个 BATMAN 靶点，返回前 " + candidates.length + " 个候选疾病（全部候选 "
     + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个）。";
@@ -172,10 +185,11 @@ async function submitForwardQuery() {
   const message = $("forward-message");
   const button = $("forward-submit");
   message.textContent = "";
-  const herbs = parseForwardHerbs($("forward-herbs-input").value);
+  if (button.disabled) return;
+  const text = $("forward-herbs-input").value.trim();
   const topK = Number($("forward-top-k").value);
-  if (!herbs.length) {
-    message.textContent = "请输入至少一个药材名称。";
+  if (!text) {
+    message.textContent = "请输入至少一个方剂或药材名称。";
     return;
   }
   if (!Number.isInteger(topK) || topK < 1 || topK > 100) {
@@ -184,8 +198,10 @@ async function submitForwardQuery() {
   }
   button.disabled = true;
   button.textContent = "查询中…";
+  $("forward-result").hidden = true;
+  message.textContent = "正在识别输入、解析药材靶点并查询本地疾病证据…";
   try {
-    const response = await postJSON("/api/agent/forward", { herbs, top_k: topK });
+    const response = await postJSON("/api/agent/forward", { text, top_k: topK });
     renderForwardResult(response.result || {});
     message.textContent = "查询完成，运行编号：" + (response.run_id || "未记录");
   } catch (err) {
@@ -849,6 +865,7 @@ function renderEvidence(candidate) {
 
 async function boot() {
   setupForwardChat();
+  if (!$("panel-task")) return;
   $("save-task").addEventListener("click", () => saveTask(false));
   $("save-start").addEventListener("click", () => saveTask(true));
   $("run-task").addEventListener("click", runSelectedTask);
@@ -864,5 +881,6 @@ async function boot() {
 }
 
 boot().catch((err) => {
-  $("task-message").textContent = "初始化失败：" + err.message;
+  const message = $("task-message") || $("forward-message");
+  message.textContent = "初始化失败：" + err.message;
 });

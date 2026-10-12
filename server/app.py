@@ -95,17 +95,19 @@ async def discovery_query(request: Request):
 
 @app.post("/api/agent/forward")
 async def agent_forward(request: Request):
-    """对话框正向查询：药材 → BATMAN 靶点 → 候选疾病。"""
+    """对话框正向查询：方剂/药材 → BATMAN 靶点 → 候选疾病。"""
     if len(await request.body()) > 100000:
         raise HTTPException(413, "查询内容过长")
     try:
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("请求必须是 JSON 对象")
-        allowed = {"herbs", "top_k", "batman_threshold"}
+        allowed = {"text", "formula", "herbs", "top_k", "batman_threshold"}
         if set(body) - allowed:
-            raise ValueError("正向查询只接受 herbs、top_k、batman_threshold")
+            raise ValueError("正向查询只接受 text、formula、herbs、top_k、batman_threshold")
         return await run_in_threadpool(forward.query, body.get("herbs"),
+                                       formula=body.get("formula"),
+                                       text=body.get("text"),
                                        top_k=body.get("top_k"),
                                        batman_threshold=body.get("batman_threshold", 0.84))
     except (ValueError, RuntimeError) as exc:

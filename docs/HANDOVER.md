@@ -2,7 +2,9 @@
 
 ## 2026-10-12 最新接续
 
-当前优先链路是“药材 → BATMAN 靶点 → 候选疾病”。正向 Agent 已实现并接入工作台顶部对话框：输入药材后调用 `POST /api/agent/forward`，读取本地 BATMAN、Open Targets 26.09 和 Monarch 2026-10-07 数据，展示候选疾病、匹配靶点、来源证据和 `heuristic_v2` 排序分数。
+当前优先链路是“方剂/药材 → BATMAN 靶点 → 候选疾病”。顶部对话框支持直接输入“温经汤”等内置方剂名，后端展开多味药材后查询本地 BATMAN、Open Targets 26.09 和 Monarch 2026-10-07，展示药材组成与 BATMAN 实际命中、候选疾病和逐条来源证据。
+
+`POST /api/agent/forward` 接受 `text`、`formula` 或 `herbs`（只能选择一种），前端直接发送 `text`，不依赖下方任务面板的方剂目录。当前已收录温经汤、半夏白术天麻汤、济川煎、桃核承气汤；未收录方剂或加减方需手工提供组成。内置组成与 BATMAN 名称候选沿用 `pharm/batman/formulas.py`，来源尚待研究者确认，不由程序确认正式研究口径。下方旧任务面板本轮仍保留；仅对话框页面的初始化不再访问旧面板或任务 API。
 
 启动命令仍为：
 
@@ -10,9 +12,13 @@
 .\.venv\Scripts\python.exe server/app.py --port 8766
 ```
 
-本次正向查询相关文件为 `pharm/agent/forward.py`、`pharm/diseases/monarch_local.py`、`server/static/` 和 `tests/test_forward_agent.py`。全量测试为 208 passed、3 skipped，JavaScript 语法检查通过。当前结果是候选关联，不提供治疗有效率或临床疗效证据；浏览器视觉交互仍需人工验收。
+本次相关文件为 `pharm/agent/forward.py`、`server/app.py`、`server/static/`、`tests/test_forward_agent.py` 与 `tests/test_server.py`。新增方剂展开、甘草候选回退、未命中与混合输入校验；全量回归 **222 passed, 3 skipped**。温经汤真实查询暴露原聚合将约 200 万条记录整体驻留内存的问题，已改为两次流式读取：第一次汇总所有候选并按原规则排序，第二次仅加载 `top_k` 候选完整证据；完整采集 CSV 保留，评分与来源规则未变。
 
-当前 `main` 与 `origin/main` 已同步到 `59f803f`。接续前先检查 `git status`，保留用户未提交修改；GitHub 推送需显式使用本机代理 `127.0.0.1:7890`，除非用户另行配置 Git 代理。
+真实验证保存于 `local/agent/formula-validation-20261012/`：温经汤 12/12 味 BATMAN 命中，2670 个唯一靶点、34571 条成分—靶点关系。首次查询完成 Open Targets 采集后因内存压力主动停止；修复后的验证复用该真实采集批次，核对输入靶点、选择参数与 CSV SHA-256，继续执行真实 Monarch 与 API 聚合，不伪造疾病证据；原未完成目录保留。成功结果为 `local/agent/forward/forward_9ed3b61f9e3b4f34acf40d9ffd7808d1/`：Open Targets 1996649 条采集关联，Monarch 95 条 ClinGen / 2113 条 OMIM 匹配，过滤后 13177 个候选，按用户设置返回 10 个，两个来源工程状态均 succeeded，`scientific_complete=false`。
+
+浏览器检查通过：现有工作台和移除下方面板的仅对话框页面，桌面与移动端均可提交方剂、显示 12 味组成、查看 10 个候选与逐条证据，无 JS 错误或移动端页面溢出；仅对话框模式未请求旧任务 API。成功响应使用上述真实 API 归档回放，混合输入与未知显式方剂通过真实 API 校验并返回 400。截图及 `browser_summary.json` 保存于验证目录；临时服务 8771 验证后关闭，原 8766 服务未改动，用户需按原命令重启后刷新。当前结果是候选关联，不提供治疗有效率或临床疗效证据。
+
+本轮开始时 `main` 与 `origin/main` 同步到 `f8a713a`。接续前先检查 `git status`，保留用户未提交修改；GitHub 推送需显式使用本机代理 `127.0.0.1:7890`，除非用户另行配置 Git 代理。
 
 更新：2026-10-02。阅读顺序：本文件 → [项目进度](PROJECT_STATUS.md) → [数据契约](DATA_CONTRACT.md)。
 

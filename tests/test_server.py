@@ -39,7 +39,7 @@ def test_index_static_assets_and_formulas_catalog():
         page = client.get("/")
         assert page.status_code == 200
         assert "方剂反向疾病发现工作台" in page.text
-        assert "正向 Agent：药材 → 候选疾病" in page.text
+        assert "正向 Agent：方剂/药材 → 候选疾病" in page.text
         assert "forward-herbs-input" in page.text
         assert "Open Targets" in page.text
         assert "GeneCards" not in page.text and "OMIM" not in page.text
@@ -75,8 +75,8 @@ def test_browser_collection_endpoints_are_removed():
 def test_forward_agent_endpoint(monkeypatch):
     calls = []
 
-    def fake_query(herbs, *, top_k=None, batman_threshold=0.84):
-        calls.append((herbs, top_k, batman_threshold))
+    def fake_query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0.84):
+        calls.append((herbs, formula, text, top_k, batman_threshold))
         return {"run_id": "forward_test", "result": {"candidates": []}}
 
     monkeypatch.setattr(backend.forward, "query", fake_query)
@@ -84,7 +84,13 @@ def test_forward_agent_endpoint(monkeypatch):
         response = client.post("/api/agent/forward", json={"herbs": ["白芍"], "top_k": 3})
         assert response.status_code == 200
         assert response.json()["run_id"] == "forward_test"
-        assert calls == [(["白芍"], 3, 0.84)]
+        assert calls == [(["白芍"], None, None, 3, 0.84)]
+        response = client.post("/api/agent/forward", json={"formula": "温经汤", "top_k": 2})
+        assert response.status_code == 200
+        assert calls[-1] == (None, "温经汤", None, 2, 0.84)
+        response = client.post("/api/agent/forward", json={"text": "温经汤", "top_k": 2})
+        assert response.status_code == 200
+        assert calls[-1] == (None, None, "温经汤", 2, 0.84)
         assert client.post("/api/agent/forward", json={"herbs": ["白芍"], "unknown": 1}).status_code == 400
 
 

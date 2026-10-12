@@ -14,23 +14,35 @@
 <section class="forward-chat" id="panel-forward">
   <div class="forward-chat-heading">
     <div>
-      <h2>正向 Agent：药材 → 候选疾病</h2>
-      <p class="note">输入药材名称，查询 BATMAN 靶点与本地 Open Targets、Monarch 证据交集。</p>
+      <h2>正向 Agent：方剂/药材 → 候选疾病</h2>
+      <p class="note">输入内置方剂名会自动展开为多味药材；也可以直接输入一味或多味药材。</p>
     </div>
     <span class="badge confidence">候选关联</span>
   </div>
   <div class="forward-form">
-    <label class="forward-herbs-field">药材名称（每行一个，也可用逗号分隔）
-      <textarea id="forward-herbs-input" rows="2" spellcheck="false" placeholder="例如：白芍&#10;炙甘草"></textarea>
+    <label class="forward-herbs-field">方剂或药材名称（每行一个，也可用逗号分隔）
+      <textarea id="forward-herbs-input" rows="2" spellcheck="false" placeholder="例如：温经汤&#10;或：白芍、炙甘草"></textarea>
     </label>
     <label>返回数量
       <input id="forward-top-k" type="number" min="1" max="100" value="10">
     </label>
     <button id="forward-submit" class="primary">查询候选疾病</button>
   </div>
-  <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。按 Ctrl+Enter 可提交查询。</p>
+  <p class="note">已收录方剂：温经汤、半夏白术天麻汤、济川煎、桃核承气汤。一次输入一个方剂名；未收录方剂或加减方请填写实际药材组合。按 Ctrl+Enter 可提交查询。</p>
+  <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。</p>
   <p id="forward-message" class="message"></p>
   <div id="forward-result" hidden>
+    <p id="forward-input-summary" class="note"></p>
+    <details id="forward-composition" hidden>
+      <summary>查看药材组成与 BATMAN 命中</summary>
+      <div class="forward-table-scroll">
+        <table id="forward-herbs-table">
+          <thead><tr><th>药材</th><th>检索候选名</th><th>BATMAN 命中名</th><th>成分数</th><th>靶点关系数</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="forward-composition-note" class="note"></p>
+    </details>
     <p id="forward-summary" class="forward-summary"></p>
     <div class="forward-table-scroll">
       <table id="forward-candidates-table">
@@ -136,6 +148,6 @@
 
   </section>
 </main>
-<script src="/assets/app.js?v=20261012-forward-agent"></script>
+<script src="/assets/app.js?v=20261012-forward-formula"></script>
 </body>
 </html>

@@ -60,7 +60,9 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 - `POST /api/run`：task_id + 可选 mode。
 - `POST /api/analysis`：`{discovery_run_id, disease, research_notes?, agents?, string_source?, string_local_dir?, network_topology?, david_enrichment?}`；校验来源 run 存在、是 discovery、disease_reverse succeeded、disease 在候选清单内。
 - `GET /api/formulas`：内置方剂组成与 BATMAN 候选名。
-- `POST /api/agent/forward`：正向 Agent 对话查询，输入 `{"herbs":["白芍"],"top_k":10,"batman_threshold":0.84}`；`herbs` 为 1—30 个名称，`top_k` 为 1—100，返回本次查询的 `run_id`、BATMAN 靶点、候选疾病、来源证据和 `heuristic_v2` 组件。结果写入 `local/agent/forward/<run_id>/`，不进入旧 discovery manifest。
+- `POST /api/agent/forward`：正向 Agent 对话查询，`text`、`formula` 与 `herbs` 三种输入只能选择一种。对话框使用 `{"text":"温经汤","top_k":10}`；也支持显式 `{"formula":"温经汤"}` 或原接口 `{"herbs":["白芍"],"top_k":10,"batman_threshold":0.84}`。`text` 为非空字符串（最多 10000 字符），后端按换行、逗号、顿号、分号拆分药材，识别单个内置方剂名并展开；已识别方剂与其他名称混合时拒绝。`formula` 必须为已收录名称，未知方剂拒绝，不猜测组成。`herbs` 为 1—30 个名称，`top_k` 为 1—100。结果写入 `local/agent/forward/<run_id>/`，不进入旧 discovery manifest。
+- 正向结果的 `input` 保留原始 `text`、识别出的 `formula`、`formula_source`、展开后的 `herbs` 与实际参数。内置方剂来源标记为 `standard_reference_pending_user_confirmation`。`resolved_herbs` 逐味记录 `canonical`、有序 `batman_candidates`、实际 `batman_name`、`matched`、`compound_count` 和 `relation_count`；`matched` 表示 BATMAN 成分目录命中，不等于临床证据。未命中项继续记录于 `unmatched_herbs`；返回本次 `run_id`、BATMAN 靶点、候选疾病、来源证据和 `heuristic_v2` 组件。
+- 正向聚合逐行读取冻结的来源文件，先汇总全部合格候选并排序，再仅加载返回候选的逐条完整证据。`candidate_count` 是截断前的候选数，`candidates` 仍按用户 `top_k` 截断；`evidence_row_count` 保留重复来源行计数，`matched_count` 仍按基因去重。完整 Open Targets 采集文件继续保存于本次目录 `open_targets/associations.csv`，不因只展示前 K 项而删减。
 - 产物下载 `GET /artifacts/{run_id}/{path}`：仅 manifest 登记且通过 public_artifact 白名单的文件；提示词、模型原始响应、私有日志不公开（Agent 会话仅 agent/execution.json 公开）。
 
 ### 正向 Agent 结果边界
