@@ -70,6 +70,22 @@ def test_browser_collection_endpoints_are_removed():
                 pass
 
 
+def test_forward_agent_endpoint(monkeypatch):
+    calls = []
+
+    def fake_query(herbs, *, top_k=None, batman_threshold=0.84):
+        calls.append((herbs, top_k, batman_threshold))
+        return {"run_id": "forward_test", "result": {"candidates": []}}
+
+    monkeypatch.setattr(backend.forward, "query", fake_query)
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        response = client.post("/api/agent/forward", json={"herbs": ["白芍"], "top_k": 3})
+        assert response.status_code == 200
+        assert response.json()["run_id"] == "forward_test"
+        assert calls == [(["白芍"], 3, 0.84)]
+        assert client.post("/api/agent/forward", json={"herbs": ["白芍"], "unknown": 1}).status_code == 400
+
+
 def test_analysis_endpoint_and_pipeline_field(tmp_path, monkeypatch):
     monkeypatch.setattr(backend, "ROOT", tmp_path)
     from pharm.pipeline import engine as engine_module

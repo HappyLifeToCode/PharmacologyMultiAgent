@@ -14,6 +14,7 @@ from pharm.core.common import ROOT, read_json, safe_name, task_list, public_arti
 from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
+from pharm.agent import forward
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
@@ -90,6 +91,27 @@ async def discovery_query(request: Request):
         raise HTTPException(400, str(exc))
     except (OSError, sqlite3.Error):
         raise HTTPException(503, "本地查询或归档不可用，请检查索引与目录权限")
+
+
+@app.post("/api/agent/forward")
+async def agent_forward(request: Request):
+    """对话框正向查询：药材 → BATMAN 靶点 → 候选疾病。"""
+    if len(await request.body()) > 100000:
+        raise HTTPException(413, "查询内容过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求必须是 JSON 对象")
+        allowed = {"herbs", "top_k", "batman_threshold"}
+        if set(body) - allowed:
+            raise ValueError("正向查询只接受 herbs、top_k、batman_threshold")
+        return await run_in_threadpool(forward.query, body.get("herbs"),
+                                       top_k=body.get("top_k"),
+                                       batman_threshold=body.get("batman_threshold", 0.84))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, "本地正向查询不可用：" + str(exc))
 
 
 @app.get("/discovery/artifacts/{run_id}/{filename}")
