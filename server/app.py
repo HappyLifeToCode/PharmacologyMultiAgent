@@ -100,7 +100,9 @@ def discovery_artifact(run_id: str, filename: str):
         raise HTTPException(404)
     if filename not in ("result.json", "candidates.csv", "evidence.csv", "report.md", "manifest.json",
                         "candidates_complete.csv", "candidates_base.csv", "candidates_strict.csv",
-                        "candidates_top50.csv", "candidate_hierarchy.json"):
+                        "candidates_top50.csv", "candidate_hierarchy.json",
+                        "monarch_gene_disease.csv", "monarch_hpo.csv", "monarch_inheritance.csv",
+                        "monarch_publications.csv", "monarch_unresolved.csv", "monarch_provenance.json"):
         raise HTTPException(404)
     root = (ROOT / "local/discovery/runs").resolve()
     path = (root / run_id / filename).resolve()

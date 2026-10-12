@@ -648,6 +648,8 @@ class Runner:
                                "reverse/candidates_complete.csv", "reverse/candidates_base.csv",
                                "reverse/candidates_strict.csv", "reverse/candidates_top50.csv",
                                "reverse/candidate_hierarchy.json"]
+            from ..diseases import monarch as monarch_source
+            stage_artifacts += ["reverse/" + name for name in monarch_source.MONARCH_ARTIFACTS]
             if self.task.get("online_collect") and self.manifest["mode"] != "fixture" and genes:
                 # Keep the online collection ledger visible and hash-checked;
                 # raw pages remain inside the archived attempt directory.

@@ -551,7 +551,11 @@ def query(database, *, herbs=None, genes=None):
     layers = build_candidate_layers(candidates)
     # 层级关系标记在 enriched 项上原地写入，complete/base/strict/top 共享同一批字典
     layers["hierarchy"] = build_candidate_hierarchy(layers["complete"])
-    return {
+    # Monarch 证据补充：只在 Top-50 生成之后执行，不修改候选与分数（默认关闭）
+    from ..diseases import monarch as monarch_source
+    monarch_evidence = monarch_source.enrich_open_targets_candidates(
+        {"input": {"genes": symbols}, "candidate_layers": layers})
+    result_payload = {
         "workflow": "five_disease_reverse_lookup_v1", "status": "succeeded", "scientific_complete": False,
         "created_at": now(), "limitation": LIMITATION, "input": {"herbs": herbs, "genes": symbols},
         "input_count": len(symbols), "matched_input_count": len(all_matched),
@@ -564,6 +568,9 @@ def query(database, *, herbs=None, genes=None):
             {"id": "disease_evidence", "status": "succeeded", "count": sum(bool(row["matched_count"]) for row in candidates)},
         ],
     }
+    if monarch_evidence is not None:
+        result_payload["monarch_evidence"] = monarch_evidence
+    return result_payload
 
 
 def save_result(result, output):
@@ -604,6 +611,9 @@ def save_result(result, output):
     if layers.get("hierarchy"):
         write_json(output / "candidate_hierarchy.json",
                    {**layers["hierarchy"], "rules": layers.get("rules")})
+    if result.get("monarch_evidence"):
+        from ..diseases import monarch as monarch_source
+        monarch_source.write_monarch_artifacts(result["monarch_evidence"], output)
 
     columns = ["disease", "gene_symbol", "source", "source_file", "source_row", "relevance_score"]
     with (output / "evidence.csv").open("w", encoding="utf-8-sig", newline="") as stream:

@@ -78,6 +78,14 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 旧数据库采集与 `/api/assist/*`、`/ws/assist` 已移除。旧任务启用不支持来源时明确 blocked；历史任务与运行不回写。
 
+### Monarch Initiative（OMIM 功能替代来源，2026-10-12 接入）
+
+- 定位：Monarch KG 是本项目 OMIM 所需功能（基因—疾病、HPO 表型、遗传方式、PMID/ECO 证据）的替代来源；Open Targets 仍是主疾病关联来源，associationScore 与 Top-50 排序不受 Monarch 影响。
+- 默认关闭：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true` 才启用；数据目录解析顺序为任务 `monarch_data_dir` > `PHARM_MONARCH_DATA_DIR` > `configs/monarch_data.local.json` > `data/monarch/<最新版本目录>`。无在线回退，缺文件明确报错。
+- 匹配规则：基因为 gene_id 命名空间 > HGNC symbol > UniProt > 记录 unresolved；疾病为 candidate.mondo_id > Monarch 明确 MONDO ID > 其他明确本体 ID > 记录 unresolved。禁止按英文名称模糊合并；MONDO 是跨库映射字段，不是所有疾病的强制主键；无 MONDO 映射的记录保留。
+- 当前只对 Top-50 候选做证据补充；产物独立保存：`monarch_gene_disease.csv`、`monarch_hpo.csv`、`monarch_inheritance.csv`、`monarch_publications.csv`、`monarch_unresolved.csv`、`monarch_provenance.json`（每条 HPO/遗传方式/PMID 单独一行），登记进运行 manifest 与下载白名单。
+- Monarch 证据不参与 Open Targets 分数计算与候选排序，不能解释为临床疗效或诊断结论。
+
 `heuristic_v2` 沿用权重，evidence_quality 仅取 BATMAN known 占比；原始关联分值不参与评分，缺失组件剔除。历史 v1 报告保留原版本。
 
 ## 归档布局

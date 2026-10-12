@@ -66,6 +66,23 @@ data/open_targets/26.09/
 
 `manifest.json` 记录 release 与 datasets 文件信息。需要 `pyarrow`（已列入 requirements）。
 
+## Monarch 本地全量数据（OMIM 功能替代，默认关闭）
+
+```text
+data/monarch/2026-10-07/
+  metadata.yaml
+  omim_gene_to_disease_edges.tsv        基因—疾病（OMIM morbidmap 摄入）
+  hpoa_gene_to_disease_edges.tsv        基因—疾病（HPOA/Orphanet 等）
+  clingen_gene_disease_edges.tsv        基因—疾病（ClinGen）
+  hpoa_disease_to_phenotype_edges.tsv   疾病—HPO 表型（频率/negated/onset/PMID）
+  hpoa_disease_mode_of_inheritance_edges.tsv  遗传方式
+  hgnc_gene_nodes.tsv                   symbol ↔ HGNC/OMIM 基因映射
+  phenio_nodes.tsv                      实体名称（NCBIGene/MONDO/HP…）
+  mondo.sssom.tsv                       疾病本体 → MONDO（subject=MONDO，取 skos:exactMatch）
+```
+
+配置：复制 `configs/monarch_data.example.json` 为 Git 忽略的 `configs/monarch_data.local.json` 填本机 `data_dir`，或设 `PHARM_MONARCH_DATA_DIR`（优先）。启用：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true`；默认关闭时 Open Targets 流程行为完全不变。原始文件不提交 Git；下载后经 metadata.yaml 官方 SHA-256 校验方可使用（校验记录见 `local/monarch_validation_20261010/`）。仅对 Top-50 候选补充证据；结果不能解释为临床疗效或诊断结论。
+
 ```powershell
 $env:PHARM_OPEN_TARGETS_MODE = "local"
 $env:PHARM_OPEN_TARGETS_DATA_DIR = "D:\PharmacologyMultiAgent\data\open_targets\26.09"
