@@ -135,6 +135,102 @@ def _load_diseases(data_dir: Path, entries: list[dict]) -> dict[str, str]:
     return diseases
 
 
+def _normalise_disease_ref(value):
+    """Normalise ontology references while preserving the source identity."""
+    text = str(value or "").strip()
+    if text.upper().startswith("MONDO:"):
+        return "MONDO_" + text.split(":", 1)[1]
+    return text
+
+
+def _load_disease_metadata(data_dir: Path, entries: list[dict]) -> dict[str, dict]:
+    """Load display, synonym, ontology and hierarchy metadata for each OT entity.
+
+    ``disease_id`` remains the Open Targets identity.  MONDO is recorded as an
+    optional cross-reference and never replaces an entity that has no MONDO
+    mapping.
+    """
+    parquet = _parquet()
+    metadata: dict[str, dict] = {}
+    wanted = ["id", "name", "dbXRefs", "exactSynonyms", "parents", "ancestors"]
+    for entry in entries:
+        reader = parquet.ParquetFile(data_dir / entry["dataset"] / entry["file"])
+        # 注意：ParquetSchema.names 返回嵌套叶子名（element 等），顶层列名必须用 schema_arrow
+        columns = [name for name in wanted if name in reader.schema_arrow.names]
+        for batch in reader.iter_batches(columns=columns, batch_size=100_000):
+            for row in batch.to_pylist():
+                disease_id = str(row.get("id") or "").strip()
+                name = str(row.get("name") or "").strip()
+                if not disease_id:
+                    continue
+                xrefs = [str(value).strip() for value in (row.get("dbXRefs") or []) if str(value).strip()]
+                mondo_refs = {_normalise_disease_ref(value) for value in xrefs
+                              if str(value).upper().startswith("MONDO:") or
+                              str(value).upper().startswith("MONDO_")}
+                if disease_id.upper().startswith("MONDO_"):
+                    mondo_refs.add(disease_id)
+                if disease_id.upper().startswith("MONDO_"):
+                    mondo_id = disease_id
+                    mapping = "direct"
+                elif len(mondo_refs) == 1:
+                    mondo_id = next(iter(mondo_refs))
+                    mapping = "dbxref"
+                elif len(mondo_refs) > 1:
+                    mondo_id = None
+                    mapping = "conflict"
+                else:
+                    mondo_id = None
+                    mapping = "unmapped"
+                ontology = re.split(r"[_:]", disease_id, maxsplit=1)[0].upper()
+                aliases = []
+                for value in row.get("exactSynonyms") or []:
+                    value = str(value).strip()
+                    if value and value.casefold() != name.casefold() and value.casefold() not in {a.casefold() for a in aliases}:
+                        aliases.append(value)
+                metadata[disease_id] = {
+                    "disease_id": disease_id,
+                    "canonical_disease_id": disease_id,
+                    "name": name,
+                    "canonical_name": name,
+                    "aliases": aliases,
+                    "ontology": ontology,
+                    "mondo_id": mondo_id,
+                    "mondo_mapping": mapping,
+                    "db_xrefs": sorted(xrefs),
+                    "parents": [str(value).strip() for value in (row.get("parents") or []) if str(value).strip()],
+                    "ancestors": [str(value).strip() for value in (row.get("ancestors") or []) if str(value).strip()],
+                }
+    return metadata
+
+
+def _disease_extra(metadata: dict[str, dict], disease_id: str) -> dict:
+    """Return serialisable disease identity metadata for an association row."""
+    entity = metadata.get(disease_id) or {
+        "disease_id": disease_id,
+        "canonical_disease_id": disease_id,
+        "canonical_name": None,
+        "name": None,
+        "aliases": [],
+        "ontology": str(disease_id).split("_", 1)[0].upper(),
+        "mondo_id": None,
+        "mondo_mapping": "unknown",
+        "db_xrefs": [],
+        "parents": [],
+        "ancestors": [],
+    }
+    return {
+        "disease_id": entity["disease_id"],
+        "canonical_disease_id": entity["canonical_disease_id"],
+        "canonical_name": entity.get("canonical_name") or entity.get("name"),
+        "aliases": entity.get("aliases", []),
+        "ontology": entity.get("ontology"),
+        "mondo_id": entity.get("mondo_id"),
+        "mondo_mapping": entity.get("mondo_mapping"),
+        "parents": entity.get("parents", []),
+        "ancestors": entity.get("ancestors", []),
+    }
+
+
 def _entity_type_from_ontology(disease_id: str, parents=None) -> str:
     """Classify Open Targets entities for the workbench display.
 
@@ -248,6 +344,7 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
     manifest, grouped = _load_manifest(local_dir)
     targets, _aliases, _approved_symbols = _load_targets(local_dir, grouped["target"])
     diseases_by_id = _load_diseases(local_dir, grouped["disease"])
+    disease_metadata = _load_disease_metadata(local_dir, grouped["disease"])
     disease_entity_types = _load_disease_entity_types(local_dir, grouped["disease"])
     resolved, unresolved = _resolve_local_diseases(clean_diseases, diseases_by_id)
     if not resolved:
@@ -309,7 +406,6 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
                 "release": manifest["release"],
                 "direction": "disease_to_target",
                 "query": disease["query"],
-                "disease_id": disease_id,
                 "disease_name": disease["name"],
                 "entity_type": disease_entity_types.get(disease_id, "phenotype"),
                 "target_id": target_id,
@@ -322,6 +418,7 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
                 "current_novelty": row.get("currentNovelty"),
                 "source_file": row.get("source_file"),
             }
+            extra.update(_disease_extra(disease_metadata, disease_id))
             associations.append({"disease": disease_key,
                                  "gene_symbol": target["approved_symbol"],
                                  "score": "%.12g" % float(row["associationScore"]),
@@ -346,9 +443,10 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
                              "candidate_disease_ids": "|".join(row.get("candidate_disease_ids", []))})
 
     manifest_path = local_dir / "manifest.json"
+    raw_rows_complete = top_k_per_disease is None and min_score is None
     provenance = {
         "sources": {"associations": {
-            "complete": True,
+            "complete": raw_rows_complete,
             "source_url": DOWNLOADS_URL,
             "accessed_at": str(manifest.get("downloaded_at") or date.today().isoformat()).split("T", 1)[0],
             "mode": "local_snapshot",
@@ -366,7 +464,8 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
             "diseases": disease_keys,
             "selection": {"top_k_per_disease": top_k_per_disease,
                            "min_score": min_score,
-                           "raw_rows_complete": True,
+                           "raw_rows_complete": raw_rows_complete,
+                           "note": "top_k/min_score 只用于候选展示与排序；为 false 时本批未保留全量 direct association，不得称为完整层" if not raw_rows_complete else "原始 direct association 全量保留",
                            "score_field": "associationScore",
                            "datasource_scores_available": False},
             "coverage": {"target_files": len(grouped["target"]),
@@ -427,6 +526,7 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
     manifest, grouped = _load_manifest(local_dir)
     targets, aliases, approved_symbols = _load_targets(local_dir, grouped["target"])
     diseases_by_id = _load_diseases(local_dir, grouped["disease"])
+    disease_metadata = _load_disease_metadata(local_dir, grouped["disease"])
     disease_entity_types = _load_disease_entity_types(local_dir, grouped["disease"])
 
     resolved = []
@@ -509,7 +609,6 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
                 "target_id": target_id,
                 "ensembl_id": target_id,
                 "approved_symbol": targets[target_id]["approved_symbol"],
-                "disease_id": disease_id,
                 "disease_name": disease_name,
                 "entity_type": disease_entity_types.get(disease_id, "phenotype"),
                 "aggregation_type": row.get("aggregationType"),
@@ -519,6 +618,7 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
                 "current_novelty": row.get("currentNovelty"),
                 "source_file": row.get("source_file"),
             }
+            extra.update(_disease_extra(disease_metadata, disease_id))
             for symbol in target_to_symbols[target_id]:
                 associations.append({"disease": disease_key, "gene_symbol": symbol,
                                      "score": "%.12g" % float(row["associationScore"]),
@@ -542,9 +642,10 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
                              "candidate_target_ids": "|".join(row.get("candidate_target_ids", []))})
 
     manifest_path = local_dir / "manifest.json"
+    raw_rows_complete = top_k_per_target is None and min_score is None
     provenance = {
         "sources": {"associations": {
-            "complete": True,
+            "complete": raw_rows_complete,
             "source_url": DOWNLOADS_URL,
             "accessed_at": str(manifest.get("downloaded_at") or date.today().isoformat()).split("T", 1)[0],
             "mode": "local_snapshot",
@@ -561,7 +662,8 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
             "missing_disease_ids": sorted(missing_disease_ids),
             "diseases": disease_keys,
             "selection": {"top_k_per_target": top_k_per_target,
-                           "min_score": min_score, "raw_rows_complete": True,
+                           "min_score": min_score, "raw_rows_complete": raw_rows_complete,
+                           "note": "top_k/min_score 只用于候选展示与排序；为 false 时本批未保留全量 direct association，不得称为完整层" if not raw_rows_complete else "原始 direct association 全量保留",
                            "score_field": "associationScore",
                            "datasource_scores_available": False},
             "coverage": {"target_files": len(grouped["target"]),

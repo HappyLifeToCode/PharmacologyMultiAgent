@@ -50,9 +50,9 @@ provenance.json     另含 sources.batman（herbs、threshold、threshold_confir
   prepare --batch local/open_targets_target_pilot
 ```
 
-Open Targets 以疾病 ID 与标签组成 disease 键，Ensembl ID、疾病 ID 和可获得的数据源分数保存在 `extra`；API 原始完整分页保存于 `raw/open_targets_responses.jsonl`。
+Open Targets 以疾病 ID 与标签组成 disease 键，Ensembl ID、疾病 ID 和可获得的数据源分数保存在 `extra`；API 原始完整分页保存于 `raw/open_targets_responses.jsonl`。每条关联的 `extra` 同时携带疾病实体元数据：`disease_id`（主键）、`canonical_disease_id`、`canonical_name`、`aliases`、`mondo_id`、`mondo_mapping`、`ontology`、`parents`、`ancestors`、`entity_type`。disease_id 为 Open Targets 原始 ID；MONDO 仅为可选映射；exactSynonyms 只作别名展示；父子疾病只标记关系不合并。批次产物按候选分层保存：`candidates_complete.csv`（完整层，含全部原始 direct association）、`candidates_base.csv`（>0.2）、`candidates_strict.csv`（>=0.6）、`candidates_top50.csv`（disease 实体排序 Top-50）、`candidate_hierarchy.json`（候选间父子关系及来源）。
 
-第三阶段现存试验默认为每疾病或每靶点 Top-100、association score≥0.2，未改为正式研究规则。调整入口：`PHARM_OPEN_TARGETS_TOP_K`、`PHARM_OPEN_TARGETS_MIN_SCORE`、`PHARM_OPEN_TARGETS_PAGE_SIZE`、`PHARM_OPEN_TARGETS_REQUEST_DELAY`、`PHARM_OPEN_TARGETS_TIMEOUT`。直接 CLI 查询可显式指定 `--top-k-per-disease` 或 `--top-k-per-target`、`--min-score`；不传时不自动沿用主流程试验选择。实际执行规则始终记录于产物。
+第三阶段采集默认不做 top-k/min-score 过滤（完整层必须保留全量 direct association），筛选只发生在候选分层。试验性过滤为显式启用：`PHARM_OPEN_TARGETS_TOP_K`、`PHARM_OPEN_TARGETS_MIN_SCORE` 设置后才生效（其余入口 `PHARM_OPEN_TARGETS_PAGE_SIZE`、`PHARM_OPEN_TARGETS_REQUEST_DELAY`、`PHARM_OPEN_TARGETS_TIMEOUT`）。直接 CLI 查询可显式指定 `--top-k-per-disease` 或 `--top-k-per-target`、`--min-score`；不传时不自动沿用主流程试验选择。实际执行规则始终记录于产物。启用 top-k/min-score 的批次未保留全量 direct association，provenance 标记 `complete=false` / `raw_rows_complete=false`，严格导入校验将拒绝该批次；完整层必须使用未过滤的采集。
 
 ## Open Targets 本地快照
 
@@ -65,6 +65,23 @@ data/open_targets/26.09/
 ```
 
 `manifest.json` 记录 release 与 datasets 文件信息。需要 `pyarrow`（已列入 requirements）。
+
+## Monarch 本地全量数据（OMIM 功能替代，默认关闭）
+
+```text
+data/monarch/2026-10-07/
+  metadata.yaml
+  omim_gene_to_disease_edges.tsv        基因—疾病（OMIM morbidmap 摄入）
+  hpoa_gene_to_disease_edges.tsv        基因—疾病（HPOA/Orphanet 等）
+  clingen_gene_disease_edges.tsv        基因—疾病（ClinGen）
+  hpoa_disease_to_phenotype_edges.tsv   疾病—HPO 表型（频率/negated/onset/PMID）
+  hpoa_disease_mode_of_inheritance_edges.tsv  遗传方式
+  hgnc_gene_nodes.tsv                   symbol ↔ HGNC/OMIM 基因映射
+  phenio_nodes.tsv                      实体名称（NCBIGene/MONDO/HP…）
+  mondo.sssom.tsv                       疾病本体 → MONDO（subject=MONDO，取 skos:exactMatch）
+```
+
+配置：复制 `configs/monarch_data.example.json` 为 Git 忽略的 `configs/monarch_data.local.json` 填本机 `data_dir`，或设 `PHARM_MONARCH_DATA_DIR`（优先）。启用：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true`；默认关闭时 Open Targets 流程行为完全不变。原始文件不提交 Git；下载后经 metadata.yaml 官方 SHA-256 校验方可使用（校验记录见 `local/monarch_validation_20261010/`）。仅对 Top-50 候选补充证据；结果不能解释为临床疗效或诊断结论。
 
 ```powershell
 $env:PHARM_OPEN_TARGETS_MODE = "local"
