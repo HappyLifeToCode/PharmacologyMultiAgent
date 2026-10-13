@@ -61,7 +61,7 @@
     <p>设置用于下一次查询，已有结果保留当时的参数。</p>
     <label>返回候选数量<input id="setting-top-k" type="number" min="1" max="100" value="10" required></label>
     <label>BATMAN 预测靶点阈值<input id="setting-threshold" type="number" min="0" max="1" step="0.01" value="0.84" required></label>
-    <small>预测记录仅保留分值严格大于阈值的靶点；已知证据沿用数据源记录。</small>
+    <small>当前正向查询采用 known-only 已知证据，调整阈值不会开启预测靶点，也不改变已知证据结果。阈值仅在显式启用预测记录的流程中生效。</small>
     <button type="submit" class="primary-button">保存设置</button>
   </form>
 </dialog>

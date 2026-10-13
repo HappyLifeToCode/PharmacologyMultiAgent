@@ -1,6 +1,7 @@
 import hashlib
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -248,3 +249,32 @@ def test_online_pipeline_uses_batman_targets_when_only_open_targets_selected(mon
         herb_targets={"genes": ["EGFR"], "relations": [], "herbs": ["白芍"]},
     )
     assert result["counts"]["open_targets"] == 1
+
+
+def test_online_pipeline_reuses_known_only_shared_index(tmp_path, monkeypatch):
+    database = tmp_path / "shared.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE metadata(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO metadata VALUES (?)", (json.dumps({
+            "schema_version": 3,
+            "shared_index": True,
+            "import_kind": "open_targets_batman_known_shared",
+            "release": "26.09",
+            "selection": "BATMAN known only",
+            "known_symbol_count": 10,
+            "resolved_symbol_count": 9,
+            "source_rows": {"open_targets": 123},
+        }),))
+
+    monkeypatch.setattr(online_pipeline, "collect_open_targets_by_targets",
+                        lambda *args, **kwargs: pytest.fail("共享索引不应重新扫描快照"))
+    result = online_pipeline.collect_and_extend(
+        {"online_diseases": [], "online_sources": ["open_targets"]},
+        tmp_path / "online", database=database,
+        herb_targets={"genes": ["EGFR"], "relations": [], "herbs": ["白芍"]})
+
+    assert result["reused"] is True
+    assert Path(result["database"]) == database.resolve()
+    assert result["counts"] == {"open_targets": 123, "duplicates": 0}
+    ledger = json.loads((tmp_path / "online" / "online_collection.json").read_text(encoding="utf-8"))
+    assert ledger["mode"] == "shared_index" and ledger["reused"] is True

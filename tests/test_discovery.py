@@ -110,6 +110,45 @@ def test_missing_database_does_not_create_empty_file(tmp_path):
     assert not path.exists()
 
 
+def test_schema_v3_reads_normalised_disease_identity(tmp_path):
+    database = tmp_path / "shared.sqlite"
+    disease = "MONDO_1 | Disease A"
+    entity = {
+        "disease_id": "MONDO_1", "disease_name": "Disease A",
+        "canonical_disease_id": "MONDO_1", "canonical_name": "Disease A",
+        "aliases": ["Disease Alpha"], "mondo_id": "MONDO_1",
+        "mondo_mapping": "direct", "ontology": "MONDO",
+        "parents": ["MONDO_0"], "ancestors": ["MONDO_0"],
+        "entity_type": "disease",
+    }
+    with sqlite3.connect(database) as connection:
+        connection.executescript("""
+            CREATE TABLE metadata(value TEXT NOT NULL);
+            CREATE TABLE associations(gene TEXT, disease TEXT, source TEXT,
+                source_row INTEGER, score REAL, record TEXT);
+            CREATE TABLE disease_entities(disease TEXT PRIMARY KEY, record TEXT);
+            CREATE TABLE herb_relations(gene TEXT PRIMARY KEY, evidence TEXT);
+        """)
+        connection.execute("INSERT INTO metadata VALUES (?)", (json.dumps({
+            "schema_version": 3, "diseases": [disease], "herbs": [],
+            "source_rows": {"open_targets": 1}, "created_at": "2026-10-13",
+            "selection": "BATMAN known only",
+        }),))
+        connection.execute("INSERT INTO associations VALUES (?,?,?,?,?,?)",
+                           ("TP53", disease, "open_targets", 1, 0.8, "{}"))
+        connection.execute("INSERT INTO disease_entities VALUES (?,?)",
+                           (disease, json.dumps(entity)))
+        connection.execute("INSERT INTO herb_relations VALUES (?,?)", ("TP53", "known"))
+
+    result = discovery.query(database, genes=["TP53"])
+    candidate = result["candidates"][0]
+    assert candidate["disease_id"] == "MONDO_1"
+    assert candidate["aliases"] == ["Disease Alpha"]
+    assert candidate["entity_type"] == "disease"
+    assert candidate["matched_genes"] == ["TP53"]
+    assert result["candidate_layers"]["top"][0]["disease"] == disease
+
+
 def test_build_tracks_sources_and_refuses_overwrite(batch, database):
     result = discovery.query(database, genes=["TP53"])
     hashes = result["dataset"]["source_sha256"]

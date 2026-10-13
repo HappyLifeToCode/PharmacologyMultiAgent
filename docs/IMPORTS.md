@@ -32,7 +32,7 @@ provenance.json     另含 sources.batman（herbs、threshold、threshold_confir
 
 ## Open Targets 查询
 
-工作台“启用 Open Targets 数据查询”对应任务 `online_collect=true`，`online_sources` 仅支持 `["open_targets"]`。留空疾病范围时使用 BATMAN 靶点发现候选疾病；填写范围时执行疾病→靶点查询。结果写入本次运行专用 SQLite 文件，不覆盖全局索引。
+工作台“启用 Open Targets 数据查询”对应任务 `online_collect=true`，`online_sources` 仅支持 `["open_targets"]`。留空疾病范围时使用 BATMAN known 靶点发现候选疾病；若配置了正式 known-only 共享索引，任务直接复用，不再扫描 Parquet 或生成运行专用 SQLite。填写疾病范围时执行疾病→靶点查询，仍按该查询范围采集。
 
 `PHARM_OPEN_TARGETS_MODE=local`（默认）读取本地 Parquet 快照；只有显式指定 `online` 才调用 GraphQL API。两者均不使用网页登录、验证码或协助画布。
 
@@ -65,6 +65,19 @@ data/open_targets/26.09/
 ```
 
 `manifest.json` 记录 release 与 datasets 文件信息。需要 `pyarrow`（已列入 requirements）。
+
+### BATMAN known-only 共享索引
+
+每个 Open Targets release 只需构建一次：
+
+```powershell
+python -m pharm.diseases.open_targets_index `
+  --open-targets-dir data/open_targets/26.09 `
+  --batman-dir data/batman/v2.0 `
+  --output data/open_targets/index/26.09/ot_known_index.sqlite
+```
+
+索引采用 schema 3：关联热表只保留 gene、disease、associationScore 与来源；别名、MONDO 和父子层级在 `disease_entities` 中按疾病保存一次。`configs/discovery_data.local.json` 指向该索引后，靶点驱动主流程优先复用。运行目录只写查询产物和 `online_collection.json`，不复制共享 SQLite。构建目录同时生成 `index_manifest.json`、`checksums.sha256` 和 `README.md`，可单独压缩分享。
 
 ## Monarch 本地全量数据（OMIM 功能替代，默认关闭）
 

@@ -8,6 +8,7 @@ import json
 import math
 import shutil
 import sqlite3
+from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
@@ -246,7 +247,7 @@ def _connect(database):
 
 def _metadata(connection):
     metadata = json.loads(connection.execute("SELECT value FROM metadata").fetchone()[0])
-    if metadata.get("schema_version") not in (1, 2):
+    if metadata.get("schema_version") not in (1, 2, 3):
         raise ValueError("不支持的反查数据库版本")
     diseases = metadata.get("diseases")
     if not isinstance(diseases, list) or not diseases or any(not isinstance(d, str) or not d for d in diseases):
@@ -446,6 +447,13 @@ def build_candidate_hierarchy(candidates):
         disease_id = str(candidate.get("disease_id") or "").strip()
         if disease_id and disease_id not in by_id:
             by_id[disease_id] = candidate
+    children_by_id = defaultdict(set)
+    for other_id, other in by_id.items():
+        references = ({str(v).strip() for v in (other.get("parents") or [])} |
+                      {str(v).strip() for v in (other.get("ancestors") or [])})
+        for reference in references:
+            if reference in by_id and reference != other_id:
+                children_by_id[reference].add(other_id)
     relations = []
     for candidate in candidates:
         disease_id = str(candidate.get("disease_id") or "").strip()
@@ -454,11 +462,8 @@ def build_candidate_hierarchy(candidates):
         parent_hits = sorted(pid for pid in parent_set if pid in by_id and pid != disease_id)
         ancestor_hits = sorted(aid for aid in ancestor_set if aid in by_id and aid != disease_id)
         candidate["parent_candidate_ids"] = parent_hits
-        child_hits = [other_id for other_id, other in by_id.items()
-                      if other_id != disease_id and disease_id in
-                      ({str(v).strip() for v in (other.get("parents") or [])} |
-                       {str(v).strip() for v in (other.get("ancestors") or [])})]
-        candidate["child_candidate_ids"] = sorted(child_hits)
+        child_hits = sorted(children_by_id.get(disease_id, set()))
+        candidate["child_candidate_ids"] = child_hits
         candidate["related_candidate_ids"] = sorted(set(ancestor_hits) | set(child_hits))
         candidate["is_parent_child_related"] = bool(candidate["related_candidate_ids"])
         if parent_hits or child_hits:
@@ -466,7 +471,7 @@ def build_candidate_hierarchy(candidates):
                 "disease_id": disease_id,
                 "disease_name": candidate.get("disease_name") or candidate.get("disease"),
                 "parent_candidate_ids": parent_hits,
-                "child_candidate_ids": sorted(child_hits),
+                "child_candidate_ids": child_hits,
                 "source": {"parents": sorted(parent_set), "ancestors": sorted(ancestor_set)},
             })
     return {"identity_key": "disease_id",
@@ -488,6 +493,12 @@ def query(database, *, herbs=None, genes=None):
     database_hash = digest(database) if database.is_file() else None
     with closing(_connect(database)) as connection:
         metadata = _metadata(connection)
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        entity_records = {}
+        if "disease_entities" in tables:
+            entity_records = {disease: json.loads(record) for disease, record in
+                              connection.execute("SELECT disease,record FROM disease_entities")}
         relations = []
         if herbs is not None:
             herbs = sorted(set(values))
@@ -522,13 +533,19 @@ def query(database, *, herbs=None, genes=None):
                 f"SELECT gene,disease,source,source_row,score,record FROM associations WHERE gene IN ({placeholders}) ORDER BY disease,gene,source,source_row", symbols)
         ]
         known, predicted = _evidence_maps(connection)
+    evidence_by_disease = defaultdict(list)
+    for row in evidence:
+        evidence_by_disease[row["disease"]].append(row)
     candidates, all_matched = [], set()
     for disease in metadata["diseases"]:
-        rows = [row for row in evidence if row["disease"] == disease]
+        rows = evidence_by_disease.get(disease, [])
         matched = sorted({row["gene_symbol"] for row in rows})
         all_matched.update(matched)
-        entity_type = _candidate_entity_type(disease, rows)
-        identity = _candidate_identity(disease, rows)
+        entity = entity_records.get(disease)
+        identity_rows = [{"record": {"extra": entity}}] if entity else rows
+        entity_type = (entity.get("entity_type") if isinstance(entity, dict)
+                       else _candidate_entity_type(disease, rows))
+        identity = _candidate_identity(disease, identity_rows)
         per_source = {}
         for row in rows:
             per_source.setdefault(row["source"], set()).add(row["gene_symbol"])
