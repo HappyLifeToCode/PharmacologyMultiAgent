@@ -207,6 +207,9 @@ function renderResult(result, message, content, sessionId) {
   const candidates = result.candidates || [];
   const description = input.formula ? "已识别「" + input.formula + "」，展开为 " + (input.herbs || []).length + " 味药材。" : "本次查询药材：" + (input.herbs || []).join("、") + "。";
   content.append(element("p", "", description));
+  const batmanMode = result.batman_source?.mode;
+  const batmanLabels = { local: "BATMAN：使用本地数据", online_download: "BATMAN：本地文件缺失，已从官方网站取得并缓存数据", cached_official_download: "BATMAN：复用此前取得的官方本地缓存，本次未重新下载" };
+  if (batmanLabels[batmanMode]) content.append(element("p", "reply-note", batmanLabels[batmanMode]));
   const composition = details("查看药材组成与 BATMAN 命中", content);
   renderComposition(result, composition);
   content.append(element("p", "", "查询得到 " + (result.input_genes || []).length + " 个唯一靶点，找到 " + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个候选关联，当前展示 " + candidates.length + " 个。"));
@@ -302,19 +305,7 @@ function latestResultMessage(session) {
 }
 
 function resolveInput(text) {
-  const cleaned = text.replace(/[。？！!?]+$/g, "").trim();
-  const formulaNames = appState.formulas.map((formula) => formula.name);
-  if (formulaNames.includes(cleaned)) return cleaned;
-  for (const formula of formulaNames) {
-    const position = cleaned.indexOf(formula);
-    if (position < 0) continue;
-    const prefix = cleaned.slice(0, position);
-    const suffix = cleaned.slice(position + formula.length);
-    if (/^(?:请|帮我|帮忙|想|我想|再|查询|查一下|看看|看一下|分析|了解|一下|换成|改成|用)*$/.test(prefix)
-        && /^(?:的)?(?:关联哪些候选疾病|关联哪些疾病|有哪些候选疾病|有哪些关联疾病|候选疾病|关联疾病|的候选疾病|能治什么病|能治疗什么疾病|能治哪些疾病|有哪些靶点)?$/.test(suffix)) return formula;
-    throw new Error("请单独输入方剂名；加减方请填写完整药材组合，我会按实际输入查询。");
-  }
-  return cleaned.replace(/^(?:请)?(?:帮我)?(?:查询|查一下|看看|看一下|分析)\s*/, "").replace(/(?:的)?(?:候选疾病|关联哪些候选疾病|关联哪些疾病)$/, "").replace(/和/g, "、").trim();
+  return text.trim();
 }
 
 function candidateIndex(text) {

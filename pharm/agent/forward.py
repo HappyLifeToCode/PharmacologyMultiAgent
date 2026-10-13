@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ..batman.local import query_local_targets
+from ..batman.resolver import query_targets
 from ..batman.formulas import SOURCE as FORMULA_SOURCE, formula_candidates, list_formulas
 from ..core.common import ROOT, now, write_json
 from ..discovery.query import CONFIDENCE_VERSION, _confidence
@@ -47,6 +48,21 @@ def _resolve_input(herbs, formula, text):
     if text is not None:
         if not isinstance(text, str) or not text.strip() or len(text) > 10000:
             raise ValueError("text 必须是 1—10000 个字符的非空字符串")
+        text = text.strip().rstrip("。？！?!")
+        formula_names = list_formulas()
+        mentioned = [name for name in formula_names if name in text]
+        if mentioned:
+            if len(mentioned) != 1:
+                raise ValueError("请单独输入一个方剂名；多方比较需要分别查询")
+            formula = mentioned[0]
+            herb_names = {name for entries in (formula_candidates(item) for item in formula_names)
+                          for canonical, candidates in entries for name in [canonical, *candidates]}
+            segments = [part.strip() for part in re.split(r"[\n,，、;；]+", text) if part.strip()]
+            if any(part in herb_names for part in segments) or re.search(r"加减|加味|去掉|去除|加入|增加|添加|加[\u4e00-\u9fff]|减[\u4e00-\u9fff]", text):
+                raise ValueError("请单独输入一个方剂名；加减方请直接输入完整的药材组合")
+            if re.search(r"(?:不用|不要|不是|排除)\s*" + re.escape(formula), text):
+                raise ValueError("请明确本次要查询的方剂或药材，不会查询被排除的方剂")
+            text = formula
         names = _clean_herbs([name.strip() for name in re.split(r"[\n,，、;；]+", text) if name.strip()])
         recognised = [name for name in names if name in list_formulas()]
         if recognised:
@@ -212,7 +228,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     run_id = "forward_" + uuid4().hex
     directory = Path(output_dir) if output_dir else ROOT / "local" / "agent" / "forward" / run_id
     directory = directory.resolve()
-    herb_result = query_local_targets(herb_candidates, threshold=float(batman_threshold))
+    herb_result = query_targets(herb_candidates, threshold=float(batman_threshold), local_query=query_local_targets)
     if not herb_result.get("genes"):
         raise RuntimeError("输入药材没有解析出可用 BATMAN 人源靶点")
 
@@ -269,6 +285,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         "unmatched_herbs": herb_result.get("unmatched", []),
         "unmatched_genes": sorted(set(input_genes) - associated_genes),
         "herb_relations": herb_result["relations"],
+        "batman_source": herb_result.get("retrieval", {"mode": "local"}),
         "candidates": selected,
         "candidate_count": full_count,
         "source_status": source_status,

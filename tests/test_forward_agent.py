@@ -59,7 +59,9 @@ def test_forward_aggregates_open_targets_and_monarch(monkeypatch, tmp_path):
     assert (tmp_path / "run" / "result.json").is_file()
 
 
-@pytest.mark.parametrize("query_input", [{"formula": " 温经汤 "}, {"text": " 温经汤\n"}])
+@pytest.mark.parametrize("query_input", [{"formula": " 温经汤 "}, {"text": " 温经汤\n"},
+                                        {"text": "温经汤可能与哪些疾病有关？"},
+                                        {"text": "请问，温经汤可能与哪些疾病有关？"}])
 def test_forward_formula_expands_to_canonical_herbs(monkeypatch, tmp_path, query_input):
     data = tmp_path / "batman"
     data.mkdir()
@@ -139,6 +141,27 @@ def test_forward_chat_herbs_use_separators_and_deduplicate():
     assert names == ["白芍", "炙甘草", "人参", "当归", "川芎", "麦冬"]
     assert candidates["炙甘草"] == ["炙甘草"]
     assert formula is None
+
+
+@pytest.mark.parametrize("text", [
+    "温经汤可能与哪些疾病有关？", "请问，温经汤可能和什么疾病存在关联？",
+    "帮我看看温经汤关联哪些候选疾病", "我想研究一下温经汤的疾病关联。",
+    "《温经汤》可能涉及哪些疾病？", "请分析济川煎可能与哪些疾病有关？",
+])
+def test_natural_question_extracts_single_formula(text):
+    names, candidates, formula = forward._resolve_input(None, None, text)
+    assert formula == ("济川煎" if "济川煎" in text else "温经汤")
+    assert names == [canonical for canonical, choices in forward.formula_candidates(formula)]
+    assert set(candidates) == set(names)
+
+
+@pytest.mark.parametrize("text", [
+    "温经汤和济川煎可能与哪些疾病有关？", "温经汤加桂枝可能与哪些疾病有关？",
+    "温经汤去掉半夏", "不用温经汤", "温经汤、白芍",
+])
+def test_formula_ambiguity_and_modifications_are_not_silently_ignored(text):
+    with pytest.raises(ValueError):
+        forward._resolve_input(None, None, text)
 
 
 def test_forward_streaming_preserves_counts_scores_and_selected_evidence():

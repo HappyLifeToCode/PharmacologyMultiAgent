@@ -9,8 +9,9 @@ known TTIs are binary literature-verified evidence: rows carry evidence=known
 with score left empty and are never threshold-filtered. predicted rows carry
 the v2.0 probability score and are filtered downstream by load_herb
 (score > threshold); they are only emitted when task batman_include_predicted
-is true. There is no online fallback: without the local files generation
-fails, per the team's per-source capability table.
+is true. This reader is local-only. The forward chat resolver can acquire
+official downloads when required files are absent; pipeline import
+generation remains local-only.
 
 Data directory resolution order: task batman_local_dir > PHARM_BATMAN_DATA_DIR
 > configs/batman_data.local.json {"data_dir": ...} > data/batman/v2.0.
@@ -32,6 +33,12 @@ from ..core.symbols import _valid_symbol
 
 BATMAN_SOURCE_URL = "http://bionet.ncpsb.org.cn/batman-tcm"
 DATA_VERSION = "BATMAN-TCM 2.0 full download"
+
+
+class MissingLocalData(ValueError):
+    pass
+
+
 MAPPING_METHOD = ("Entrez gene ID resolved to official gene symbol via the "
                   "BATMAN-TCM v2.0 browse_by_targets file rows; known TTI "
                   "symbols are used as published")
@@ -95,7 +102,7 @@ def batman_local_files(task):
     for kind, name in REQUIRED_FILES.items():
         candidate = root / name
         if not candidate.is_file():
-            raise ValueError("本地 BATMAN 文件缺失：" + str(candidate))
+            raise MissingLocalData("本地 BATMAN 文件缺失：" + str(candidate))
         files[kind] = candidate
     if task.get("batman_include_predicted"):
         for kind, names in PREDICTED_FILES.items():
@@ -325,7 +332,7 @@ def query_local_targets(herb_candidates, threshold=0.84, task=None):
     for kind, name in REQUIRED_FILES.items():
         candidate = root / name
         if not candidate.is_file():
-            raise ValueError("本地 BATMAN 文件缺失：" + str(candidate))
+            raise MissingLocalData("本地 BATMAN 文件缺失：" + str(candidate))
         files[kind] = candidate
     for kind, names in PREDICTED_FILES.items():
         for name in names:
