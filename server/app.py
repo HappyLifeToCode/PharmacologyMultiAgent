@@ -45,6 +45,30 @@ def index():
     return FileResponse(ROOT / "server/static/index.html")
 
 
+@app.get("/workbench")
+def workbench():
+    return FileResponse(ROOT / "server/static/workbench.html")
+
+
+@app.get("/assets/chat.js")
+def chat_script():
+    return FileResponse(ROOT / "server/static/chat.js", media_type="text/javascript")
+
+
+@app.get("/assets/chat.css")
+def chat_style():
+    return FileResponse(ROOT / "server/static/chat.css", media_type="text/css")
+
+
+@app.get("/assets/icons/{filename}")
+def chat_icon(filename: str):
+    allowed = {"leaf.svg", "plus.svg", "search.svg", "arrow-up.svg", "settings.svg",
+               "layout-sidebar.svg", "download.svg", "x.svg", "trash.svg"}
+    if filename not in allowed:
+        raise HTTPException(404)
+    return FileResponse(ROOT / "server/static/icons" / filename, media_type="image/svg+xml")
+
+
 @app.get("/assets/app.js")
 def app_script():
     return FileResponse(ROOT / "server/static/app.js", media_type="text/javascript")
@@ -114,6 +138,21 @@ async def agent_forward(request: Request):
         raise HTTPException(400, str(exc))
     except OSError as exc:
         raise HTTPException(503, "本地正向查询不可用：" + str(exc))
+
+
+@app.get("/api/agent/forward/{run_id}")
+def forward_result(run_id: str):
+    try:
+        safe_name(run_id)
+    except ValueError:
+        raise HTTPException(404, "查询记录不存在")
+    if not run_id.startswith("forward_"):
+        raise HTTPException(404, "查询记录不存在")
+    root = (ROOT / "local/agent/forward").resolve()
+    path = (root / run_id / "result.json").resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(404, "查询结果不存在，请重新查询")
+    return FileResponse(path, media_type="application/json")
 
 
 @app.get("/discovery/artifacts/{run_id}/{filename}")

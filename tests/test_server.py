@@ -38,14 +38,21 @@ def test_index_static_assets_and_formulas_catalog():
     with TestClient(backend.app, base_url="http://localhost") as client:
         page = client.get("/")
         assert page.status_code == 200
-        assert "方剂反向疾病发现工作台" in page.text
-        assert "正向 Agent：方剂/药材 → 候选疾病" in page.text
-        assert "forward-herbs-input" in page.text
+        assert "药理研究助手" in page.text
+        assert "chat-input" in page.text
+        assert "history-list" in page.text
         assert "Open Targets" in page.text
         assert "GeneCards" not in page.text and "OMIM" not in page.text
         assert "assist-canvas" not in page.text
         assert client.get("/assets/app.js").status_code == 200
         assert client.get("/assets/style.css").status_code == 200
+        assert client.get("/assets/chat.js").status_code == 200
+        assert client.get("/assets/chat.css").status_code == 200
+        assert client.get("/assets/icons/leaf.svg").status_code == 200
+        assert client.get("/assets/icons/private.svg").status_code == 404
+        workbench = client.get("/workbench")
+        assert workbench.status_code == 200
+        assert "forward-herbs-input" in workbench.text
         # 旧页面与旧静态资源已下线
         assert client.get("/legacy").status_code == 404
         assert client.get("/assets/discovery.js").status_code == 404
@@ -92,6 +99,18 @@ def test_forward_agent_endpoint(monkeypatch):
         assert response.status_code == 200
         assert calls[-1] == (None, None, "温经汤", 2, 0.84)
         assert client.post("/api/agent/forward", json={"herbs": ["白芍"], "unknown": 1}).status_code == 400
+
+
+def test_forward_archive_read_and_path_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "ROOT", tmp_path)
+    result = {"candidates": [{"disease": "Disease A", "matched_count": 1}], "scientific_complete": False}
+    write_json(tmp_path / "local/agent/forward/forward_test/result.json", result)
+    write_json(tmp_path / "local/agent/forward/other_test/result.json", {"private": True})
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        assert client.get("/api/agent/forward/forward_test").json() == result
+        assert client.get("/api/agent/forward/forward_missing").status_code == 404
+        assert client.get("/api/agent/forward/other_test").status_code == 404
+        assert client.get("/api/agent/forward/forward_test", headers={"Host": "other.example"}).status_code == 403
 
 
 def test_analysis_endpoint_and_pipeline_field(tmp_path, monkeypatch):

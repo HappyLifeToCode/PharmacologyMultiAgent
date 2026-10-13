@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方剂反向疾病发现工作台</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<header>
+  <h1>方剂反向疾病发现工作台</h1>
+  <p class="note">本地确定性流水线：方剂 → BATMAN 本地靶点 → 本地疾病索引反查。关键词关联≠疗效；scientific_complete 恒为 false。</p>
+</header>
+<section class="forward-chat" id="panel-forward">
+  <div class="forward-chat-heading">
+    <div>
+      <h2>正向 Agent：方剂/药材 → 候选疾病</h2>
+      <p class="note">输入内置方剂名会自动展开为多味药材；也可以直接输入一味或多味药材。</p>
+    </div>
+    <span class="badge confidence">候选关联</span>
+  </div>
+  <div class="forward-form">
+    <label class="forward-herbs-field">方剂或药材名称（每行一个，也可用逗号分隔）
+      <textarea id="forward-herbs-input" rows="2" spellcheck="false" placeholder="例如：温经汤&#10;或：白芍、炙甘草"></textarea>
+    </label>
+    <label>返回数量
+      <input id="forward-top-k" type="number" min="1" max="100" value="10">
+    </label>
+    <button id="forward-submit" class="primary">查询候选疾病</button>
+  </div>
+  <p class="note">已收录方剂：温经汤、半夏白术天麻汤、济川煎、桃核承气汤。一次输入一个方剂名；未收录方剂或加减方请填写实际药材组合。按 Ctrl+Enter 可提交查询。</p>
+  <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。</p>
+  <p id="forward-message" class="message"></p>
+  <div id="forward-result" hidden>
+    <p id="forward-input-summary" class="note"></p>
+    <details id="forward-composition" hidden>
+      <summary>查看药材组成与 BATMAN 命中</summary>
+      <div class="forward-table-scroll">
+        <table id="forward-herbs-table">
+          <thead><tr><th>药材</th><th>检索候选名</th><th>BATMAN 命中名</th><th>成分数</th><th>靶点关系数</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="forward-composition-note" class="note"></p>
+    </details>
+    <p id="forward-summary" class="forward-summary"></p>
+    <div class="forward-table-scroll">
+      <table id="forward-candidates-table">
+        <thead><tr><th>#</th><th>候选疾病</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>来源</th><th>证据行</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="forward-limitation" class="note"></p>
+    <p id="forward-unmatched" class="note"></p>
+    <div id="forward-evidence-panel" hidden>
+      <h3 id="forward-evidence-title"></h3>
+      <table id="forward-evidence-table">
+        <thead><tr><th>基因</th><th>来源</th><th>关联分值</th><th>证据说明</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="forward-evidence-note" class="note"></p>
+    </div>
+  </div>
+</section>
+<main class="layout">
+  <section class="column" id="panel-task">
+    <h2>新建任务</h2>
+    <label>方剂
+      <select id="formula-select"></select>
+    </label>
+    <label>药材（每行一味，可增删编辑）
+      <textarea id="herbs-input" rows="10" spellcheck="false"></textarea>
+    </label>
+    <label>BATMAN 阈值
+      <input id="threshold-input" type="number" step="0.01" min="0" max="1" value="0.84">
+    </label>
+    <label>运行方式
+      <select id="mode-select">
+        <option value="live">live（本地数据反查）</option>
+        <option value="fixture">fixture（合成工程验证）</option>
+      </select>
+    </label>
+    <label class="inline-check"><input id="online-collect" type="checkbox"> 启用 Open Targets 数据查询（本地快照或 API）</label>
+    <label>限定疾病范围（可选；留空时使用 BATMAN 靶点发现候选疾病；每行一个）
+      <textarea id="online-diseases-input" rows="4" spellcheck="false" placeholder="例如：Hyperthyroidism&#10;Rheumatoid arthritis"></textarea>
+    </label>
+    <label>研究说明
+      <textarea id="notes-input" rows="3" spellcheck="false"></textarea>
+    </label>
+    <div class="button-row">
+      <button id="save-task">保存任务</button>
+      <button id="save-start" class="primary">保存并启动</button>
+    </div>
+    <p id="task-message" class="message"></p>
+    <h2>已有任务</h2>
+    <ul id="task-list" class="item-list"></ul>
+    <div id="selected-task-actions" class="button-row" hidden>
+      <button id="run-task" class="primary">运行此任务</button>
+      <select id="run-mode-override" title="运行方式覆盖">
+        <option value="">按任务方式</option>
+        <option value="live">live（本地数据反查）</option>
+        <option value="fixture">fixture（合成验证）</option>
+      </select>
+    </div>
+    <p id="run-task-message" class="message"></p>
+  </section>
+
+  <section class="column" id="panel-runs">
+    <h2>运行</h2>
+    <ul id="run-list" class="item-list"></ul>
+    <div class="button-row">
+      <button id="resume-run" hidden>恢复运行</button>
+      <a id="report-link" class="download-link" href="#" hidden>↓ 下载报告</a>
+    </div>
+    <h2>阶段</h2>
+    <p class="graph-legend">实线：程序确定性计算；核验：对应 Agent 会话核验产物（live 模式）</p>
+    <div id="stage-graph" class="stage-graph"></div>
+    <h2>事件</h2>
+    <ul id="event-list" class="event-list"></ul>
+  </section>
+
+  <section class="column" id="panel-detail">
+    <h2>阶段详情</h2>
+    <div id="stage-detail"><p class="placeholder">在中间栏选择一个阶段查看详情。</p></div>
+    <div id="result-panel" hidden>
+      <details id="candidate-disease-section" class="candidate-section" open>
+        <summary>候选疾病 <span id="candidate-disease-count" class="section-count">0</span></summary>
+        <div class="candidate-table-scroll">
+          <table id="candidates-table">
+            <thead><tr><th>疾病</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="candidate-filter-note" class="note"></p>
+        <p class="note">此处仅显示来源本体标记为疾病的实体。置信度为程序启发式，非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击数值查看组件和计算版本。</p>
+      </details>
+      <div id="evidence-panel" hidden>
+        <h3 id="evidence-title"></h3>
+        <table id="evidence-table">
+          <thead><tr><th>基因</th><th>来源</th><th>行号</th><th>分值</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="evidence-note" class="note"></p>
+      </div>
+      <p id="unmatched-genes" class="note"></p>
+      <p id="unmatched-herbs" class="note"></p>
+    </div>
+
+  </section>
+</main>
+<script src="/assets/app.js?v=20261012-forward-formula"></script>
+</body>
+</html>
