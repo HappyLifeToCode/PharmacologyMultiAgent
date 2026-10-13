@@ -2,7 +2,7 @@ import gzip
 
 import pytest
 
-from pharm.batman.local import generate_import
+from pharm.batman.local import generate_import, query_local_targets
 from pharm.core.imports import load_herb
 
 
@@ -72,6 +72,27 @@ def test_generate_import_with_predicted_rows(tmp_path):
     kept = sorted((r["gene_symbol"], r["evidence"]) for r in herb["relations"])
     assert kept == [("EGFR", "known"), ("EGFR", "known"), ("EGFR", "known"),
                     ("EGFR", "predicted"), ("EGFR", "predicted"), ("TP53", "known")]
+
+
+def test_query_local_targets_defaults_to_known_only_even_when_predicted_files_exist(tmp_path):
+    data = _fixture_data_dir(tmp_path)
+    task = _task(data)
+    result = query_local_targets({"白芍": ["白芍"], "甘草": ["甘草"]}, task=task)
+
+    assert result["include_predicted"] is False
+    assert len(result["relations"]) == 4
+    assert {row["evidence"] for row in result["relations"]} == {"known"}
+    assert result["genes"] == ["EGFR", "TP53"]
+
+
+def test_query_local_targets_can_explicitly_enable_predicted_rows(tmp_path):
+    data = _fixture_data_dir(tmp_path)
+    task = _task(data, batman_include_predicted=True)
+    result = query_local_targets({"白芍": ["白芍"], "甘草": ["甘草"]}, task=task)
+
+    assert result["include_predicted"] is True
+    assert len(result["relations"]) == 6
+    assert any(row["evidence"] == "predicted" for row in result["relations"])
 
 
 def test_generate_import_rejects_unmatched_herb(tmp_path):

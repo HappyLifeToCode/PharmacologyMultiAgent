@@ -125,17 +125,24 @@
     <div id="result-panel" hidden>
       <details id="candidate-disease-section" class="candidate-section" open>
         <summary>候选疾病 <span id="candidate-disease-count" class="section-count">0</span></summary>
+        <p id="candidate-layer-stats" class="note"></p>
         <div class="candidate-table-scroll">
           <table id="candidates-table">
-            <thead><tr><th>疾病</th><th>置信度</th><th>匹配靶点</th><th>输入覆盖率</th><th>疾病覆盖率</th><th>证据行</th><th>操作</th></tr></thead>
+            <thead><tr><th>疾病名称</th><th>disease_id</th><th>MONDO</th><th>associationScore</th><th>严格支持</th><th>匹配靶点</th><th>证据行</th><th>置信度</th><th>操作</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
         <p id="candidate-filter-note" class="note"></p>
-        <p class="note">此处仅显示来源本体标记为疾病的实体。置信度为程序启发式，非统计检验，仅供排序参考；列表为固定顺序，不是疗效排名；零匹配如实显示。点击数值查看组件和计算版本。</p>
+        <p class="note">默认展示 Top-50（Open Targets 既定排序，UI 不重新计算 associationScore）。置信度为程序启发式，非统计检验，仅供排序参考；列表不是疗效排名；零匹配如实显示。点击行查看别名与层级关系，点击置信度数值查看组件。</p>
+      </details>
+      <details id="monarch-section" class="candidate-section monarch-section" hidden>
+        <summary>Monarch 证据补充（OMIM 功能替代） <span id="monarch-count" class="section-count">0</span></summary>
+        <p id="monarch-note" class="note"></p>
+        <div id="monarch-tables"></div>
       </details>
       <div id="evidence-panel" hidden>
         <h3 id="evidence-title"></h3>
+        <div id="candidate-detail" class="candidate-detail"></div>
         <table id="evidence-table">
           <thead><tr><th>基因</th><th>来源</th><th>行号</th><th>分值</th></tr></thead>
           <tbody></tbody>

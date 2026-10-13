@@ -7,6 +7,9 @@ Open Targets 在填写疾病范围时执行疾病→基因，
 from __future__ import annotations
 
 import os
+import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from ..core.common import now, write_json
@@ -14,6 +17,23 @@ from ..discovery import query as discovery
 from .open_targets import collect_open_targets_by_diseases, collect_open_targets_by_targets
 
 SUPPORTED_SOURCES = ("open_targets",)
+
+
+def _shared_index_metadata(database):
+    """Return metadata only for a production reusable Open Targets index."""
+    if not database or not Path(database).is_file():
+        return None
+    try:
+        path = Path(database).resolve()
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+            row = connection.execute("SELECT value FROM metadata LIMIT 1").fetchone()
+        metadata = json.loads(row[0]) if row else None
+    except (OSError, sqlite3.Error, json.JSONDecodeError, TypeError):
+        return None
+    if (isinstance(metadata, dict) and metadata.get("shared_index") is True and
+            metadata.get("import_kind") == "open_targets_batman_known_shared"):
+        return metadata
+    return None
 
 
 def collect_and_extend(task, output_dir, database=None, herb_targets=None):
@@ -31,6 +51,25 @@ def collect_and_extend(task, output_dir, database=None, herb_targets=None):
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    # 靶点驱动的生产主流程优先复用按 Open Targets 版本构建的 BATMAN
+    # known-only 共享索引。疾病限定查询可能需要索引外靶点，仍走采集分支。
+    shared = _shared_index_metadata(database) if not diseases else None
+    if shared:
+        collection = {
+            "started_at": now(), "finished_at": now(), "diseases": [],
+            "sources": sources, "records": [], "database": str(Path(database).resolve()),
+            "mode": "shared_index", "reused": True,
+            "release": shared.get("release"),
+            "selection": shared.get("selection"),
+            "known_symbol_count": shared.get("known_symbol_count"),
+            "resolved_symbol_count": shared.get("resolved_symbol_count"),
+            "counts": {"open_targets": int(shared.get("source_rows", {}).get("open_targets", 0)),
+                       "duplicates": 0},
+        }
+        write_json(output_dir / "online_collection.json", collection)
+        return {"database": collection["database"], "collection": collection,
+                "counts": collection["counts"], "reused": True,
+                "artifacts": ["online_collection.json"]}
     additions = {}
     records = []
     if "open_targets" in sources:
@@ -80,4 +119,5 @@ def collect_and_extend(task, output_dir, database=None, herb_targets=None):
     collection["counts"] = result["counts"]
     write_json(output_dir / "online_collection.json", collection)
     return {"database": result["database"], "collection": collection, "counts": result["counts"],
+            "reused": False,
             "artifacts": ["online_collection.json", "disease_index.sqlite"]}

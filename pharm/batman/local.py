@@ -313,7 +313,9 @@ def query_local_targets(herb_candidates, threshold=0.84, task=None):
     herb_candidates 为 {canonical 名: [候选名, ...]}，按候选顺序取第一个在
     herb_browse.txt 命中的名字；全部未命中的 canonical 记入 unmatched（动物/
     矿物药可能本无记录），不抛错。known 行为二值证据，score=None 且不过滤；
-    predicted 行仅在本地 predicted 文件存在时纳入，保留 score 严格大于阈值者。
+    predicted 行只有在任务显式设置 ``batman_include_predicted=true`` 且本地
+    predicted 文件齐全时才纳入，保留 score 严格大于阈值者。默认主流程只用
+    known 证据，即使 predicted 文件存在也不会自动混入。
     """
     task = task or {}
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(float(threshold)):
@@ -331,7 +333,12 @@ def query_local_targets(herb_candidates, threshold=0.84, task=None):
             if candidate.is_file():
                 files[kind] = candidate
                 break
-    include_predicted = all(kind in files for kind in PREDICTED_FILES)
+    # predicted 是可选对照来源，不能因为本地文件存在就自动进入主流程。
+    # 主流程默认采用此前确定的 BATMAN known-only 口径。
+    include_predicted = (
+        task.get("batman_include_predicted") is True
+        and all(kind in files for kind in PREDICTED_FILES)
+    )
 
     all_names = [name for names in herb_candidates.values() for name in names]
     matched, _ = _match_herb_compounds(files["herbs"], all_names)

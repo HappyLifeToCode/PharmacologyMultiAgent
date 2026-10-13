@@ -42,7 +42,8 @@ def test_index_static_assets_and_formulas_catalog():
         assert "正向 Agent：方剂/药材 → 候选疾病" in page.text
         assert "forward-herbs-input" in page.text
         assert "Open Targets" in page.text
-        assert "GeneCards" not in page.text and "OMIM" not in page.text
+        assert "GeneCards" not in page.text and "omim.org" not in page.text
+        # Monarch 作为 OMIM 功能替代来源出现在页面中是预期内容（直接 OMIM 数据源已退役）
         assert "assist-canvas" not in page.text
         assert client.get("/assets/app.js").status_code == 200
         assert client.get("/assets/style.css").status_code == 200

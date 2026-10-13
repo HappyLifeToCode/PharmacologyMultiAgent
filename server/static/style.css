@@ -241,3 +241,19 @@ th { background: #eef3f0; }
 .analysis-btn { padding: 2px 10px; font-size: 12px; }
 .analysis-btn:disabled { opacity: 0.5; cursor: default; }
 .agent-review { border: 1px solid #d8d2c0; border-radius: 4px; padding: 8px 12px; margin: 8px 0; background: #fbfaf5; }
+
+/* 候选详情与 Monarch 证据区 */
+.candidate-detail {
+  background: #f3efe2;
+  border-radius: 6px;
+  color: #41565f;
+  font-size: 12px;
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.monarch-section { margin-top: 12px; }
+.monarch-block { margin: 10px 0; }
+.monarch-block h4 { margin: 6px 0; font-size: 13px; color: #41565f; }
+.monarch-block .candidate-table-scroll { max-height: 320px; }

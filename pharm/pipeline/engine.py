@@ -601,12 +601,18 @@ class Runner:
                             database = Path(online["database"])
                             self.manifest["discovery_database"] = str(database)
                             counts = online["counts"]
-                            source_summary = "、".join(
-                                "%s %d 行" % (name, counts.get(name, 0))
-                                for name in self.task.get("online_sources", ["open_targets"]))
-                            self.event(role, "online_collection.completed",
-                                       "Open Targets 查询与建库完成：%s，重复 %d 行" % (
-                                           source_summary, counts.get("duplicates", 0)))
+                            if online.get("reused"):
+                                self.event(role, "online_collection.completed",
+                                           "已复用 Open Targets %s known-only 共享索引（%d 行），本次未重新提取或建库" % (
+                                               online["collection"].get("release") or "",
+                                               counts.get("open_targets", 0)))
+                            else:
+                                source_summary = "、".join(
+                                    "%s %d 行" % (name, counts.get(name, 0))
+                                    for name in self.task.get("online_sources", ["open_targets"]))
+                                self.event(role, "online_collection.completed",
+                                           "Open Targets 查询与建库完成：%s，重复 %d 行" % (
+                                               source_summary, counts.get("duplicates", 0)))
                         except Exception as exc:
                             guidance = "Open Targets 查询未完成，已保留中间产物；检查 API 连接或本地快照配置后恢复第三阶段。"
                             self.event(role, "online_collection.error", str(exc))

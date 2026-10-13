@@ -680,32 +680,49 @@ async function renderResults(manifest, stage, role) {
     return;
   }
   panel.hidden = false;
+  // Top-50 优先：新产物用 candidate_layers.top，旧运行回退 result.candidates；UI 不改变后端排序
+  const layers = result.candidate_layers || {};
   const allCandidates = Array.isArray(result.candidates) ? result.candidates : [];
-  const candidates = allCandidates.filter(isDiseaseCandidate);
+  const hasTop = Array.isArray(layers.top) && layers.top.length > 0;
+  const source = hasTop ? layers.top : allCandidates;
+  const candidates = source.filter(isDiseaseCandidate).slice(0, 50);
+  const completeCount = Array.isArray(layers.complete) ? layers.complete.length : allCandidates.length;
+  const baseCount = Array.isArray(layers.base) ? layers.base.length : null;
+  const strictCount = Array.isArray(layers.strict) ? layers.strict.length : null;
+  const hiddenPhenotypes = completeCount - allCandidates.filter(isDiseaseCandidate).length >= 0
+    ? completeCount - allCandidates.filter(isDiseaseCandidate).length : 0;
+  const statsParts = [`完整候选 ${completeCount}`];
+  if (baseCount != null) statsParts.push(`基础 ${baseCount}`);
+  if (strictCount != null) statsParts.push(`严格 ${strictCount}`);
+  statsParts.push(`Top-50 展示 ${candidates.length}`);
+  statsParts.push(`已隐藏表型/测量性状 ${Math.max(hiddenPhenotypes, 0)}`);
+  $("candidate-layer-stats").textContent = statsParts.join(" · ")
+    + (hasTop ? "" : "（旧产物无 candidate_layers.top，回退到原始候选列表）");
   $("candidate-disease-count").textContent = String(candidates.length);
-  $("candidate-filter-note").textContent = allCandidates.length > candidates.length
-    ? `已隐藏 ${allCandidates.length - candidates.length} 个表型或测量性状实体；完整关联仍保留在运行产物中。`
-    : "当前结果未发现表型或测量性状实体。";
+  $("candidate-filter-note").textContent = "";
+  const nameOf = (c) => c.disease_name || c.canonical_name || c.disease;
   const tbody = $("candidates-table").querySelector("tbody");
   tbody.innerHTML = "";
   if (!candidates.length) {
     const empty = document.createElement("tr");
-    empty.innerHTML = "<td colspan='7' class='empty-cell'>当前结果没有可显示的疾病实体。</td>";
+    empty.innerHTML = "<td colspan='9' class='empty-cell'>当前结果没有可显示的疾病实体。</td>";
     tbody.appendChild(empty);
   }
   for (const candidate of candidates) {
     const row = document.createElement("tr");
-    const coverage = (value) => (value == null ? "—" : (value * 100).toFixed(1) + "%");
     const confidence = candidate.confidence || {};
-    row.innerHTML = "<td></td><td class='conf-cell'></td><td></td><td></td><td></td><td></td><td></td>";
+    row.innerHTML = "<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>";
     const cells = row.querySelectorAll("td");
-    cells[0].textContent = candidate.disease;
-    cells[1].textContent = confidence.value == null ? "—" : confidence.value.toFixed(2);
-    cells[1].title = "点击展开置信度组件";
-    cells[2].textContent = candidate.matched_count;
-    cells[3].textContent = result.input_count ? coverage(candidate.input_coverage) : "—";
-    cells[4].textContent = coverage(candidate.disease_coverage);
-    cells[5].textContent = (candidate.evidence || []).length;
+    cells[0].textContent = nameOf(candidate);
+    cells[0].title = candidate.disease;
+    cells[1].textContent = candidate.disease_id || "—";
+    cells[2].textContent = candidate.mondo_id || "未映射";
+    cells[3].textContent = candidate.max_association_score == null ? "—" : candidate.max_association_score;
+    cells[4].textContent = candidate.strict_support_target_count == null ? "—" : candidate.strict_support_target_count;
+    cells[5].textContent = candidate.matched_count;
+    cells[6].textContent = candidate.evidence_row_count != null ? candidate.evidence_row_count : (candidate.evidence || []).length;
+    cells[7].textContent = confidence.value == null ? "—" : confidence.value.toFixed(2);
+    cells[7].title = "点击展开置信度组件";
     if (candidate.matched_count > 0) {
       const button = document.createElement("button");
       button.className = "analysis-btn";
@@ -713,20 +730,20 @@ async function renderResults(manifest, stage, role) {
       button.title = "对该疾病做机制分析（共同靶点→网络→富集→验收）";
       button.addEventListener("click", (event) => {
         event.stopPropagation();
-        startAnalysis(candidate.disease, button);
+        startAnalysis(candidate.disease, button);  // 内部传递仍用 candidate.disease
       });
-      cells[6].appendChild(button);
+      cells[8].appendChild(button);
     } else {
-      cells[6].textContent = "—";  // 零匹配：无共同靶点可分析
+      cells[8].textContent = "—";  // 零匹配：无共同靶点可分析
     }
-    cells[1].addEventListener("click", (event) => {
+    cells[7].addEventListener("click", (event) => {
       event.stopPropagation();
       toggleConfidenceDetail(row, candidate);
     });
     row.addEventListener("click", () => {
       tbody.querySelectorAll("tr").forEach((tr) => tr.classList.remove("selected"));
       row.classList.add("selected");
-      renderEvidence(candidate);
+      renderEvidence(candidate, candidates);
     });
     tbody.appendChild(row);
   }
@@ -743,6 +760,80 @@ async function renderResults(manifest, stage, role) {
   $("unmatched-herbs").textContent = unmatchedHerbs.length
     ? "BATMAN 未收录或未命中药材：" + unmatchedHerbs.join("、")
     : "";
+  renderMonarch(result);
+}
+
+function renderMonarch(result) {
+  const section = $("monarch-section");
+  const evidence = result.monarch_evidence;
+  if (!evidence) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  const tables = evidence.tables || {};
+  const total = (evidence.gene_disease_count || 0) + (evidence.hpo_count || 0)
+    + (evidence.inheritance_count || 0) + (evidence.publication_count || 0);
+  $("monarch-count").textContent = String(total);
+  $("monarch-note").textContent = `来源：${evidence.source || "monarch"} ${evidence.release || ""} · `
+    + `基因—疾病 ${evidence.gene_disease_count || 0} · HPO 表型 ${evidence.hpo_count || 0} · `
+    + `遗传方式 ${evidence.inheritance_count || 0} · 文献 ${evidence.publication_count || 0} · `
+    + `未解析 ${evidence.unresolved_count || 0}。Monarch 证据独立保存，不参与 Open Targets 分数与排序，`
+    + `不能解释为临床疗效或诊断结论。完整数据请下载 monarch_* 产物文件。`;
+  const host = $("monarch-tables");
+  host.innerHTML = "";
+  const defs = [
+    ["基因—疾病", tables.gene_disease,
+     ["candidate_disease_id", "mondo_id", "gene_symbol", "disease_id", "disease_name", "predicate", "publication_id", "source"]],
+    ["HPO 表型", tables.hpo,
+     ["disease_id", "hpo_id", "hpo_name", "frequency", "onset", "negated", "evidence_code", "publication_id"]],
+    ["遗传方式", tables.inheritance,
+     ["disease_id", "inheritance_id", "inheritance_name", "evidence_code", "publication_id"]],
+    ["文献", tables.publications,
+     ["disease_id", "gene_id", "publication_id", "source", "evidence_code"]],
+  ];
+  const CAP = 50;
+  for (const [title, rows, fields] of defs) {
+    if (!Array.isArray(rows) || !rows.length) continue;
+    const block = document.createElement("div");
+    block.className = "monarch-block";
+    const head = document.createElement("h4");
+    head.textContent = `${title}（${rows.length}）`;
+    block.appendChild(head);
+    const wrap = document.createElement("div");
+    wrap.className = "candidate-table-scroll";
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    for (const field of fields) {
+      const th = document.createElement("th");
+      th.textContent = field;
+      headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const row of rows.slice(0, CAP)) {
+      const tr = document.createElement("tr");
+      for (const field of fields) {
+        const td = document.createElement("td");
+        const value = row[field];
+        td.textContent = value == null || value === "" ? "—" : value;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    block.appendChild(wrap);
+    if (rows.length > CAP) {
+      const more = document.createElement("p");
+      more.className = "note";
+      more.textContent = `仅显示前 ${CAP} 行，共 ${rows.length} 行。`;
+      block.appendChild(more);
+    }
+    host.appendChild(block);
+  }
 }
 
 function renderAgentReview(review) {
@@ -803,7 +894,7 @@ function toggleConfidenceDetail(row, candidate) {  const next = row.nextElementS
   const detail = document.createElement("tr");
   detail.className = "conf-detail";
   const cell = document.createElement("td");
-  cell.colSpan = 7;
+  cell.colSpan = 9;
   const names = { match_score: "log 匹配数", input_coverage: "输入覆盖率",
                   disease_coverage: "疾病覆盖率", evidence_quality: "证据质量" };
   const parts = Object.keys(names).map((key) => {
@@ -839,10 +930,31 @@ function isDiseaseCandidate(candidate) {
   return ["MONDO", "ORPHANET", "DOID"].includes(prefix);
 }
 
-function renderEvidence(candidate) {
+function renderEvidence(candidate, allCandidates) {
   const panel = $("evidence-panel");
   panel.hidden = false;
-  $("evidence-title").textContent = candidate.disease + " · 逐条证据";
+  const displayName = candidate.disease_name || candidate.canonical_name || candidate.disease;
+  $("evidence-title").textContent = displayName + " · 逐条证据";
+  // 候选详情：别名、MONDO 与父子层级（只标记关系，不合并、不排序）
+  const detail = $("candidate-detail");
+  detail.innerHTML = "";
+  const parts = [];
+  parts.push(`disease_id：${candidate.disease_id || "—"}`);
+  parts.push(`MONDO：${candidate.mondo_id || "未映射"}`);
+  const aliases = Array.isArray(candidate.aliases) ? candidate.aliases.filter(Boolean) : [];
+  if (aliases.length) parts.push(`别名：${aliases.join("、")}`);
+  const nameById = {};
+  for (const other of allCandidates || []) {
+    if (other.disease_id) nameById[other.disease_id] = other.disease_name || other.canonical_name || other.disease;
+  }
+  const describe = (ids) => (ids || []).map((id) => `${nameById[id] || id}（${id}）`);
+  const parents = describe(candidate.parent_candidate_ids);
+  const children = describe(candidate.child_candidate_ids);
+  if (candidate.is_parent_child_related && (parents.length || children.length)) {
+    parts.push("相关疾病实体：父级疾病：" + (parents.join("、") || "无（本批候选内）")
+      + "；下位疾病：" + (children.join("、") || "无（本批候选内）"));
+  }
+  detail.textContent = parts.join("　|　");
   const tbody = $("evidence-table").querySelector("tbody");
   tbody.innerHTML = "";
   const rows = (candidate.evidence || []).slice(0, 100);
