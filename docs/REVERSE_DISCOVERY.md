@@ -45,7 +45,7 @@ GeneCards/OMIM 专用导入入口已移除，既有 SQLite 索引仍可查询。
 
 - `GET /api/discovery/catalog`：索引疾病清单（名称 + 靶点数）、收录药材、来源行数与限制声明。
 - `POST /api/discovery/query`：`{"herbs":[...]}` 或 `{"genes":[...]}` 二选一；自动归档到 `local/discovery/runs/lookup_<id>/`。
-- `GET /discovery/artifacts/{run_id}/{filename}`：只允许下载 result.json、candidates.csv、evidence.csv、report.md、manifest.json。
+- `GET /discovery/artifacts/{run_id}/{filename}`：默认 compact 产物包括 result.json、summary.json、candidates_topk.csv、topk_target_evidence.csv、topk_hierarchy.json、report.md、manifest.json；audit 模式另提供全量结果与证据文件。
 
 pipeline 运行时无需直接调用以上接口——`disease_reverse` 阶段内部完成反查并把同样格式的产物写入阶段 attempt 目录。
 

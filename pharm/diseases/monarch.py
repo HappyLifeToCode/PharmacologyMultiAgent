@@ -2,7 +2,7 @@
 
 Monarch supplements Open Targets candidates with gene-disease links, HPO
 phenotypes, inheritance modes and PMID/ECO evidence.  It never touches
-Open Targets associationScore, candidate layers or Top-50 ordering.
+Open Targets associationScore, candidate layers or configurable Top-K ordering.
 
 Disabled by default: PHARM_MONARCH_ENABLED=true (or task monarch_enabled=true)
 turns it on; PHARM_MONARCH_DATA_DIR / configs/monarch_data.local.json /
@@ -191,7 +191,7 @@ def _publication_rows(disease_id, gene_id, publications, source, evidence_code):
 
 
 def enrich_open_targets_candidates(result, task=None):
-    """为 result 的 Top-50 候选生成独立 Monarch 证据（不修改任何候选字段）。
+    """为 result 的 Top-K 候选生成独立 Monarch 证据（不修改任何候选字段）。
 
     返回可直接写入 result["monarch_evidence"] 的字典；未启用时返回 None。
     """

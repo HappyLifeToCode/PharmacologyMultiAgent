@@ -50,7 +50,7 @@ provenance.json     另含 sources.batman（herbs、threshold、threshold_confir
   prepare --batch local/open_targets_target_pilot
 ```
 
-Open Targets 以疾病 ID 与标签组成 disease 键，Ensembl ID、疾病 ID 和可获得的数据源分数保存在 `extra`；API 原始完整分页保存于 `raw/open_targets_responses.jsonl`。每条关联的 `extra` 同时携带疾病实体元数据：`disease_id`（主键）、`canonical_disease_id`、`canonical_name`、`aliases`、`mondo_id`、`mondo_mapping`、`ontology`、`parents`、`ancestors`、`entity_type`。disease_id 为 Open Targets 原始 ID；MONDO 仅为可选映射；exactSynonyms 只作别名展示；父子疾病只标记关系不合并。批次产物按候选分层保存：`candidates_complete.csv`（完整层，含全部原始 direct association）、`candidates_base.csv`（>0.2）、`candidates_strict.csv`（>=0.6）、`candidates_top50.csv`（disease 实体排序 Top-50）、`candidate_hierarchy.json`（候选间父子关系及来源）。
+Open Targets 以疾病 ID 与标签组成 disease 键，Ensembl ID、疾病 ID 和可获得的数据源分数保存在 `extra`；API 原始完整分页保存于 `raw/open_targets_responses.jsonl`。每条关联的 `extra` 同时携带疾病实体元数据：`disease_id`（主键）、`canonical_disease_id`、`canonical_name`、`aliases`、`mondo_id`、`mondo_mapping`、`ontology`、`parents`、`ancestors`、`entity_type`。disease_id 为 Open Targets 原始 ID；MONDO 仅为可选映射；exactSynonyms 只作别名展示；父子疾病只标记关系不合并。默认运行产物采用 compact 模式：`summary.json` 保存完整/基础/严格/Top-K 数量，`candidates_topk.csv` 保存最终候选，`topk_target_evidence.csv` 保存其支持证据，`topk_hierarchy.json` 保存候选间父子关系。`result_full.json`、`candidates_complete.csv`、`candidates_base.csv`、`candidates_strict.csv` 与全量 `evidence.csv` 只在 audit 模式生成。
 
 第三阶段采集默认不做 top-k/min-score 过滤（完整层必须保留全量 direct association），筛选只发生在候选分层。试验性过滤为显式启用：`PHARM_OPEN_TARGETS_TOP_K`、`PHARM_OPEN_TARGETS_MIN_SCORE` 设置后才生效（其余入口 `PHARM_OPEN_TARGETS_PAGE_SIZE`、`PHARM_OPEN_TARGETS_REQUEST_DELAY`、`PHARM_OPEN_TARGETS_TIMEOUT`）。直接 CLI 查询可显式指定 `--top-k-per-disease` 或 `--top-k-per-target`、`--min-score`；不传时不自动沿用主流程试验选择。实际执行规则始终记录于产物。启用 top-k/min-score 的批次未保留全量 direct association，provenance 标记 `complete=false` / `raw_rows_complete=false`，严格导入校验将拒绝该批次；完整层必须使用未过滤的采集。
 
@@ -94,7 +94,7 @@ data/monarch/2026-10-07/
   mondo.sssom.tsv                       疾病本体 → MONDO（subject=MONDO，取 skos:exactMatch）
 ```
 
-配置：复制 `configs/monarch_data.example.json` 为 Git 忽略的 `configs/monarch_data.local.json` 填本机 `data_dir`，或设 `PHARM_MONARCH_DATA_DIR`（优先）。启用：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true`；默认关闭时 Open Targets 流程行为完全不变。原始文件不提交 Git；下载后经 metadata.yaml 官方 SHA-256 校验方可使用（校验记录见 `local/monarch_validation_20261010/`）。仅对 Top-50 候选补充证据；结果不能解释为临床疗效或诊断结论。
+配置：复制 `configs/monarch_data.example.json` 为 Git 忽略的 `configs/monarch_data.local.json` 填本机 `data_dir`，或设 `PHARM_MONARCH_DATA_DIR`（优先）。启用：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true`；默认关闭时 Open Targets 流程行为完全不变。原始文件不提交 Git；下载后经 metadata.yaml 官方 SHA-256 校验方可使用（校验记录见 `local/monarch_validation_20261010/`）。仅对本次配置的 Top-K 候选补充证据；结果不能解释为临床疗效或诊断结论。
 
 ```powershell
 $env:PHARM_OPEN_TARGETS_MODE = "local"

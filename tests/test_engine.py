@@ -212,6 +212,7 @@ def test_fixture_reverse_uses_synthetic_index(root):
     result = json.loads((root / "runs" / _ / manifest["verified_targets"]["disease_reverse"]).read_text(encoding="utf-8"))
     assert result["dataset"]["batch_name"] == "synthetic_engineering"
     diseases = {candidate["disease"] for candidate in result["candidates"] if candidate["matched_count"]}
-    # 两味药覆盖 TP53/EGFR/AKT1/TNF，其余疾病无命中如实保留
-    assert diseases == {"Hyperthyroidism", "Hypothyroidism", "Thyroid cancer", "Thyroid nodules"}
+    # 精简结果只保留满足候选层阈值的 Top-K；完整命中数量保存在 summary。
+    assert diseases == {"Hyperthyroidism", "Hypothyroidism", "Thyroid cancer"}
+    assert result["summary"]["counts"]["matched_candidates"] == 4
     assert result["unmatched_genes"] == []

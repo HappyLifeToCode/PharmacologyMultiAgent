@@ -2,5 +2,7 @@
   "agent_runtime": "codex-cli",
   "codex_profile": "icrc",
   "model": "gpt-5.6-luna",
-  "model_reasoning_effort": "medium"
+  "model_reasoning_effort": "medium",
+  "candidate_output_top_k": 50,
+  "output_retention": "compact"
 }

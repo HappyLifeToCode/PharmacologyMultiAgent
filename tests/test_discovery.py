@@ -186,7 +186,11 @@ def test_save_result_and_no_overwrite(database, tmp_path):
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     for name, expected in manifest["artifacts"].items():
         assert digest(output / name) == expected
-    assert (output / "evidence.csv").read_text(encoding="utf-8-sig").startswith("disease,gene_symbol")
+    assert (output / "topk_target_evidence.csv").read_text(
+        encoding="utf-8-sig").startswith("disease,disease_id,gene_symbol")
+    assert (output / "summary.json").is_file()
+    assert not (output / "evidence.csv").exists()
+    assert not (output / "result_full.json").exists()
     with pytest.raises(FileExistsError):
         discovery.save_result(result, output)
 
@@ -513,7 +517,7 @@ def test_evidence_rows_are_distinct_from_unique_matched_genes(database):
 
     output = database.parent / "evidence-counts"
     discovery.save_result(result, output)
-    header = (output / "candidates.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+    header = (output / "candidates_topk.csv").read_text(encoding="utf-8-sig").splitlines()[0]
     assert "unique_evidence_gene_count" in header
     assert "evidence_row_count" in header
 
@@ -558,11 +562,41 @@ def test_confidence_in_csv_and_report(database, tmp_path):
     result = discovery.query(database, genes=["TP53"])
     output = tmp_path / "run"
     discovery.save_result(result, output)
-    header = (output / "candidates.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+    header = (output / "candidates_topk.csv").read_text(encoding="utf-8-sig").splitlines()[0]
     assert "confidence" in header.split(",")
     report = (output / "report.md").read_text(encoding="utf-8")
     assert "置信度" in report and "heuristic_v2" in report
     assert "非统计检验" in report
+
+
+def test_compact_top_k_is_configurable_and_audit_is_explicit(database, tmp_path):
+    result = discovery.query(database, genes=["TP53", "EGFR"], candidate_top_k=2)
+    compact = tmp_path / "compact"
+    discovery.save_result(result, compact)
+    saved = json.loads((compact / "result.json").read_text(encoding="utf-8"))
+    summary = json.loads((compact / "summary.json").read_text(encoding="utf-8"))
+    assert summary["candidate_output"] == {
+        "requested_k": 2,
+        "actual_count": len(saved["candidates"]),
+        "sort_policy": "candidate_layers.rules + deterministic disease_id tie-break",
+    }
+    assert len(saved["candidates"]) <= 2
+    assert summary["counts"]["evidence_rows_full"] >= summary["counts"]["evidence_rows_top_k"]
+    assert not (compact / "candidates_complete.csv").exists()
+    assert not (compact / "evidence.csv").exists()
+
+    audit = tmp_path / "audit"
+    discovery.save_result(result, audit, retention="audit")
+    for name in ("result_full.json", "candidates_complete.csv", "candidates_base.csv",
+                 "candidates_strict.csv", "evidence.csv"):
+        assert (audit / name).is_file()
+
+
+def test_candidate_top_k_environment_overrides_runtime(database, monkeypatch):
+    monkeypatch.setenv("PHARM_CANDIDATE_OUTPUT_TOP_K", "1")
+    result = discovery.query(database, genes=["TP53", "EGFR"])
+    assert result["candidate_layers"]["rules"]["top_n"] == 1
+    assert len(result["candidate_layers"]["top"]) <= 1
 
 
 def test_confidence_on_generic_associations_index(assoc_batch, tmp_path):

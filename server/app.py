@@ -302,6 +302,8 @@ def discovery_artifact(run_id: str, filename: str):
     if filename not in ("result.json", "candidates.csv", "evidence.csv", "report.md", "manifest.json",
                         "candidates_complete.csv", "candidates_base.csv", "candidates_strict.csv",
                         "candidates_top50.csv", "candidate_hierarchy.json",
+                        "summary.json", "candidates_topk.csv", "topk_target_evidence.csv",
+                        "topk_hierarchy.json", "result_full.json",
                         "monarch_gene_disease.csv", "monarch_hpo.csv", "monarch_inheritance.csv",
                         "monarch_publications.csv", "monarch_unresolved.csv", "monarch_provenance.json"):
         raise HTTPException(404)

@@ -18,7 +18,8 @@ def prepare_task(body):
     if not isinstance(body, dict):
         raise ValueError("任务必须是 JSON 对象")
     allowed = {"formula", "herbs", "research_notes", "batman_threshold", "mode", "agents",
-               "online_collect", "online_diseases", "online_sources"}
+               "online_collect", "online_diseases", "online_sources",
+               "candidate_output_top_k", "output_retention"}
     if set(body) - allowed:
         raise ValueError("包含不支持的任务字段")
     formula = body.get("formula")
@@ -81,10 +82,24 @@ def prepare_task(body):
     if not isinstance(online_sources, list) or not online_sources or any(source != "open_targets" for source in online_sources):
         raise ValueError("online_sources 目前只支持 open_targets，且不能为空；旧数据源任务需重新保存")
     online_sources = list(dict.fromkeys(online_sources))
+    candidate_top_k = body.get("candidate_output_top_k")
+    if candidate_top_k is not None and (
+            isinstance(candidate_top_k, bool) or not isinstance(candidate_top_k, int)
+            or not 1 <= candidate_top_k <= 500):
+        raise ValueError("candidate_output_top_k 须为 1—500 的整数")
+    retention = body.get("output_retention")
+    if retention is not None:
+        retention = str(retention).strip().lower()
+        if retention not in ("compact", "audit"):
+            raise ValueError("output_retention 只支持 compact 或 audit")
     task = {"formula": formula, "herbs": herbs, "research_notes": notes.strip(),
             "batman_threshold": float(threshold), "mode": mode, "composition": composition,
             "agents": agents, "online_collect": online_collect,
             "online_diseases": normalized_diseases, "online_sources": online_sources}
+    if candidate_top_k is not None:
+        task["candidate_output_top_k"] = candidate_top_k
+    if retention is not None:
+        task["output_retention"] = retention
     key = hashlib.sha256(json.dumps(task, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return dict(task_id="web_" + key, **task)
 
