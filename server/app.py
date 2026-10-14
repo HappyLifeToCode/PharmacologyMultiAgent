@@ -104,7 +104,7 @@ def formula_picker_style():
 @app.get("/assets/icons/{filename}")
 def chat_icon(filename: str):
     allowed = {"leaf.svg", "plus.svg", "search.svg", "arrow-up.svg", "settings.svg",
-               "layout-sidebar.svg", "download.svg", "x.svg", "trash.svg"}
+               "layout-sidebar.svg", "download.svg", "x.svg", "trash.svg", "favicon.svg"}
     if filename not in allowed:
         raise HTTPException(404)
     return FileResponse(ROOT / "server/static/icons" / filename, media_type="image/svg+xml")
