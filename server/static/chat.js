@@ -173,6 +173,7 @@ function table(headers, rows, parent) {
   grid.append(head, body);
   wrapper.append(grid);
   parent.append(wrapper);
+  return grid;
 }
 
 function renderComposition(result, content) {

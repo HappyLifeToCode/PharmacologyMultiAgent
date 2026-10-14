@@ -73,7 +73,8 @@ function renderReverseEvidence(result, index, content) {
   if (herb.excluded_known_symbols?.length) content.append(element("p", "reply-note", "未通过项目符号校验、未计入覆盖率的原始记录：" + herb.excluded_known_symbols.join("、")));
   const paths = details("靶点 → 成分 → 药材（最多 100 行）", content);
   paths.open = true;
-  table(["疾病靶点", "BATMAN 原符号", "成分 CID", "成分名称", "证据"], (herb.evidence || []).slice(0, 100).map((row) => [row.gene_symbol, row.batman_symbol, row.compound_id, row.compound_name, "known"]), paths);
+  const pathTable = table(["疾病靶点", "BATMAN 原符号", "成分 CID", "成分名称", "证据"], (herb.evidence || []).slice(0, 100).map((row) => [row.gene_symbol, row.batman_symbol, row.compound_id, row.compound_name, "known"]), paths);
+  pathTable.classList.add("compound-evidence-table");
   const disease = details("这些靶点的疾病关联来源（最多 100 行）", content);
   table(["靶点", "来源", "原始关联分值"], (herb.matched_genes || []).flatMap((gene) => (result.disease_evidence?.[gene] || []).map((row) => [gene, sourceLabel(row.source), row.relevance_score])).slice(0, 100), disease);
   content.append(element("p", "reply-note", "疾病—靶点关联与成分—靶点 known 关系分别保留；完整路径随结果导出。"));

@@ -102,6 +102,9 @@ th { font-weight: 500; color: var(--muted); background: var(--page); }
 th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .table-scroll th { position: sticky; top: 0; }
 .evidence-table { min-width: 540px; }
+.compound-evidence-table { min-width: 0; }
+.compound-evidence-table th, .compound-evidence-table td { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.compound-evidence-table td:nth-child(4) { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
 .source-state { color: #936a2e; font-size: 12px; margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .followups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .followups button { border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font-size: 11px; transition: background .15s ease; }
