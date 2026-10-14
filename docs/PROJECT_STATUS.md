@@ -1,5 +1,13 @@
 # 项目进度与问题清单
 
+更新：2026-10-14。首页与工作台候选疾病英文名后追加中文名，覆盖候选列表、证据、评分组成和父子疾病展示；本地词表含 2,620 个 MONDO ID 和 66 个精确英文名/别名，来自 Wikidata CC0 中文标签及明确标注的项目译名。既有温经汤/白芍甘草结果全部候选已覆盖，旧结果无需重算，未知词条明确提示；研究 ID、排序、原始归档与导出不变。
+
+同日修复 `Failed to fetch` 后重试重叠，并按用户最后要求改为“关闭页签才自动停止”：正向查询独立进程，项目内导航/切换标签/刷新继续原查询，SSE 页签持续连接断开后给 10 秒重连接续缓冲；关闭页签或长期丢失连接才停止对应任务。连接报错可恢复原查询；主动重试带旧请求编号并确认旧进程退出后启动新的，保留中间记录。访问校验使用纯 ASGI 中间件。研究工作台新标签页打开；归档读取失败可只重读。重试从头运行，尚无断点续算。验证记录见 `local/checks/chinese-disease-20261014/`。更新后按原命令启动服务，实时 PID/端口状态看本地接续记录。
+
+浏览器最新验证：桌面 1440×960、移动 390×844 通过真实温经汤归档的双语候选/证据/评分及只 GET 重读，无 JS 错误/横向溢出，原归档 SHA-256 不变。真实白芍查询进入工作台超过 10 秒、返回/刷新仍保持同一 PID，仅一个 POST；关闭查询页签后 cancelled/tab_closed，其他工作台页签和服务继续运行。网络故障/合成错误响应验证不自动取消、主动重试携带 supersedes；不把负向测试作为研究结果。最新全量测试结果见接续文件。
+
+最终全量 **269 passed, 3 skipped**，四份 JavaScript 语法检查通过。另验证本已中文的名称不重复追加、未知名称和对象原型键不误当词条；服务重启状态不被错误恢复为持续运行。
+
 更新：2026-10-10。基于 `0e4abd0` 的 Open Targets 双方向查询实现，删除不可用数据源链路，并收紧候选疾病展示。本次新增 Open Targets 疾病实体归一化审计（26.09）与候选分层方案落地：disease_id 为主键、MONDO 为可选映射、exactSynonyms 不改变实体身份、父子疾病只标记不合并；候选产物分为完整/基础/严格/Top-50 四层并输出 `candidate_hierarchy.json`；修复启用 top-k/min-score 时 provenance 误标完整的问题（现标记 `complete=false` 并被严格导入拒绝）；修复本地疾病元数据读取丢列问题（pyarrow `schema.names` 返回叶子名，改用 `schema_arrow.names`）。TP53/EGFR/AKT1 本地验证十项检查全部通过，产物见 `local/open_targets_candidate_layers_validation_20261010/`。合并前三点确认：① 主流程采集默认不再带 Top-100/min_score=0.2（完整层使用未过滤采集，环境变量仅作显式试验）；② 工作台仍直接展示 `result.candidates`（自行过滤疾病实体），**尚未接入** candidates_top50.csv、别名与父子关系，界面 Top-50 展示不属于已完成项；③ 五个分层产物已写入运行 manifest 产物列表（含 SHA-256）与服务器下载白名单。测试 200 passed / 3 skipped。
 
 更新：2026-10-12。Monarch Initiative（KG 2026-10-07，官方 SHA-256 校验通过）作为 OMIM 功能替代来源接入：新增 `pharm/diseases/monarch.py`，默认关闭（`PHARM_MONARCH_ENABLED` / 任务 `monarch_enabled`），仅对 Top-50 候选补充基因—疾病、HPO 表型、遗传方式与 PMID/ECO 证据，产物独立保存并登记 manifest/下载白名单；不参与 Open Targets 分数与排序，无 MONDO 映射记录保留。6 靶点回归验证见 `local/monarch_omim_replacement_validation_20261012/`。测试 205 passed / 3 skipped。

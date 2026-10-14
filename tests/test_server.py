@@ -49,6 +49,10 @@ def test_index_static_assets_and_formulas_catalog():
         assert client.get("/assets/style.css").status_code == 200
         assert client.get("/assets/chat.js").status_code == 200
         assert client.get("/assets/chat.css").status_code == 200
+        assert client.get("/assets/disease-labels.js").status_code == 200
+        assert client.get("/assets/query-presence.js").status_code == 200
+        glossary = client.get("/assets/disease-labels.json").json()
+        assert glossary["by_id"]["MONDO:0007254"]["label"] == "乳腺癌"
         assert client.get("/assets/icons/leaf.svg").status_code == 200
         assert client.get("/assets/icons/private.svg").status_code == 404
         workbench = client.get("/workbench")
@@ -87,7 +91,16 @@ def test_forward_agent_endpoint(monkeypatch):
         calls.append((herbs, formula, text, top_k, batman_threshold))
         return {"run_id": "forward_test", "result": {"candidates": []}}
 
-    monkeypatch.setattr(backend.forward, "query", fake_query)
+    async def fake_run(request, body, root, request_id, supersedes=None, owner_id=None):
+        backend.forward_jobs.request_identifier(request_id)
+        if supersedes is not None:
+            backend.forward_jobs.request_identifier(supersedes)
+        if owner_id is not None:
+            backend.forward_jobs.request_identifier(owner_id)
+        return fake_query(body.get("herbs"), formula=body.get("formula"), text=body.get("text"),
+                          top_k=body.get("top_k"), batman_threshold=body.get("batman_threshold", 0.84))
+
+    monkeypatch.setattr(backend.forward_jobs.manager, "run", fake_run)
     with TestClient(backend.app, base_url="http://localhost") as client:
         response = client.post("/api/agent/forward", json={"herbs": ["白芍"], "top_k": 3})
         assert response.status_code == 200
@@ -99,7 +112,47 @@ def test_forward_agent_endpoint(monkeypatch):
         response = client.post("/api/agent/forward", json={"text": "温经汤", "top_k": 2})
         assert response.status_code == 200
         assert calls[-1] == (None, None, "温经汤", 2, 0.84)
+        assert client.post("/api/agent/forward", json={"text": "温经汤", "request_id": "../bad"}).status_code == 400
+        assert client.post("/api/agent/forward", json={"text": "温经汤", "owner_id": "../bad"}).status_code == 400
         assert client.post("/api/agent/forward", json={"herbs": ["白芍"], "unknown": 1}).status_code == 400
+
+
+def test_forward_cancel_endpoint_and_origin(monkeypatch):
+    calls = []
+
+    async def fake_stop(request_id):
+        backend.forward_jobs.request_identifier(request_id)
+        calls.append(request_id)
+        return {"request_id": request_id, "stopped": True, "status": "cancelled"}
+
+    monkeypatch.setattr(backend.forward_jobs.manager, "stop", fake_stop)
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        assert client.post("/api/agent/forward/cancel", json={"request_id": "test-query"}).json()["stopped"]
+        assert calls == ["test-query"]
+        assert client.post("/api/agent/forward/cancel", json={"request_id": "../bad"}).status_code == 400
+        assert client.post("/api/agent/forward/cancel", json={"request_id": "test-query", "extra": 1}).status_code == 400
+        assert client.post("/api/agent/forward/cancel", json={"request_id": "test-query"},
+                           headers={"Origin": "https://other.example"}).status_code == 403
+
+
+def test_forward_request_status_restores_only_existing_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "ROOT", tmp_path)
+    path = tmp_path / "local/agent/jobs/active-query.json"
+    write_json(path, {"request_id": "active-query", "run_id": "forward_existing", "status": "running",
+                      "owner_id": "tab-one", "worker_pid": 1234, "private": "not public"})
+    original = path.read_bytes()
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        result = client.get("/api/agent/forward/request/active-query").json()
+        assert result["run_id"] == "forward_existing" and result["status"] == "running"
+        assert "private" not in result and "worker_pid" not in result
+        assert client.get("/api/agent/forward/request/missing-query").status_code == 404
+        assert client.get("/api/agent/forward/presence/bad!id").status_code == 400
+        assert client.get("/api/agent/forward/request/bad!id").status_code == 404
+        assert client.get("/api/agent/forward/request/active-query", headers={"Host": "other.example"}).status_code == 403
+    assert path.read_bytes() == original
+    write_json(path, {"status": "running", "service_instance_id": "previous-service"})
+    with TestClient(backend.app, base_url="http://localhost") as client:
+        assert client.get("/api/agent/forward/request/active-query").json()["status"] == "interrupted"
 
 
 def test_forward_archive_read_and_path_boundary(tmp_path, monkeypatch):

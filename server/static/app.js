@@ -52,9 +52,20 @@ const state = {
 };
 
 async function api(path, options) {
-  const response = await fetch(path, options);
+  let response;
+  try { response = await fetch(path, options); }
+  catch (error) {
+    const failure = new Error("与本机服务的连接中断，请检查服务状态。");
+    failure.connectionLost = true;
+    throw failure;
+  }
   let data = null;
-  try { data = await response.json(); } catch (err) { /* 非 JSON */ }
+  try { data = await response.json(); }
+  catch (error) {
+    const failure = new Error("服务返回了无法读取的结果，请检查服务状态。");
+    failure.connectionLost = error.name === "TypeError" || error.name === "AbortError";
+    throw failure;
+  }
   if (!response.ok) throw new Error((data && data.detail) || ("请求失败 " + response.status));
   return data;
 }
@@ -85,7 +96,7 @@ function forwardPercent(value) {
 function renderForwardEvidence(candidate) {
   const panel = $("forward-evidence-panel");
   panel.hidden = false;
-  $("forward-evidence-title").textContent = candidate.disease + " · 逐条证据";
+  $("forward-evidence-title").textContent = DiseaseLabels.format(candidate, true) + " · 逐条证据";
   const tbody = $("forward-evidence-table").querySelector("tbody");
   tbody.innerHTML = "";
   const rows = Array.isArray(candidate.evidence) ? candidate.evidence.slice(0, 100) : [];
@@ -155,7 +166,7 @@ function renderForwardResult(result) {
     const confidence = candidate.confidence || {};
     const sourceCounts = candidate.source_gene_counts || {};
     const sources = Object.keys(sourceCounts).map((source) => forwardSourceLabel(source) + "（" + sourceCounts[source] + "）");
-    const values = [String(index + 1), candidate.disease || "", confidence.value == null ? "—" : Number(confidence.value).toFixed(2),
+    const values = [String(index + 1), DiseaseLabels.format(candidate, true), confidence.value == null ? "—" : Number(confidence.value).toFixed(2),
       String(candidate.matched_count == null ? 0 : candidate.matched_count), forwardPercent(candidate.input_coverage),
       sources.join("、") || "—", String(candidate.evidence_row_count == null ? (candidate.evidence || []).length : candidate.evidence_row_count)];
     values.forEach((value) => {
@@ -181,6 +192,8 @@ function renderForwardResult(result) {
   }
 }
 
+let previousForwardQuery = null;
+
 async function submitForwardQuery() {
   const message = $("forward-message");
   const button = $("forward-submit");
@@ -200,13 +213,24 @@ async function submitForwardQuery() {
   button.textContent = "查询中…";
   $("forward-result").hidden = true;
   message.textContent = "正在识别输入、解析药材靶点并查询本地疾病证据…";
+  const requestId = crypto.randomUUID();
+  sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
   try {
-    const response = await postJSON("/api/agent/forward", { text, top_k: topK });
+    const response = await postJSON("/api/agent/forward", {
+      text, top_k: topK, request_id: requestId, owner_id: QueryPresence.id,
+      ...(previousForwardQuery ? { supersedes: previousForwardQuery } : {}),
+    });
+    previousForwardQuery = null;
+    sessionStorage.removeItem("pharmacology.workbench.query.v1");
     renderForwardResult(response.result || {});
     message.textContent = "查询完成，运行编号：" + (response.run_id || "未记录");
   } catch (err) {
     $("forward-result").hidden = true;
     message.textContent = err.message;
+    previousForwardQuery = requestId;
+    if (err.connectionLost) {
+      message.textContent = "连接已中断，原查询可能仍在继续。刷新可恢复原查询；再次查询会先停止上一条。";
+    }
   } finally {
     button.disabled = false;
     button.textContent = "查询候选疾病";
@@ -221,6 +245,34 @@ function setupForwardChat() {
       submitForwardQuery();
     }
   });
+  resumeForwardQuery();
+}
+
+async function resumeForwardQuery() {
+  const requestId = sessionStorage.getItem("pharmacology.workbench.query.v1");
+  if (!requestId) return;
+  previousForwardQuery = requestId;
+  const button = $("forward-submit");
+  button.disabled = true;
+  button.textContent = "查询中…";
+  $("forward-message").textContent = "正在恢复原查询，未启动新的计算…";
+  try {
+    while (!QueryPresence.leaving) {
+      const status = await api("/api/agent/forward/request/" + encodeURIComponent(requestId));
+      if (status.status === "running") {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+      if (["succeeded", "partial"].includes(status.status)) {
+        renderForwardResult(await api("/api/agent/forward/" + encodeURIComponent(status.run_id)));
+        $("forward-message").textContent = "原查询已完成，运行编号：" + status.run_id;
+        previousForwardQuery = null;
+        sessionStorage.removeItem("pharmacology.workbench.query.v1");
+      } else $("forward-message").textContent = status.error || "原查询已停止，可以重新查询。";
+      break;
+    }
+  } catch (error) { $("forward-message").textContent = "暂时无法恢复原查询；再次查询会先停止上一条。"; }
+  finally { button.disabled = false; button.textContent = "查询候选疾病"; }
 }
 
 // ---------- 左栏：任务 ----------
@@ -700,7 +752,7 @@ async function renderResults(manifest, stage, role) {
     + (hasTop ? "" : "（旧产物无 candidate_layers.top，回退到原始候选列表）");
   $("candidate-disease-count").textContent = String(candidates.length);
   $("candidate-filter-note").textContent = "";
-  const nameOf = (c) => c.disease_name || c.canonical_name || c.disease;
+  const nameOf = (c) => DiseaseLabels.format(c);
   const tbody = $("candidates-table").querySelector("tbody");
   tbody.innerHTML = "";
   if (!candidates.length) {
@@ -933,7 +985,7 @@ function isDiseaseCandidate(candidate) {
 function renderEvidence(candidate, allCandidates) {
   const panel = $("evidence-panel");
   panel.hidden = false;
-  const displayName = candidate.disease_name || candidate.canonical_name || candidate.disease;
+  const displayName = DiseaseLabels.format(candidate);
   $("evidence-title").textContent = displayName + " · 逐条证据";
   // 候选详情：别名、MONDO 与父子层级（只标记关系，不合并、不排序）
   const detail = $("candidate-detail");
@@ -945,7 +997,7 @@ function renderEvidence(candidate, allCandidates) {
   if (aliases.length) parts.push(`别名：${aliases.join("、")}`);
   const nameById = {};
   for (const other of allCandidates || []) {
-    if (other.disease_id) nameById[other.disease_id] = other.disease_name || other.canonical_name || other.disease;
+    if (other.disease_id) nameById[other.disease_id] = DiseaseLabels.format(other);
   }
   const describe = (ids) => (ids || []).map((id) => `${nameById[id] || id}（${id}）`);
   const parents = describe(candidate.parent_candidate_ids);
@@ -976,6 +1028,7 @@ function renderEvidence(candidate, allCandidates) {
 // ---------- 启动 ----------
 
 async function boot() {
+  await DiseaseLabels.load();
   setupForwardChat();
   if (!$("panel-task")) return;
   $("save-task").addEventListener("click", () => saveTask(false));

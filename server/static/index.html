@@ -19,7 +19,7 @@
     <div class="history-list" id="history-list"></div>
     <div class="sidebar-bottom">
       <span class="local-note">会话保存在当前浏览器</span>
-      <a href="/workbench" class="sidebar-link"><img src="/assets/icons/layout-sidebar.svg" alt="">研究工作台</a>
+      <a href="/workbench" target="_blank" rel="noopener" class="sidebar-link" title="在新标签页打开，保留当前查询连接"><img src="/assets/icons/layout-sidebar.svg" alt="">研究工作台<span class="sr-only">（新标签页）</span></a>
       <button id="open-settings" class="sidebar-link"><img src="/assets/icons/settings.svg" alt="">查询设置</button>
     </div>
   </aside>
@@ -65,6 +65,8 @@
     <button type="submit" class="primary-button">保存设置</button>
   </form>
 </dialog>
-<script src="/assets/chat.js?v=20261013"></script>
+<script src="/assets/disease-labels.js?v=20261014"></script>
+<script src="/assets/query-presence.js?v=20261014-tab"></script>
+<script src="/assets/chat.js?v=20261014"></script>
 </body>
 </html>

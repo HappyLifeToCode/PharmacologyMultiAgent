@@ -97,6 +97,26 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 `heuristic_v2` 沿用权重，evidence_quality 仅取 BATMAN known 占比；原始关联分值不参与评分，缺失组件剔除。历史 v1 报告保留原版本。
 
+## 中文疾病名称展示
+
+首页与工作台通过 `server/static/disease-labels.js` 读取 `disease-labels.json`，按精确 `disease_id`、`mondo_id` 或 `disease` 中的 ID 匹配，统一 `MONDO_`/`MONDO:`；最后可回退项目词表内的精确英文名。不做模糊翻译、不按中文名称合并实体，`breast cancer` 与 `breast carcinoma` 仍是两个原 ID。
+
+当前词表包含 2,620 个 MONDO ID、66 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
+
+人工维护常用词条后，显式运行 `python scripts/update_disease_labels.py --proxy http://127.0.0.1:7890` 更新提交的本地词表；也可用 `--input <保存的 SPARQL JSON>` 离线生成。用户查询时不会联网翻译。未知词条显示“中文名未收录”，加载失败显示“中文名暂不可用”；名称本已中文时不重复追加。
+
+中文名称仅是 UI 补充：不修改候选、排序、分值、逐条证据或历史文件，历史结果可直接补充展示；JSON/CSV 导出保持原始研究字段。
+
+## 正向 HTTP 查询的停止与重试
+
+`POST /api/agent/forward` 另接受可选的 `request_id`（1—64 位字母/数字/下划线/连字符）、`supersedes` 与 `owner_id`（同一页签编号）。旧客户端可省略；首页/工作台为每次查询生成新编号，重试带上一条编号。`POST /api/agent/forward/cancel` 只接受 `{"request_id":"..."}`，作为显式取消入口；保留本机访问与 Origin 检查。
+
+用户最后指定“关闭页面才停止”，覆盖本轮先前的离开页面即取消方案。`server/static/query-presence.js` 用 sessionStorage 保存页签编号，通过 `/api/agent/forward/presence/<owner_id>` 的 SSE 持续连接保持任务。项目内导航/刷新重连同一编号，后台给 10 秒接续缓冲；切换标签不关闭连接，不受后台 JS 定时器节流影响。没有同页签连接超过 10 秒时终止并等待该查询进程退出；关闭页签会断开持续连接，长期连接丢失也会触发该规则。应用外页面无法维持本项目连接，不承诺导航到其他网站后仍保持任务。
+
+查询 POST 连接丢失或 `fetch` 报错本身不停止带 owner_id 的查询，前端可“恢复原查询”。`GET /api/agent/forward/request/<request_id>` 读取任务状态，首页/工作台返回后仅读取状态和结果，不新建计算。元数据记录 service_instance_id；原服务已重启的运行中状态返回 interrupted，避免无限等待。主动重试先停止 `supersedes` 指定的旧任务，停止失败不启动新的；显式取消/服务处理协程取消也终止对应子进程。未传 owner_id 的旧 API 客户端仍在自身 HTTP 连接断开时停止。纯 ASGI 中间件保留断开信号。归档 GET 失败只重读，不启动或取消研究计算。
+
+任务状态写入 `local/agent/jobs/<request_id>.json`，结束后在本次 `local/agent/forward/<run_id>/job.json` 留存，包含工作进程 PID、状态、取消原因与时间。未完成记录标为 cancelled/failed；中间文件保留，不改成成功、不删除历史完整结果。再次查询从头运行，不复用半成品；本轮不实现断点续算或生产缓存。停止仅针对本服务创建的查询子进程，服务与其他查询继续运行。
+
 ## 归档布局
 
 live 运行逐阶段归档到 `data/pharm/<归档名>/`（方名或 `custom_<task_id>`，analysis 继承来源任务）：

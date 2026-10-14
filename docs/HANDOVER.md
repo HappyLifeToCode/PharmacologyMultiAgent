@@ -1,5 +1,19 @@
 # 项目交接说明
 
+## 2026-10-14 最新接续
+
+最新起点 main/`be2409c`，默认首页是会话，研究工作台在 `/workbench`；自然问句方剂识别与 BATMAN 本地优先回退已经合入，不能把下方 10-12 页面状态当最新。10-14 新增疾病中文名称展示与正向请求取消，不改变研究数据和排序。
+
+首页/工作台共用 `server/static/disease-labels.js` 与提交的本地 `disease-labels.json`：2,620 个 MONDO ID、66 个精确英文名/别名，来源 Wikidata CC0 标签与 `pharm/diseases/chinese_labels_overrides.json` 的项目译名。旧归档读取后直接显示中文，无需重算、不回写旧文件；未知译名明确标注。维护与来源见 DATA_CONTRACT，更新脚本不在用户查询时运行。
+
+用户最后指令为“关闭页签才自动停止”，覆盖先前的页面离开/连接报错即取消策略。`pharm/agent/jobs.py` 管理独立子进程，`query-presence.js` 用 sessionStorage 页签编号 + SSE 持续连接跟踪 owner_id；项目内导航/刷新重连同页签、切换标签继续，断开超过 10 秒才停止该页签的查询。POST 断开/前端报错可恢复原查询，状态接口 `/api/agent/forward/request/<request_id>` 支持接续；服务实例变更的运行记录返回 interrupted。主动重试 supersedes 先等待旧任务退出，显式 cancel 入口仍保留；无 owner_id 的旧 API 仍在 HTTP 断开时停止。任务记录见 local/agent/jobs/ 与查询目录 job.json，重试从头运行、不自动续算。纯 ASGI 保留访问校验/断开信号；工作台新标签页打开，归档 GET 可只重读。
+
+验证使用自行启动的 8771 服务和真实既有温经汤归档，保存于 `local/checks/chinese-disease-20261014/`；自动测试包含独立进程被终止、先停旧任务再重试、请求编号重复与提前取消。更新后仍用原命令启动服务，实时端口/PID看本地 AGENTS.md。三个此前重叠的真实查询均已保存 succeeded 结果（第二条 12:08，第一/第三 12:09），并非进程自动停止；新策略只适用于更新后的服务。
+
+最新浏览器验证通过：真实白芍查询进入工作台超过缓冲期、返回/刷新保持同一 PID，仅一个 POST；关闭查询页签后才 cancelled/tab_closed，另一工作台页签继续可用。桌面/移动端真实温经汤归档双语候选/证据/评分、GET 故障重读通过，原 43MB result.json SHA-256 完全不变。网络故障/合成错误响应验证保留原请求编号和显式重试 supersedes，不把错误响应当研究结果；`scientific_complete=false`。最终全量结果记录在 AGENTS.md/PROJECT_STATUS。
+
+最终全量 **269 passed, 3 skipped**；四份 JS 语法检查通过，本已中文的名称不重复追加、未收录/异常键不误匹配的浏览器核对通过。
+
 ## 2026-10-12 最新接续
 
 当前优先链路是“方剂/药材 → BATMAN 靶点 → 候选疾病”。顶部对话框支持直接输入“温经汤”等内置方剂名，后端展开多味药材后查询本地 BATMAN、Open Targets 26.09 和 Monarch 2026-10-07，展示药材组成与 BATMAN 实际命中、候选疾病和逐条来源证据。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import copy
 import sys
@@ -9,12 +10,13 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.datastructures import MutableHeaders
 from pharm.core.common import ROOT, read_json, safe_name, task_list, public_artifact, owned_run
 from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
-from pharm.agent import forward
+from pharm.agent import jobs as forward_jobs
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
@@ -23,21 +25,34 @@ import sqlite3
 app = FastAPI(title="Pharmacology Multi-Agent", docs_url=None, redoc_url=None)
 
 
-@app.middleware("http")
-async def local_only(request: Request, call_next):
-    if request.url.hostname not in ("localhost", "127.0.0.1"):
-        from fastapi.responses import JSONResponse
-        return JSONResponse({"detail": "仅允许本机访问"}, status_code=403)
-    if request.method == "POST":
-        origin = request.headers.get("origin")
-        expected = request.headers.get("host")
-        if origin and urlparse(origin).netloc != expected:
-            from fastapi.responses import JSONResponse
-            return JSONResponse({"detail": "跨站请求被拒绝"}, status_code=403)
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "no-store"
-    return response
+class LocalOnlyMiddleware:
+    """Preserve ASGI disconnect messages while enforcing local access."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        request = Request(scope)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        if request.url.hostname not in ("localhost", "127.0.0.1"):
+            return await JSONResponse({"detail": "仅允许本机访问"}, status_code=403)(scope, receive, send_with_headers)
+        if request.method == "POST":
+            origin = request.headers.get("origin")
+            if origin and urlparse(origin).netloc != request.headers.get("host"):
+                return await JSONResponse({"detail": "跨站请求被拒绝"}, status_code=403)(scope, receive, send_with_headers)
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(LocalOnlyMiddleware)
 
 
 @app.get("/")
@@ -58,6 +73,21 @@ def chat_script():
 @app.get("/assets/chat.css")
 def chat_style():
     return FileResponse(ROOT / "server/static/chat.css", media_type="text/css")
+
+
+@app.get("/assets/disease-labels.js")
+def disease_labels_script():
+    return FileResponse(ROOT / "server/static/disease-labels.js", media_type="text/javascript")
+
+
+@app.get("/assets/disease-labels.json")
+def disease_labels_glossary():
+    return FileResponse(ROOT / "server/static/disease-labels.json", media_type="application/json")
+
+
+@app.get("/assets/query-presence.js")
+def query_presence_script():
+    return FileResponse(ROOT / "server/static/query-presence.js", media_type="text/javascript")
 
 
 @app.get("/assets/icons/{filename}")
@@ -126,18 +156,34 @@ async def agent_forward(request: Request):
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("请求必须是 JSON 对象")
-        allowed = {"text", "formula", "herbs", "top_k", "batman_threshold"}
+        allowed = {"text", "formula", "herbs", "top_k", "batman_threshold", "request_id", "supersedes", "owner_id"}
         if set(body) - allowed:
-            raise ValueError("正向查询只接受 text、formula、herbs、top_k、batman_threshold")
-        return await run_in_threadpool(forward.query, body.get("herbs"),
-                                       formula=body.get("formula"),
-                                       text=body.get("text"),
-                                       top_k=body.get("top_k"),
-                                       batman_threshold=body.get("batman_threshold", 0.84))
+            raise ValueError("正向查询只接受 text、formula、herbs、top_k、batman_threshold、request_id、supersedes、owner_id")
+        request_id = body.pop("request_id", uuid4().hex)
+        supersedes = body.pop("supersedes", None)
+        owner_id = body.pop("owner_id", None)
+        return await forward_jobs.manager.run(request, body, ROOT, request_id, supersedes, owner_id)
+    except forward_jobs.QueryCancelled as exc:
+        raise HTTPException(409, str(exc))
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc))
     except OSError as exc:
         raise HTTPException(503, "本地正向查询不可用：" + str(exc))
+
+
+@app.post("/api/agent/forward/cancel")
+async def cancel_forward(request: Request):
+    if len(await request.body()) > 1000:
+        raise HTTPException(413, "查询内容过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) != {"request_id"}:
+            raise ValueError("停止查询只接受 request_id")
+        return await forward_jobs.manager.stop(body["request_id"])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
 
 
 @app.get("/api/agent/forward/{run_id}")
@@ -153,6 +199,43 @@ def forward_result(run_id: str):
     if not path.is_relative_to(root) or not path.is_file():
         raise HTTPException(404, "查询结果不存在，请重新查询")
     return FileResponse(path, media_type="application/json")
+
+
+@app.get("/api/agent/forward/presence/{owner_id}")
+async def forward_presence(owner_id: str):
+    try:
+        forward_jobs.request_identifier(owner_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    async def events():
+        forward_jobs.manager.connect_tab(owner_id)
+        try:
+            while True:
+                yield ": connected\n\n"
+                await asyncio.sleep(3)
+        finally:
+            forward_jobs.manager.disconnect_tab(owner_id)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
+
+
+@app.get("/api/agent/forward/request/{request_id}")
+def forward_request_status(request_id: str):
+    try:
+        forward_jobs.request_identifier(request_id)
+    except ValueError:
+        raise HTTPException(404, "查询记录不存在")
+    path = ROOT / "local/agent/jobs" / (request_id + ".json")
+    if not path.is_file():
+        raise HTTPException(404, "尚未找到本次查询记录，可以重新提交")
+    status = read_json(path)
+    result = {key: status.get(key) for key in (
+        "request_id", "run_id", "status", "owner_id", "created_at", "finished_at", "reason", "error",
+    )}
+    if status.get("status") == "running" and status.get("service_instance_id") not in (None, forward_jobs.manager.instance_id):
+        result.update(status="interrupted", error="原查询服务已重启或当前端口不是原服务，请核对后重新查询。")
+    return result
 
 
 @app.get("/discovery/artifacts/{run_id}/{filename}")
@@ -301,4 +384,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host="127.0.0.1", port=args.port, timeout_graceful_shutdown=5)

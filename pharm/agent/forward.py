@@ -217,7 +217,7 @@ def _aggregate(herb_result, iter_associations, top_k):
 
 
 def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0.84, output_dir=None,
-          monarch_data_dir=None, open_targets_data_dir=None):
+          monarch_data_dir=None, open_targets_data_dir=None, run_id=None):
     herbs, herb_candidates, formula = _resolve_input(herbs, formula, text)
     top_k = _top_k(top_k)
     if isinstance(batman_threshold, bool) or not isinstance(batman_threshold, (int, float)):
@@ -225,7 +225,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     if not 0 <= float(batman_threshold) <= 1:
         raise ValueError("batman_threshold 必须在 0—1 之间")
 
-    run_id = "forward_" + uuid4().hex
+    run_id = run_id or "forward_" + uuid4().hex
     directory = Path(output_dir) if output_dir else ROOT / "local" / "agent" / "forward" / run_id
     directory = directory.resolve()
     herb_result = query_targets(herb_candidates, threshold=float(batman_threshold), local_query=query_local_targets)

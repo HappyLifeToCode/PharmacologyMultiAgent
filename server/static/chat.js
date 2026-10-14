@@ -3,7 +3,7 @@
 const byId = (id) => document.getElementById(id);
 const STORAGE_KEY = "pharmacology.chat.v1";
 const SETTINGS_KEY = "pharmacology.chat.settings.v1";
-const appState = { sessions: [], selected: null, formulas: [], results: new Map(), loading: new Map(), busy: new Set() };
+const appState = { sessions: [], selected: null, formulas: [], results: new Map(), loading: new Map(), busy: new Set(), resuming: new Set() };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -32,21 +32,32 @@ function sourceLabel(source) {
   return ({ open_targets: "Open Targets", monarch_clingen: "Monarch · ClinGen", monarch_omim: "Monarch · OMIM" })[source] || source;
 }
 function diseaseName(candidate) {
-  const name = String(candidate.disease || "");
-  return name.includes(" | ") ? name.split(" | ").slice(1).join(" | ") : name;
+  return DiseaseLabels.format(candidate);
 }
 function saveSessions() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.sessions)); }
   catch (error) { byId("status-message").textContent = "浏览器存储空间不足，本轮会话仅在当前页面保留。可以导出查询结果。"; }
 }
 
-async function request(path, body) {
-  const options = body === undefined ? {} : {
+async function request(path, body, signal) {
+  const options = body === undefined ? { signal } : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    signal,
   };
-  const response = await fetch(path, options);
+  let response;
+  try { response = await fetch(path, options); }
+  catch (error) {
+    const failure = new Error("与本机服务的连接中断，请检查服务后重新读取结果。");
+    failure.connectionLost = true;
+    throw failure;
+  }
   let data;
-  try { data = await response.json(); } catch (error) { throw new Error("服务返回了无法读取的结果，请稍后重试。"); }
+  try { data = await response.json(); }
+  catch (error) {
+    const failure = new Error("服务返回了无法读取的结果，请检查服务后重新读取。");
+    failure.connectionLost = error.name === "TypeError" || error.name === "AbortError";
+    throw failure;
+  }
   if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "请求失败，请检查输入与本机数据配置。");
   return data;
 }
@@ -58,9 +69,13 @@ function loadSessions() {
       session && typeof session.id === "string" && typeof session.title === "string" && Array.isArray(session.messages));
     for (const session of appState.sessions) {
       for (const message of session.messages) {
-        if (message.kind === "pending") {
+        if (message.kind === "error" && message.queryId && message.ownerId === QueryPresence.id) message.kind = "pending";
+        if (message.kind === "pending" && !message.queryId) {
           message.kind = "error";
-          message.text = "上一次请求在页面关闭前尚未返回。后端可能仍在处理；需要时可重新查询。";
+          message.text = "旧版页面离开前未收到结果，后台可能仍在处理。请先检查查询记录，避免重复提交。";
+        }
+        if (message.kind === "error" && /Failed to fetch|NetworkError|Load failed/.test(message.text || "")) {
+          message.text = "与本机服务的连接中断，后端查询可能仍在继续。请先检查服务与查询记录，避免重复提交。";
         }
       }
     }
@@ -273,10 +288,17 @@ function render() {
       const { article, content } = messageContent(message);
       messages.append(article);
       if (!content) continue;
-      if (message.kind === "pending") { content.append(element("p", "pending-content", "正在查询药材靶点和疾病关联，请稍候…")); continue; }
+      if (message.kind === "pending") {
+        content.append(element("p", "pending-content", "正在查询药材靶点和疾病关联，请稍候…切换工作台或刷新后会继续本次查询。"));
+        if (message.queryId && !appState.busy.has(session.id)) resumeQuery(session, message);
+        continue;
+      }
       if (!message.runId) {
         content.append(element("p", "", message.text || ""));
-        if (message.kind === "error" && message.queryBody) content.append(action("重新查询", () => submitMessage(message.queryText || session.title, { retryBody: message.queryBody })));
+        if (message.kind === "error" && message.queryBody) {
+          if (message.queryId) content.append(action("恢复原查询", () => { message.kind = "pending"; saveSessions(); render(); }));
+          content.append(action("重新查询", () => submitMessage(message.queryText || session.title, { retryBody: message.queryBody, retryQueryId: message.queryId })));
+        }
         continue;
       }
       const populate = (result) => {
@@ -293,11 +315,45 @@ function render() {
         resultFor(message).then(populate).catch((error) => {
           if (!article.isConnected) return;
           content.replaceChildren(element("p", "source-state", error.message));
+          content.append(action("重新读取结果", render));
         });
       }
     }
   }
   byId("send-message").disabled = Boolean(session && appState.busy.has(session.id));
+}
+
+async function resumeQuery(session, message) {
+  if (appState.resuming.has(message.queryId)) return;
+  appState.resuming.add(message.queryId);
+  appState.busy.add(session.id);
+  try {
+    while (!QueryPresence.leaving) {
+      const status = await request("/api/agent/forward/request/" + encodeURIComponent(message.queryId));
+      if (status.status === "running") {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+      if (["succeeded", "partial"].includes(status.status)) {
+        message.runId = status.run_id;
+        message.kind = "query";
+      } else {
+        message.kind = "error";
+        message.text = status.status === "cancelled" ? "原查询已停止，可以重新查询。" : status.error || "原查询未完成，可以重新查询。";
+      }
+      break;
+    }
+  } catch (error) {
+    if (!QueryPresence.leaving) {
+      message.kind = "error";
+      message.text = "暂时无法读取原查询状态。可恢复原查询；重新查询会先停止上一条。";
+    }
+  } finally {
+    appState.resuming.delete(message.queryId);
+    appState.busy.delete(session.id);
+    saveSessions();
+    if (!QueryPresence.leaving) render();
+  }
 }
 
 function latestResultMessage(session) {
@@ -356,7 +412,15 @@ async function submitMessage(suppliedText, context) {
         const body = context?.retryBody || { text: resolveInput(text), ...settings() };
         reply.queryBody = body;
         reply.queryText = text;
-        const response = await request("/api/agent/forward", body);
+        reply.queryId = uid();
+        reply.ownerId = QueryPresence.id;
+        const unfinished = [...session.messages].reverse().find((item) => item !== reply && item.queryId && !item.runId);
+        const supersedes = context?.retryQueryId || unfinished?.queryId;
+        saveSessions();
+        const response = await request("/api/agent/forward", {
+          ...body, request_id: reply.queryId, owner_id: QueryPresence.id,
+          ...(supersedes ? { supersedes } : {}),
+        });
         if (!response.run_id || !response.result) throw new Error("查询没有返回可读取的结果，请检查服务日志。");
         reply.kind = "query";
         reply.runId = response.run_id;
@@ -364,13 +428,16 @@ async function submitMessage(suppliedText, context) {
       }
     }
   } catch (error) {
-    reply.kind = "error";
+    reply.kind = QueryPresence.leaving && reply.queryId ? "pending" : "error";
     reply.text = error.message;
+    if (error.connectionLost && reply.queryId) {
+      reply.text = "连接已中断，原查询可能仍在继续。可恢复原查询；重新查询会先停止上一条。";
+    }
   } finally {
     appState.busy.delete(session.id);
     saveSessions();
-    render();
-    if (appState.selected === session.id) byId("message-scroll").scrollTop = byId("message-scroll").scrollHeight;
+    if (!QueryPresence.leaving) render();
+    if (!QueryPresence.leaving && appState.selected === session.id) byId("message-scroll").scrollTop = byId("message-scroll").scrollHeight;
   }
 }
 
@@ -399,6 +466,7 @@ function openSettings() {
 }
 
 async function bootChat() {
+  await DiseaseLabels.load();
   loadSessions();
   appState.selected = appState.sessions[0]?.id || null;
   render();
