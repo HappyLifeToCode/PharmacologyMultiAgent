@@ -1,0 +1,13 @@
+{
+  "note": "项目显式名称映射，仅处理列出的常用简称。目标必须精确存在于当前 BATMAN 药材表；不作模糊匹配、药材替代或炮制形式合并。原名和映射规则均随查询保留。",
+  "aliases": {
+    "熟地": {"target": "SHU DI HUANG", "note": "项目名称映射：熟地为熟地黄的常用简称"},
+    "生地": {"target": "SHENG DI HUANG", "note": "项目名称映射：生地为生地黄的常用简称；不映射为熟地黄"},
+    "白芍药": {"target": "BAI SHAO", "note": "项目名称映射：白芍药对应白芍；不自动映射未明确的芍药"},
+    "麦门冬": {"target": "MAI DONG", "note": "项目名称映射：麦门冬对应麦冬；不映射为天冬"},
+    "SHU DI": {"target": "SHU DI HUANG", "note": "项目名称映射：熟地为熟地黄的常用简称；保留原始 SHU DI"},
+    "SHENG DI": {"target": "SHENG DI HUANG", "note": "项目名称映射：生地为生地黄的常用简称；不映射为熟地黄"},
+    "BAI SHAO YAO": {"target": "BAI SHAO", "note": "项目名称映射：白芍药对应白芍；不将 SHAO YAO/芍药自动判为白芍或赤芍"},
+    "MAI MEN DONG": {"target": "MAI DONG", "note": "项目名称映射：麦门冬对应麦冬；不映射为天冬"}
+  }
+}

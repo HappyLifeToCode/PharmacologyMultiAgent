@@ -69,6 +69,10 @@ function loadSessions() {
       session && typeof session.id === "string" && typeof session.title === "string" && Array.isArray(session.messages));
     for (const session of appState.sessions) {
       for (const message of session.messages) {
+        if (message.kind === "resolving") {
+          message.kind = "text";
+          message.text = "上次组成核对尚未完成，没有启动查询。请再次输入或选择方剂组成。";
+        }
         if (message.kind === "error" && message.queryId && message.ownerId === QueryPresence.id) message.kind = "pending";
         if (message.kind === "pending" && !message.queryId) {
           message.kind = "error";
@@ -181,6 +185,16 @@ function renderComposition(result, content) {
   if (input.formula_source === "standard_reference_pending_user_confirmation") {
     content.append(element("p", "reply-note", "组成沿用内置参考表，来源尚待研究者确认；加减方请直接输入完整药材清单。"));
   }
+  const resolution = input.formula_resolution;
+  if (resolution && input.formula) {
+    content.append(element("p", "reply-note", resolution.source_note
+      + (resolution.kind === "user_composition" ? "；本次药材清单由用户修改" : "")
+      + (resolution.source_rows?.length ? "；原表行号：" + resolution.source_rows.join("、") : "")));
+    if (resolution.mappings?.some((item) => item.status !== "legacy_reference")) {
+      table(["原始名称", "本次药材名称", "匹配说明"], resolution.mappings.map((item) => [item.original, item.canonical, item.note]), content);
+    }
+    if (resolution.unresolved?.length) content.append(element("p", "source-state", "组成尚未完整匹配：" + resolution.unresolved.join("、")));
+  }
   if ((result.unmatched_herbs || []).length) content.append(element("p", "source-state", "未命中药材：" + result.unmatched_herbs.join("、")));
 }
 
@@ -288,6 +302,10 @@ function render() {
       const { article, content } = messageContent(message);
       messages.append(article);
       if (!content) continue;
+      if (message.kind === "resolving") {
+        content.append(element("p", "pending-content", "正在核对输入与方剂组成…"));
+        continue;
+      }
       if (message.kind === "pending") {
         content.append(element("p", "pending-content", "正在查询药材靶点和疾病关联，请稍候…切换工作台或刷新后会继续本次查询。"));
         if (message.queryId && !appState.busy.has(session.id)) resumeQuery(session, message);
@@ -385,7 +403,7 @@ async function submitMessage(suppliedText, context) {
   session.updated = new Date().toISOString();
   byId("chat-input").value = "";
   byId("chat-input").style.height = "";
-  const reply = { id: uid(), role: "assistant", kind: "pending", text: "" };
+  const reply = { id: uid(), role: "assistant", kind: "resolving", text: "" };
   session.messages.push(reply);
   appState.busy.add(session.id);
   saveSessions();
@@ -394,7 +412,7 @@ async function submitMessage(suppliedText, context) {
   try {
     if (/^(你能做什么|怎么使用|如何使用|帮助)[？?]?$/.test(text)) {
       reply.kind = "text";
-      reply.text = "可以输入温经汤、半夏白术天麻汤、济川煎或桃核承气汤，也可以输入实际药材清单，例如「白芍、甘草」。我会查询药材靶点与候选疾病。\n\n结果出来后，可以说「展开第一个疾病的证据」「查看药材组成」或「解释匹配支持度」。查询数量和 BATMAN 阈值在查询设置里调整。";
+      reply.text = "可以输入本地方剂库收录的方剂名，也可以输入实际药材清单，例如「白芍、甘草」。同名方剂有不同组成时，会先展示药材清单供你选择或修改；确认后可以保存为默认组成。温经汤等四方继续沿用当前内置组成，可用「选择/修改组成」切换。\n\n结果出来后，可以说「展开第一个疾病的证据」「查看药材组成」或「解释匹配支持度」。查询数量和 BATMAN 阈值在查询设置里调整。";
     } else {
       const previous = context?.message || latestResultMessage(session);
       const inspectIndex = context?.index ?? candidateIndex(text);
@@ -409,7 +427,10 @@ async function submitMessage(suppliedText, context) {
         reply.runId = previous.runId;
         reply.candidateIndex = inspectIndex;
       } else {
-        const body = context?.retryBody || { text: resolveInput(text), ...settings() };
+        let body = context?.retryBody || { text: resolveInput(text), ...settings() };
+        body = await FormulaPicker.prepare(body, { force: Boolean(context?.chooseComposition) });
+        if (!body) { reply.kind = "text"; reply.text = "已取消组成选择，本次未启动查询。"; return; }
+        reply.kind = "pending";
         reply.queryBody = body;
         reply.queryText = text;
         reply.queryId = uid();
@@ -484,6 +505,11 @@ async function bootChat() {
   document.querySelectorAll("[data-prompt]").forEach((button) => button.addEventListener("click", () => submitMessage(button.dataset.prompt)));
   byId("open-settings").addEventListener("click", openSettings);
   byId("composer-settings").addEventListener("click", openSettings);
+  byId("choose-composition").addEventListener("click", () => {
+    const text = byId("chat-input").value.trim();
+    if (!text) { byId("status-message").textContent = "请先在输入框填写要选择组成的方剂名。"; return; }
+    submitMessage(text, { chooseComposition: true });
+  });
   byId("close-settings").addEventListener("click", () => byId("settings-dialog").close());
   byId("settings-form").addEventListener("submit", (event) => {
     event.preventDefault();

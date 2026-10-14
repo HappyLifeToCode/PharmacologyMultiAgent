@@ -13,6 +13,7 @@ from uuid import uuid4
 from ..batman.local import query_local_targets
 from ..batman.resolver import query_targets
 from ..batman.formulas import SOURCE as FORMULA_SOURCE, formula_candidates, list_formulas
+from ..batman import formula_catalog
 from ..core.common import ROOT, now, write_json
 from ..discovery.query import CONFIDENCE_VERSION, _confidence
 from ..diseases.monarch_local import collect_monarch_by_targets
@@ -41,48 +42,12 @@ def _clean_herbs(herbs):
     return values
 
 
-def _resolve_input(herbs, formula, text):
+def _resolve_input(herbs, formula, text, **selection):
     """Resolve one chat text, an explicit formula or a herb list without guessing composition."""
-    if sum(value is not None for value in (herbs, formula, text)) > 1:
-        raise ValueError("text、formula 与 herbs 只能选择一种输入")
-    if text is not None:
-        if not isinstance(text, str) or not text.strip() or len(text) > 10000:
-            raise ValueError("text 必须是 1—10000 个字符的非空字符串")
-        text = text.strip().rstrip("。？！?!")
-        formula_names = list_formulas()
-        mentioned = [name for name in formula_names if name in text]
-        if mentioned:
-            if len(mentioned) != 1:
-                raise ValueError("请单独输入一个方剂名；多方比较需要分别查询")
-            formula = mentioned[0]
-            herb_names = {name for entries in (formula_candidates(item) for item in formula_names)
-                          for canonical, candidates in entries for name in [canonical, *candidates]}
-            segments = [part.strip() for part in re.split(r"[\n,，、;；]+", text) if part.strip()]
-            if any(part in herb_names for part in segments) or re.search(r"加减|加味|去掉|去除|加入|增加|添加|加[\u4e00-\u9fff]|减[\u4e00-\u9fff]", text):
-                raise ValueError("请单独输入一个方剂名；加减方请直接输入完整的药材组合")
-            if re.search(r"(?:不用|不要|不是|排除)\s*" + re.escape(formula), text):
-                raise ValueError("请明确本次要查询的方剂或药材，不会查询被排除的方剂")
-            text = formula
-        names = _clean_herbs([name.strip() for name in re.split(r"[\n,，、;；]+", text) if name.strip()])
-        recognised = [name for name in names if name in list_formulas()]
-        if recognised:
-            if len(names) != 1:
-                raise ValueError("请单独输入一个方剂名；加减方请直接输入完整的药材组合")
-            formula = names[0]
-        else:
-            herbs = names
-    if formula is not None:
-        if not isinstance(formula, str) or not formula.strip():
-            raise ValueError("formula 必须是非空方剂名称")
-        formula = formula.strip()
-        if formula not in list_formulas():
-            raise ValueError("未收录的内置方剂：" + formula)
-        entries = formula_candidates(formula)
-        names = [canonical for canonical, _ in entries]
-        return names, {canonical: candidates for canonical, candidates in entries}, formula
-
-    names = _clean_herbs(herbs)
-    return names, {name: [name] for name in names}, None
+    resolved = formula_catalog.resolve(herbs, formula, text, **selection)
+    if resolved["status"] != "ready":
+        raise formula_catalog.SelectionRequired(resolved)
+    return resolved["herbs"], resolved["herb_candidates"], resolved["formula"]
 
 
 def _top_k(value):
@@ -217,8 +182,13 @@ def _aggregate(herb_result, iter_associations, top_k):
 
 
 def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0.84, output_dir=None,
-          monarch_data_dir=None, open_targets_data_dir=None, run_id=None):
-    herbs, herb_candidates, formula = _resolve_input(herbs, formula, text)
+          monarch_data_dir=None, open_targets_data_dir=None, run_id=None,
+          formula_variant_id=None, formula_herbs=None, formula_fingerprint=None):
+    resolved = formula_catalog.resolve(herbs, formula, text, formula_variant_id=formula_variant_id,
+                                       formula_herbs=formula_herbs, formula_fingerprint=formula_fingerprint)
+    if resolved["status"] != "ready":
+        raise formula_catalog.SelectionRequired(resolved)
+    herbs, herb_candidates, formula = resolved["herbs"], resolved["herb_candidates"], resolved["formula"]
     top_k = _top_k(top_k)
     if isinstance(batman_threshold, bool) or not isinstance(batman_threshold, (int, float)):
         raise ValueError("batman_threshold 必须是数值")
@@ -269,7 +239,9 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         "scientific_complete": False,
         "created_at": now(),
         "limitation": LIMITATION,
-        "input": {"text": text, "formula": formula, "formula_source": FORMULA_SOURCE if formula else None,
+        "input": {"text": text, "formula": formula,
+                  "formula_source": resolved["resolution"].get("source") if formula else None,
+                  "formula_resolution": resolved["resolution"],
                   "herbs": herbs, "top_k": top_k,
                   "batman_threshold": float(batman_threshold)},
         "resolved_herbs": [

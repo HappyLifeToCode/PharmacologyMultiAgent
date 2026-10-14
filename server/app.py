@@ -18,6 +18,7 @@ from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
 from pharm.agent import jobs as forward_jobs
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
+from pharm.batman import formula_catalog
 from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
 import sqlite3
@@ -90,6 +91,16 @@ def query_presence_script():
     return FileResponse(ROOT / "server/static/query-presence.js", media_type="text/javascript")
 
 
+@app.get("/assets/formula-picker.js")
+def formula_picker_script():
+    return FileResponse(ROOT / "server/static/formula-picker.js", media_type="text/javascript")
+
+
+@app.get("/assets/formula-picker.css")
+def formula_picker_style():
+    return FileResponse(ROOT / "server/static/formula-picker.css", media_type="text/css")
+
+
 @app.get("/assets/icons/{filename}")
 def chat_icon(filename: str):
     allowed = {"leaf.svg", "plus.svg", "search.svg", "arrow-up.svg", "settings.svg",
@@ -115,6 +126,42 @@ def formulas():
                           "herbs": [{"canonical": canonical, "candidates": candidates}
                                     for canonical, candidates in formula_candidates(name)],
                           "source": SOURCE} for name in list_formulas()]}
+
+
+async def formula_body(request):
+    if len(await request.body()) > 100000:
+        raise HTTPException(413, "查询内容过长")
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) - (formula_catalog.INPUT_KEYS | {"use_saved"}):
+        raise ValueError("方剂组成只接受 text、formula、herbs、formula_variant_id、formula_herbs、use_saved")
+    if "use_saved" in body and not isinstance(body["use_saved"], bool):
+        raise ValueError("use_saved 必须是布尔值")
+    return body
+
+
+@app.post("/api/formulas/resolve")
+async def resolve_formula(request: Request):
+    try:
+        body = await formula_body(request)
+        return await run_in_threadpool(formula_catalog.resolve, **body, root=ROOT)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, "本地方剂数据不可用：" + str(exc))
+
+
+@app.post("/api/formulas/preference")
+async def formula_preference(request: Request):
+    try:
+        body = await formula_body(request)
+        body.pop("use_saved", None)
+        if not body.get("formula_variant_id"):
+            raise ValueError("保存默认组成前必须明确选择组成候选")
+        return await run_in_threadpool(formula_catalog.save_preference, body, root=ROOT)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, "无法保存本地方剂组成：" + str(exc))
 
 
 @app.get("/api/discovery/catalog")
@@ -156,12 +203,20 @@ async def agent_forward(request: Request):
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("请求必须是 JSON 对象")
-        allowed = {"text", "formula", "herbs", "top_k", "batman_threshold", "request_id", "supersedes", "owner_id"}
+        allowed = formula_catalog.INPUT_KEYS | {"top_k", "batman_threshold", "request_id", "supersedes", "owner_id"}
         if set(body) - allowed:
-            raise ValueError("正向查询只接受 text、formula、herbs、top_k、batman_threshold、request_id、supersedes、owner_id")
+            raise ValueError("正向查询包含不支持的字段")
         request_id = body.pop("request_id", uuid4().hex)
         supersedes = body.pop("supersedes", None)
         owner_id = body.pop("owner_id", None)
+        # Resolve before spawning so composition choices do not start a query.
+        resolved = await run_in_threadpool(formula_catalog.resolve,
+                                          **{key: value for key, value in body.items() if key in formula_catalog.INPUT_KEYS},
+                                          root=ROOT)
+        if resolved["status"] != "ready":
+            return JSONResponse({"detail": resolved}, status_code=409)
+        body.update({key: value for key, value in resolved["query_input"].items()
+                     if key in {"formula_variant_id", "formula_herbs", "formula_fingerprint"}})
         return await forward_jobs.manager.run(request, body, ROOT, request_id, supersedes, owner_id)
     except forward_jobs.QueryCancelled as exc:
         raise HTTPException(409, str(exc))

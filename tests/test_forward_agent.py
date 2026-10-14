@@ -121,7 +121,7 @@ def test_forward_rejects_formula_and_herbs_together(tmp_path):
 @pytest.mark.parametrize("kwargs, message", [
     ({"text": "温经汤、白芍"}, "单独输入"),
     ({"text": "温经汤、济川煎"}, "单独输入"),
-    ({"formula": "四物汤"}, "未收录"),
+    ({"formula": "未收录的工程测试方剂"}, "未收录"),
     ({"formula": ""}, "非空方剂"),
     ({"formula": True}, "非空方剂"),
     ({"text": ""}, "非空字符串"),

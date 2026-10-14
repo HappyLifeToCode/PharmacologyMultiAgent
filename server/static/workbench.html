@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>方剂反向疾病发现工作台</title>
 <link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 </head>
 <body>
 <header>
@@ -15,7 +16,7 @@
   <div class="forward-chat-heading">
     <div>
       <h2>正向 Agent：方剂/药材 → 候选疾病</h2>
-      <p class="note">输入内置方剂名会自动展开为多味药材；也可以直接输入一味或多味药材。</p>
+      <p class="note">输入本地方剂库收录的名称，先核对药材组成；也可以直接输入一味或多味药材。</p>
     </div>
     <span class="badge confidence">候选关联</span>
   </div>
@@ -27,8 +28,9 @@
       <input id="forward-top-k" type="number" min="1" max="100" value="10">
     </label>
     <button id="forward-submit" class="primary">查询候选疾病</button>
+    <button id="forward-choose-composition" type="button">选择/修改组成</button>
   </div>
-  <p class="note">已收录方剂：温经汤、半夏白术天麻汤、济川煎、桃核承气汤。一次输入一个方剂名；未收录方剂或加减方请填写实际药材组合。按 Ctrl+Enter 可提交查询。</p>
+  <p class="note">支持 BATMAN 本地方剂组成表；同名不同组成需选择，可保存默认清单。温经汤等四方保留当前内置组成。未收录方剂或加减方请填写实际药材组合。按 Ctrl+Enter 可提交查询。</p>
   <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。</p>
   <p id="forward-message" class="message"></p>
   <div id="forward-result" hidden>
@@ -157,6 +159,7 @@
 </main>
 <script src="/assets/disease-labels.js?v=20261014"></script>
 <script src="/assets/query-presence.js?v=20261014-tab"></script>
+<script src="/assets/formula-picker.js?v=20261014"></script>
 <script src="/assets/app.js?v=20261014"></script>
 </body>
 </html>

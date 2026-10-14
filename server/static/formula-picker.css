@@ -1,0 +1,20 @@
+.formula-dialog { width: min(760px, calc(100% - 28px)); max-height: 86dvh; overflow: auto; padding: 24px; border: 1px solid #d8cbbc; border-radius: 14px; background: #fffcf7; color: #342f2a; font: 14px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif; }
+.formula-dialog::backdrop { background: #30231866; }
+.formula-dialog * { box-sizing: border-box; }
+.formula-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.formula-dialog h2 { font-size: 19px; font-weight: 500; margin: 0; }
+.formula-dialog label { display: block; margin-top: 16px; }
+.formula-dialog select, .formula-dialog textarea { display: block; width: 100%; min-width: 0; margin-top: 7px; padding: 9px; border: 1px solid #d8cbbc; border-radius: 7px; color: inherit; background: #f8f5ef; font: inherit; }
+.formula-dialog textarea { resize: vertical; }
+.formula-note { color: #82796d; font-size: 12px; overflow-wrap: anywhere; }
+.formula-mapping-list { max-height: 220px; overflow: auto; }
+.formula-mapping-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; padding: 7px 0; border-bottom: 1px solid #e3dace; overflow-wrap: anywhere; }
+.formula-mapping-row small { grid-column: 1 / -1; color: #82796d; }
+.formula-mapping-row.unresolved { color: #936a2e; }
+.formula-dialog .formula-save-default { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.formula-save-default input { width: auto; margin: 0; }
+.formula-warning { color: #936a2e; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.formula-dialog button { font: inherit; cursor: pointer; border: 0; background: transparent; padding: 7px; color: #ac4a36; }
+.formula-dialog .formula-confirm { width: 100%; padding: 10px; margin-top: 10px; border-radius: 7px; background: #ac4a36; color: white; }
+.formula-dialog button:disabled { opacity: .5; cursor: wait; }
+@media (max-width: 680px) { .formula-dialog { padding: 16px; } .formula-dialog h2 { font-size: 17px; } .formula-mapping-row { font-size: 12px; } }

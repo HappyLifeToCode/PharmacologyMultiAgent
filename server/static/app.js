@@ -150,6 +150,12 @@ function renderForwardResult(result) {
   }
   $("forward-composition-note").textContent = input.formula_source === "standard_reference_pending_user_confirmation"
     ? "组成沿用内置参考表，来源尚待研究者确认；加减方请直接输入实际药材组合。" : "";
+  if (input.formula_resolution) {
+    const resolution = input.formula_resolution;
+    $("forward-composition-note").textContent += " " + (resolution.source_note || "")
+      + (resolution.kind === "user_composition" ? "；本次药材清单由用户修改" : "")
+      + (resolution.unresolved?.length ? "；未明确匹配：" + resolution.unresolved.join("、") : "");
+  }
   $("forward-summary").textContent = "已解析 " + (result.input_genes || []).length
     + " 个 BATMAN 靶点，返回前 " + candidates.length + " 个候选疾病（全部候选 "
     + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个）。";
@@ -194,7 +200,7 @@ function renderForwardResult(result) {
 
 let previousForwardQuery = null;
 
-async function submitForwardQuery() {
+async function submitForwardQuery(forceComposition = false) {
   const message = $("forward-message");
   const button = $("forward-submit");
   message.textContent = "";
@@ -213,11 +219,14 @@ async function submitForwardQuery() {
   button.textContent = "查询中…";
   $("forward-result").hidden = true;
   message.textContent = "正在识别输入、解析药材靶点并查询本地疾病证据…";
-  const requestId = crypto.randomUUID();
-  sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
+  let requestId;
   try {
+    const query = await FormulaPicker.prepare({ text, top_k: topK }, { force: forceComposition === true });
+    if (!query) { message.textContent = "已取消组成选择，本次未启动查询。"; return; }
+    requestId = crypto.randomUUID();
+    sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
     const response = await postJSON("/api/agent/forward", {
-      text, top_k: topK, request_id: requestId, owner_id: QueryPresence.id,
+      ...query, request_id: requestId, owner_id: QueryPresence.id,
       ...(previousForwardQuery ? { supersedes: previousForwardQuery } : {}),
     });
     previousForwardQuery = null;
@@ -227,7 +236,7 @@ async function submitForwardQuery() {
   } catch (err) {
     $("forward-result").hidden = true;
     message.textContent = err.message;
-    previousForwardQuery = requestId;
+    if (requestId) previousForwardQuery = requestId;
     if (err.connectionLost) {
       message.textContent = "连接已中断，原查询可能仍在继续。刷新可恢复原查询；再次查询会先停止上一条。";
     }
@@ -239,6 +248,7 @@ async function submitForwardQuery() {
 
 function setupForwardChat() {
   $("forward-submit").addEventListener("click", submitForwardQuery);
+  $("forward-choose-composition")?.addEventListener("click", () => submitForwardQuery(true));
   $("forward-herbs-input").addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();

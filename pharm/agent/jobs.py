@@ -36,6 +36,9 @@ def _worker(body, directory):
         response = forward.query(body.get("herbs"), formula=body.get("formula"),
                                  text=body.get("text"), top_k=body.get("top_k"),
                                  batman_threshold=body.get("batman_threshold", 0.84),
+                                 formula_variant_id=body.get("formula_variant_id"),
+                                 formula_herbs=body.get("formula_herbs"),
+                                 formula_fingerprint=body.get("formula_fingerprint"),
                                  output_dir=directory, run_id=directory.name)
         write_json(directory / "worker_outcome.json", {"status": "succeeded", "run_id": directory.name})
     except Exception as exc:

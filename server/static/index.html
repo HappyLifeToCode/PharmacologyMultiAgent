@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>药理研究助手</title>
 <link rel="stylesheet" href="/assets/chat.css?v=20261013">
+<link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 </head>
 <body>
 <div class="chat-shell">
@@ -49,7 +50,7 @@
       <form class="composer" id="composer-form">
         <label class="sr-only" for="chat-input">输入方剂、药材或追问</label>
         <textarea id="chat-input" rows="1" placeholder="输入方剂或药材，也可以继续追问…" maxlength="10000"></textarea>
-        <div class="composer-toolbar"><button type="button" id="composer-settings" class="composer-settings"><img src="/assets/icons/settings.svg" alt="">查询设置</button><span class="composer-shortcut">Enter 发送 · Shift+Enter 换行</span><button id="send-message" type="submit" class="send-button" aria-label="发送消息"><img src="/assets/icons/arrow-up.svg" alt=""></button></div>
+        <div class="composer-toolbar"><button type="button" id="composer-settings" class="composer-settings"><img src="/assets/icons/settings.svg" alt="">查询设置</button><button type="button" id="choose-composition" class="composer-settings">选择/修改组成</button><span class="composer-shortcut">Enter 发送 · Shift+Enter 换行</span><button id="send-message" type="submit" class="send-button" aria-label="发送消息"><img src="/assets/icons/arrow-up.svg" alt=""></button></div>
       </form>
       <p class="composer-disclaimer">匹配支持度用于筛选研究线索，靶点关联不等于治疗有效率。</p>
     </div>
@@ -67,6 +68,7 @@
 </dialog>
 <script src="/assets/disease-labels.js?v=20261014"></script>
 <script src="/assets/query-presence.js?v=20261014-tab"></script>
+<script src="/assets/formula-picker.js?v=20261014"></script>
 <script src="/assets/chat.js?v=20261014"></script>
 </body>
 </html>
