@@ -95,7 +95,7 @@ def _canonical_disease(identifier: str, name: str, names: dict) -> tuple[str, st
     return mondo_id, names.get(mondo_id, name or mondo_id)
 
 
-def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
+def collect_monarch_by_targets(symbols, data_dir=None, *, disease_ids=None) -> dict:
     """Collect Monarch gene--disease evidence for approved symbols.
 
     ClinGen edges use HGNC IDs directly.  OMIM gene IDs are mapped through
@@ -105,7 +105,8 @@ def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
     """
     root = resolve_data_dir(data_dir)
     maps = _maps(str(root))
-    wanted = {str(symbol).strip().casefold() for symbol in symbols if str(symbol).strip()}
+    wanted = {str(symbol).strip().casefold() for symbol in symbols if str(symbol).strip()} if symbols is not None else None
+    wanted_diseases = {value.replace("MONDO_", "MONDO:") for value in disease_ids} if disease_ids is not None else None
     records = {}
     stats = {
         "clingen_rows_seen": 0,
@@ -138,7 +139,7 @@ def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
             "score": "",
             "source": source,
             "extra": {
-                "direction": "target_to_disease",
+                "direction": "disease_to_target" if wanted_diseases is not None else "target_to_disease",
                 "entity_type": "disease",
                 "disease_id": disease_id,
                 "disease_name": disease_name,
@@ -154,11 +155,13 @@ def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
         if not symbol:
             stats["unmapped_gene_rows"] += 1
             continue
-        if symbol.casefold() not in wanted:
+        if wanted is not None and symbol.casefold() not in wanted:
             continue
         disease_id = str(row.get("object") or "").strip()
         if not disease_id.startswith("MONDO:"):
             stats["unmapped_disease_rows"] += 1
+            continue
+        if wanted_diseases is not None and disease_id not in wanted_diseases:
             continue
         disease_name = maps["mondo_names"].get(disease_id, disease_id)
         add(row, symbol, disease_id, disease_name, "monarch_clingen", "clingen_gene_disease_edges.tsv")
@@ -170,7 +173,7 @@ def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
         if not symbol:
             stats["unmapped_gene_rows"] += 1
             continue
-        if symbol.casefold() not in wanted:
+        if wanted is not None and symbol.casefold() not in wanted:
             continue
         external_id = str(row.get("object") or "").strip()
         mondo_ids = maps["external_to_mondo"].get(external_id, [])
@@ -178,6 +181,8 @@ def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
             stats["unmapped_disease_rows"] += 1
             continue
         disease_id = mondo_ids[0]
+        if wanted_diseases is not None and disease_id not in wanted_diseases:
+            continue
         disease_name = maps["mondo_names"].get(disease_id, disease_id)
         add(row, symbol, disease_id, disease_name, "monarch_omim", "omim_gene_to_disease_edges.tsv")
         stats["omim_rows_matched"] += 1
@@ -200,4 +205,10 @@ def collect_monarch_by_targets(symbols, data_dir=None) -> dict:
             "metadata_sha256": digest(root / "metadata.yaml") if (root / "metadata.yaml").is_file() else None,
         },
     }
+
+
+def collect_monarch_by_diseases(disease_ids, data_dir=None):
+    if not isinstance(disease_ids, (list, tuple)) or not disease_ids:
+        raise ValueError("必须提供明确的 MONDO 疾病 ID")
+    return collect_monarch_by_targets(None, data_dir=data_dir, disease_ids=disease_ids)
 

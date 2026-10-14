@@ -17,6 +17,8 @@ from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
 from pharm.agent import jobs as forward_jobs
+from pharm.agent import disease_input
+from pharm.agent.forward import _top_k
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from pharm.batman import formula_catalog
 from starlette.concurrency import run_in_threadpool
@@ -226,6 +228,67 @@ async def agent_forward(request: Request):
         raise HTTPException(503, "本地正向查询不可用：" + str(exc))
 
 
+@app.post("/api/agent/reverse/resolve")
+async def resolve_reverse(request: Request):
+    if len(await request.body()) > 10000:
+        raise HTTPException(413, "查询内容过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) - {"text", "disease", "disease_id"}:
+            raise ValueError("疾病解析只接受 text、disease、disease_id")
+        return await run_in_threadpool(disease_input.resolve, **body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, str(exc))
+
+
+@app.post("/api/agent/reverse")
+async def agent_reverse(request: Request):
+    if len(await request.body()) > 10000:
+        raise HTTPException(413, "查询内容过长")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) - {"text", "disease", "disease_id", "top_k", "request_id", "supersedes", "owner_id"}:
+            raise ValueError("反向查询只接受疾病输入、top_k 与请求跟踪字段；当前采用 known-only")
+        _top_k(body.get("top_k"))
+        request_id = body.pop("request_id", uuid4().hex)
+        supersedes, owner_id = body.pop("supersedes", None), body.pop("owner_id", None)
+        resolved = await run_in_threadpool(disease_input.resolve,
+                                          **{key: value for key, value in body.items() if key in {"text", "disease", "disease_id"}})
+        if resolved["status"] != "ready":
+            return JSONResponse({"detail": resolved}, status_code=409 if resolved["status"] == "needs_selection" else 400)
+        body["disease_id"] = resolved["disease"]["disease_id"]
+        return await forward_jobs.manager.run(request, body, ROOT, request_id, supersedes, owner_id, direction="reverse")
+    except forward_jobs.QueryCancelled as exc:
+        raise HTTPException(409, str(exc))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, "本地反向查询不可用：" + str(exc))
+
+
+@app.get("/api/agent/reverse/{run_id}")
+def reverse_result(run_id: str):
+    try:
+        safe_name(run_id)
+    except ValueError:
+        raise HTTPException(404, "查询记录不存在")
+    if not run_id.startswith("reverse_"):
+        raise HTTPException(404, "查询记录不存在")
+    root = (ROOT / "local/agent/reverse").resolve()
+    path = (root / run_id / "result.json").resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(404, "查询结果不存在，请重新读取查询状态")
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/assets/reverse-chat.js")
+def reverse_chat_script():
+    return FileResponse(ROOT / "server/static/reverse-chat.js", media_type="text/javascript")
+
+
+@app.post("/api/agent/reverse/cancel")
 @app.post("/api/agent/forward/cancel")
 async def cancel_forward(request: Request):
     if len(await request.body()) > 1000:
@@ -256,6 +319,7 @@ def forward_result(run_id: str):
     return FileResponse(path, media_type="application/json")
 
 
+@app.get("/api/agent/reverse/presence/{owner_id}")
 @app.get("/api/agent/forward/presence/{owner_id}")
 async def forward_presence(owner_id: str):
     try:
@@ -275,6 +339,7 @@ async def forward_presence(owner_id: str):
     return StreamingResponse(events(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
+@app.get("/api/agent/reverse/request/{request_id}")
 @app.get("/api/agent/forward/request/{request_id}")
 def forward_request_status(request_id: str):
     try:
@@ -286,7 +351,7 @@ def forward_request_status(request_id: str):
         raise HTTPException(404, "尚未找到本次查询记录，可以重新提交")
     status = read_json(path)
     result = {key: status.get(key) for key in (
-        "request_id", "run_id", "status", "owner_id", "created_at", "finished_at", "reason", "error",
+        "request_id", "run_id", "status", "owner_id", "created_at", "finished_at", "reason", "error", "direction",
     )}
     if status.get("status") == "running" and status.get("service_instance_id") not in (None, forward_jobs.manager.instance_id):
         result.update(status="interrupted", error="原查询服务已重启或当前端口不是原服务，请核对后重新查询。")

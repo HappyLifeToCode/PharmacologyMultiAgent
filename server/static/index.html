@@ -29,18 +29,18 @@
   <main class="chat-main">
     <header class="chat-header">
       <div class="header-left"><button class="icon-button" id="toggle-sidebar" aria-label="切换会话历史"><img src="/assets/icons/layout-sidebar.svg" alt=""></button><span id="conversation-title">新对话</span></div>
-      <span class="header-note">方剂 · 靶点 · 候选疾病</span>
+      <span class="header-note">药材 · 靶点 · 疾病双向查询</span>
     </header>
     <div class="message-scroll" id="message-scroll">
       <section class="welcome" id="welcome">
         <div class="welcome-mark"><img src="/assets/icons/leaf.svg" alt=""></div>
         <p class="eyebrow">PHARMACOLOGY RESEARCH</p>
-        <h1>从一味药，一张方开始。</h1>
-        <p class="welcome-description">查询药材靶点与候选疾病，让每一条关联都有据可查。</p>
+        <h1>从一味药，一张方，或一种疾病开始。</h1>
+        <p class="welcome-description">从药材寻找候选疾病，也从疾病靶点追溯候选药材。</p>
         <div class="welcome-prompts">
           <button data-prompt="帮我看看温经汤关联哪些候选疾病"><span>方剂探索</span><strong>温经汤关联哪些候选疾病？</strong><small>展开组成，追溯药材与靶点</small></button>
           <button data-prompt="白芍、甘草"><span>药材组合</span><strong>查询白芍与甘草的关联线索</strong><small>从药材组合出发查看候选</small></button>
-          <button data-prompt="你能做什么？"><span>开始使用</span><strong>了解如何查询和查看证据</strong><small>支持的输入与结果阅读方法</small></button>
+          <button data-prompt="查询肺腺癌关联哪些药材"><span>疾病探索</span><strong>肺腺癌关联哪些候选药材？</strong><small>追溯疾病、靶点与成分关系</small></button>
         </div>
         <p class="data-note">数据来源：BATMAN · Open Targets · Monarch（可用时）</p>
       </section>
@@ -49,8 +49,10 @@
     <div class="composer-area">
       <p class="status-message" id="status-message" role="status"></p>
       <form class="composer" id="composer-form">
-        <label class="sr-only" for="chat-input">输入方剂、药材或追问</label>
-        <textarea id="chat-input" rows="1" placeholder="输入方剂或药材，也可以继续追问…" maxlength="10000"></textarea>
+        <label class="sr-only" for="query-direction">查询方向</label>
+        <select id="query-direction" class="query-direction"><option value="auto">自动识别方向</option><option value="forward">方剂/药材 → 疾病</option><option value="reverse">疾病 → 药材</option></select>
+        <label class="sr-only" for="chat-input">输入疾病、方剂、药材或追问</label>
+        <textarea id="chat-input" rows="1" placeholder="输入疾病、方剂或药材，也可以继续追问…" maxlength="10000"></textarea>
         <div class="composer-toolbar"><button type="button" id="composer-settings" class="composer-settings"><img src="/assets/icons/settings.svg" alt="">查询设置</button><button type="button" id="choose-composition" class="composer-settings">选择/修改组成</button><span class="composer-shortcut">Enter 发送 · Shift+Enter 换行</span><button id="send-message" type="submit" class="send-button" aria-label="发送消息"><img src="/assets/icons/arrow-up.svg" alt=""></button></div>
       </form>
       <p class="composer-disclaimer">匹配支持度用于筛选研究线索，靶点关联不等于治疗有效率。</p>
@@ -63,13 +65,14 @@
     <p>设置用于下一次查询，已有结果保留当时的参数。</p>
     <label>返回候选数量<input id="setting-top-k" type="number" min="1" max="100" value="10" required></label>
     <label>BATMAN 预测靶点阈值<input id="setting-threshold" type="number" min="0" max="1" step="0.01" value="0.84" required></label>
-    <small>当前正向查询采用 known-only 已知证据，调整阈值不会开启预测靶点，也不改变已知证据结果。阈值仅在显式启用预测记录的流程中生效。</small>
+    <small>当前正向、反向会话查询均采用 known-only 已知证据，调整阈值不会开启预测靶点，也不改变已知证据结果。</small>
     <button type="submit" class="primary-button">保存设置</button>
   </form>
 </dialog>
 <script src="/assets/disease-labels.js?v=20261014"></script>
 <script src="/assets/query-presence.js?v=20261014-tab"></script>
 <script src="/assets/formula-picker.js?v=20261014"></script>
-<script src="/assets/chat.js?v=20261014"></script>
+<script src="/assets/reverse-chat.js?v=20261014"></script>
+<script src="/assets/chat.js?v=20261014-reverse"></script>
 </body>
 </html>

@@ -1,5 +1,19 @@
 # 项目交接说明
 
+## 2026-10-14 疾病到药材会话入口
+
+用户现已明确要求并授权实现反向“疾病 → 靶点 → 成分 → 候选药材”，第一版采用 known-only，覆盖此前“反向暂缓”记录。本次基于 main/fef7227 完成独立 BATMAN 全药材反向索引、完整疾病靶点读取、Monarch 按疾病补充、基因别名归一及原始符号追溯、药材聚合、API、首页双向入口与疾病歧义选择。旧 discovery 中的“反查”仍是靶点到候选疾病，与此新入口区分。
+
+模块见 `pharm/batman/reverse_index.py`、`pharm/agent/disease_input.py`、`pharm/agent/reverse.py` 与 `server/static/reverse-chat.js`，使用与契约见 [疾病到药材](DISEASE_TO_HERB.md)。正反向共用 jobs.py 的进程、页签连接、取消/重试和状态记录；反向归档在 local/agent/reverse，浏览器按查询方向恢复和读取。方剂组成选择、旧工作台和 favicon 保留。顺带修复 EFO 疾病分类读取嵌套 Parquet parents 时误用 schema.names，统一使用顶层 schema_arrow.names；分类规则本身未改。
+
+真实 BATMAN 索引：8,404 条药材原始记录、39,169 个成分、15,322 条 known 成分—靶点关系、3,116 个有效符号，4,417 条药材记录具备 known 靶点。源指纹及拒绝记录保留，重复中文名不合并；数据与派生索引不上传 Git。known_by_targets 的全部符号数不等于药材成分实际可达符号数，不能混用覆盖率分母。
+
+真实肺腺癌验证运行 `reverse_a8ed1f82a1ea421d9a530f3f2665bd64`：Open Targets/Monarch 工程状态 succeeded，10,694 个唯一已解析疾病靶点，2,460 个可追溯 BATMAN 药材关系，4,389 条候选药材记录，展示 5 条；HTTP 实测约 24 秒，仅代表该次任务。独立读取原始 Parquet 核对完整 Open Targets 靶点集合，独立核对五条展示药材的原始成分/known 路径、拒绝符号与覆盖率。
+
+验证目录 `local/checks/reverse-20261014/`：桌面/移动端使用上述真实归档回放测试列表、证据、指标、JSON 导出及刷新只 GET；疾病歧义先选择/取消、未知疾病明确拒绝、原正向组成选择通过，无 JS 错误或页面横向溢出。另真实启动反向查询验证刷新同 PID/同 request_id/单 POST，关闭承载页签后 cancelled/tab_closed，服务仍响应。临时 8773 已由验证脚本关闭，未启停生产 8766，仍由用户终端启动管理。工程验证不构成疗效或科学验收，scientific_complete=false。
+
+最新全量回归 **303 passed, 3 skipped**；修改的 JS 语法及差异空白检查通过。推送与最终工作树状态见本地 AGENTS.md。
+
 2026-10-14 中文显示补充：用户截图中的拼音分别来自未匹配拼写、含糊名称、原药材表缺中文名。修复 `BAI SHAO YAO` 有登记别名但精确命中 NA 中文条目后漏显示中文的问题，新增仅展示字段，不换原检索条目（真实 BAI SHAO YAO 为 30 个成分，BAI SHAO 为 301 个，不能为显示中文而静默替换）。未命中/中文名缺失分开标记；SHAO YAO 及剂量说明混入项仍不猜测。修复自身回归 284 passed / 3 skipped；合并团队 `0d92152` 的旧 discovery 流程 Top-K 产物优化后，最终全量 **287 passed / 3 skipped**。显示字段不改变组成 ID 或数据指纹，已保存默认仍有效；此次合并不是新增疾病→药材对话功能。
 
 ## 2026-10-14 方剂组成表接入

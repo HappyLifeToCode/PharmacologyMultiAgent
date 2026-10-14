@@ -257,7 +257,7 @@ def _load_disease_entity_types(data_dir: Path, entries: list[dict]) -> dict[str,
     for entry in entries:
         reader = parquet.ParquetFile(data_dir / entry["dataset"] / entry["file"])
         columns = ["id"]
-        if "parents" in reader.schema.names:
+        if "parents" in reader.schema_arrow.names:
             columns.append("parents")
         for batch in reader.iter_batches(columns=columns, batch_size=100_000):
             for row in batch.to_pylist():

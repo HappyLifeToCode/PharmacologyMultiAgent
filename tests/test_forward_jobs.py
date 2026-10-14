@@ -168,3 +168,28 @@ def test_owned_query_can_finish_after_its_http_connection_disappears(tmp_path):
         assert result["result"]["status"] == "succeeded"
         assert not manager.active
     asyncio.run(scenario())
+
+
+def test_reverse_uses_shared_presence_without_stopping_other_tab(tmp_path):
+    async def scenario():
+        manager = QueryManager(sample_worker, close_grace=0.1)
+        manager.connect_tab("reverse-tab")
+        manager.connect_tab("forward-tab")
+        reverse_task = asyncio.create_task(manager.run(Connection(), {"delay": 120}, tmp_path, "reverse-job", owner_id="reverse-tab", direction="reverse"))
+        forward_task = asyncio.create_task(manager.run(Connection(), {"delay": 120}, tmp_path, "forward-job", owner_id="forward-tab"))
+        reverse_job = await ready(manager, "reverse-job")
+        reverse_pid = reverse_job.process.pid
+        forward_job = await ready(manager, "forward-job")
+        assert reverse_job.directory.parent.name == "reverse"
+        manager.disconnect_tab("reverse-tab")
+        with pytest.raises(QueryCancelled):
+            await asyncio.wait_for(reverse_task, timeout=10)
+        assert forward_job.process.is_alive()
+        assert reverse_pid not in {child.pid for child in multiprocessing.active_children()}
+        record = json.loads((reverse_job.directory / "job.json").read_text(encoding="utf-8"))
+        assert record["direction"] == "reverse" and record["reason"] == "tab_closed"
+        await manager.stop("forward-job")
+        with pytest.raises(QueryCancelled):
+            await forward_task
+        assert not manager.active
+    asyncio.run(scenario())

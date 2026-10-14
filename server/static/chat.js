@@ -176,6 +176,7 @@ function table(headers, rows, parent) {
 }
 
 function renderComposition(result, content) {
+  if (result.direction === "reverse") { renderReverseTargets(result, content); return; }
   const input = result.input || {};
   const rows = result.resolved_herbs || [];
   content.append(element("p", "", (input.formula ? input.formula + "的药材组成：" : "本次输入药材：") + FormulaPicker.compositionNames(input).join("、")));
@@ -200,6 +201,7 @@ function renderComposition(result, content) {
 }
 
 function renderEvidence(result, index, content) {
+  if (result.direction === "reverse") { renderReverseEvidence(result, index, content); return; }
   const candidate = (result.candidates || [])[index];
   if (!candidate) { content.append(element("p", "", "本次返回结果里没有这个候选，请指定已有候选的名称或序号。")); return; }
   content.append(element("p", "", diseaseName(candidate) + "匹配了 " + candidate.matched_count + " 个唯一靶点，保留 " + (candidate.evidence_row_count == null ? (candidate.evidence || []).length : candidate.evidence_row_count) + " 行关联证据。"));
@@ -221,6 +223,7 @@ function renderEvidence(result, index, content) {
 }
 
 function renderScore(result, content) {
+  if (result.direction === "reverse") { renderReverseMetrics(result, content); return; }
   const version = (result.candidates || []).find((item) => item.confidence)?.confidence?.formula_version || "当前版本";
   content.append(element("p", "", "匹配支持度由匹配靶点数、输入覆盖率、疾病覆盖率和证据质量加权得到。缺失项不参与计算，剩余权重重新归一；数值用于核查关联线索。"));
   content.append(element("p", "reply-note", "本次公式版本：" + version + "。证据质量来自 BATMAN 已知证据占比；Open Targets 和 Monarch 的原始关联分值单独展示。"));
@@ -232,6 +235,7 @@ function renderScore(result, content) {
 }
 
 function renderResult(result, message, content, sessionId) {
+  if (result.direction === "reverse") { renderReverseResult(result, message, content, sessionId); return; }
   if (result.data_origin === "synthetic_engineering") content.append(element("p", "source-state", "合成工程测试数据，仅用于验证界面，不代表真实药理结果。"));
   const input = result.input || {};
   const candidates = result.candidates || [];
@@ -283,7 +287,7 @@ function renderResult(result, message, content, sessionId) {
 async function resultFor(message) {
   if (appState.results.has(message.runId)) return appState.results.get(message.runId);
   if (appState.loading.has(message.runId)) return appState.loading.get(message.runId);
-  const pending = request("/api/agent/forward/" + encodeURIComponent(message.runId)).then((result) => {
+  const pending = request("/api/agent/" + queryDirection(message) + "/" + encodeURIComponent(message.runId)).then((result) => {
     appState.results.set(message.runId, result);
     return result;
   }).finally(() => appState.loading.delete(message.runId));
@@ -304,11 +308,11 @@ function render() {
       messages.append(article);
       if (!content) continue;
       if (message.kind === "resolving") {
-        content.append(element("p", "pending-content", "正在核对输入与方剂组成…"));
+        content.append(element("p", "pending-content", "正在核对输入、疾病或方剂组成…"));
         continue;
       }
       if (message.kind === "pending") {
-        content.append(element("p", "pending-content", "正在查询药材靶点和疾病关联，请稍候…切换工作台或刷新后会继续本次查询。"));
+        content.append(element("p", "pending-content", (queryDirection(message) === "reverse" ? "正在查询疾病靶点与候选药材" : "正在查询药材靶点和疾病关联") + "，请稍候…切换工作台或刷新后会继续本次查询。"));
         if (message.queryId && !appState.busy.has(session.id)) resumeQuery(session, message);
         continue;
       }
@@ -316,7 +320,7 @@ function render() {
         content.append(element("p", "", message.text || ""));
         if (message.kind === "error" && message.queryBody) {
           if (message.queryId) content.append(action("恢复原查询", () => { message.kind = "pending"; saveSessions(); render(); }));
-          content.append(action("重新查询", () => submitMessage(message.queryText || session.title, { retryBody: message.queryBody, retryQueryId: message.queryId })));
+          content.append(action("重新查询", () => submitMessage(message.queryText || session.title, { retryBody: message.queryBody, retryQueryId: message.queryId, retryDirection: queryDirection(message) })));
         }
         continue;
       }
@@ -348,7 +352,7 @@ async function resumeQuery(session, message) {
   appState.busy.add(session.id);
   try {
     while (!QueryPresence.leaving) {
-      const status = await request("/api/agent/forward/request/" + encodeURIComponent(message.queryId));
+      const status = await request("/api/agent/" + queryDirection(message) + "/request/" + encodeURIComponent(message.queryId));
       if (status.status === "running") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
@@ -414,23 +418,26 @@ async function submitMessage(suppliedText, context) {
     if (/^(你能做什么|怎么使用|如何使用|帮助)[？?]?$/.test(text)) {
       reply.kind = "text";
       reply.text = "可以输入本地方剂库收录的方剂名，也可以输入实际药材清单，例如「白芍、甘草」。同名方剂有不同组成时，会先展示药材清单供你选择或修改；确认后可以保存为默认组成。温经汤等四方继续沿用当前内置组成，可用「选择/修改组成」切换。\n\n结果出来后，可以说「展开第一个疾病的证据」「查看药材组成」或「解释匹配支持度」。查询数量和 BATMAN 阈值在查询设置里调整。";
+      reply.text += "\n\n也可以输入疾病中文名、英文名或标准 ID，例如「查询肺腺癌关联哪些药材」。疾病歧义先选择；反向结果支持「展开第一个药材的证据」「查看疾病靶点」「查看匹配指标」。两种方向均采用 BATMAN known-only。";
     } else {
       const previous = context?.message || latestResultMessage(session);
       const inspectIndex = context?.index ?? candidateIndex(text);
       const evidenceIntent = inspectIndex !== null && /证据|展开|查看/.test(text);
-      const compositionIntent = /^(查看|展开)?(药材组成|方剂组成|药材命中)[。？?]?$/.test(text);
-      const scoreIntent = /^(解释|查看|展开)?(匹配支持度|评分组成|置信度|这个分数怎么来的)[。？?]?$/.test(text);
+      const compositionIntent = /^(查看|展开)?(药材组成|方剂组成|药材命中|疾病靶点|关联靶点)[。？?]?$/.test(text);
+      const scoreIntent = /^(解释|查看|展开)?(匹配支持度|评分组成|置信度|这个分数怎么来的|匹配指标|覆盖率)[。？?]?$/.test(text);
       if (evidenceIntent || compositionIntent || scoreIntent) {
-        if (!previous) throw new Error("请先查询一个方剂或药材组合，再展开对应结果。");
+        if (!previous) throw new Error("请先查询疾病、方剂或药材，再展开对应结果。");
         const result = await resultFor(previous);
         if (evidenceIntent && !(result.candidates || [])[inspectIndex]) throw new Error("本次返回结果没有这个序号，请指定已有候选。");
         reply.kind = evidenceIntent ? "evidence" : compositionIntent ? "composition" : "score";
         reply.runId = previous.runId;
+        reply.direction = queryDirection(previous);
         reply.candidateIndex = inspectIndex;
       } else {
-        let body = context?.retryBody || { text: resolveInput(text), ...settings() };
-        body = await FormulaPicker.prepare(body, { force: Boolean(context?.chooseComposition) });
-        if (!body) { reply.kind = "text"; reply.text = "已取消组成选择，本次未启动查询。"; return; }
+        const prepared = await prepareChatQuery(context?.retryBody || { text: resolveInput(text), ...settings() }, text, context);
+        if (!prepared) { reply.kind = "text"; reply.text = "已取消选择，本次未启动查询。"; return; }
+        const body = prepared.body;
+        reply.direction = prepared.direction;
         reply.kind = "pending";
         reply.queryBody = body;
         reply.queryText = text;
@@ -439,7 +446,7 @@ async function submitMessage(suppliedText, context) {
         const unfinished = [...session.messages].reverse().find((item) => item !== reply && item.queryId && !item.runId);
         const supersedes = context?.retryQueryId || unfinished?.queryId;
         saveSessions();
-        const response = await request("/api/agent/forward", {
+        const response = await request("/api/agent/" + reply.direction, {
           ...body, request_id: reply.queryId, owner_id: QueryPresence.id,
           ...(supersedes ? { supersedes } : {}),
         });

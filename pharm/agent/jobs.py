@@ -1,4 +1,4 @@
-"""Own cancellable worker processes for HTTP forward queries."""
+"""Shared cancellable worker processes for forward and reverse queries."""
 
 from __future__ import annotations
 
@@ -29,11 +29,16 @@ def request_identifier(value):
 
 
 def _worker(body, directory):
-    from . import forward
+    from . import forward, reverse
 
     directory = Path(directory)
     try:
-        response = forward.query(body.get("herbs"), formula=body.get("formula"),
+        if directory.name.startswith("reverse_"):
+            response = reverse.query(text=body.get("text"), disease=body.get("disease"),
+                                     disease_id=body.get("disease_id"), top_k=body.get("top_k"),
+                                     output_dir=directory, run_id=directory.name)
+        else:
+            response = forward.query(body.get("herbs"), formula=body.get("formula"),
                                  text=body.get("text"), top_k=body.get("top_k"),
                                  batman_threshold=body.get("batman_threshold", 0.84),
                                  formula_variant_id=body.get("formula_variant_id"),
@@ -118,7 +123,9 @@ class QueryManager:
         return {"request_id": request_id, "stopped": True,
                 "status": "cancelled" if job else "not_running"}
 
-    async def run(self, request, body, root, request_id, supersedes=None, owner_id=None):
+    async def run(self, request, body, root, request_id, supersedes=None, owner_id=None, *, direction="forward"):
+        if direction not in ("forward", "reverse"):
+            raise ValueError("不支持的查询方向")
         request_id = request_identifier(request_id)
         if owner_id is not None:
             request_identifier(owner_id)
@@ -127,7 +134,7 @@ class QueryManager:
             if request_identifier(supersedes) == request_id:
                 raise ValueError("新请求不能替代自身")
             await self.stop(supersedes, "superseded_by_retry")
-        directory = Path(root) / "local/agent/forward" / ("forward_" + uuid4().hex)
+        directory = Path(root) / "local/agent" / direction / (direction + "_" + uuid4().hex)
         process = multiprocessing.get_context("spawn").Process(
             target=self.worker, args=(body, str(directory)), daemon=True,
         )
@@ -140,7 +147,7 @@ class QueryManager:
             self.active[request_id] = job
         status = {"request_id": request_id, "run_id": directory.name,
                   "created_at": now(), "status": "running", "owner_id": owner_id,
-                  "service_instance_id": self.instance_id}
+                  "service_instance_id": self.instance_id, "direction": direction}
         status_path = Path(root) / "local/agent/jobs" / (request_id + ".json")
         started = False
         try:

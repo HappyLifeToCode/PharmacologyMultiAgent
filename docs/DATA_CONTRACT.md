@@ -2,6 +2,16 @@
 
 双流水线（workflow_version=4）的产物、状态语义与归档布局。旧九阶段契约已随重构废弃（Git 历史可查）。
 
+## 疾病到药材会话查询
+
+独立于旧 discovery 的疾病到药材入口为 `POST /api/agent/reverse`，返回 `workflow=reverse_disease_target_herb_v1`、`direction=reverse`、`scientific_complete=false`，归档于 `local/agent/reverse/reverse_<id>/result.json`。`/reverse/resolve` 只解析名称，歧义需明确选择；原始 Open Targets ID 与 MONDO 对应保留，父子疾病不自动合并。
+
+BATMAN 派生索引由 herbs、herb_compounds、compound_targets 构成，只纳入 known，保留原始药材行号作为身份、文件哈希、拒绝记录和版本指纹。显示别名不替换查询条目。独立构建 CLI 和 HTTP 字段见 [疾病到药材](DISEASE_TO_HERB.md)。
+
+结果 `disease_evidence` 保存完整已解析疾病靶点的逐来源记录，候选 `evidence` 保存靶点—成分—药材路径。`disease_target_count` 和 `matched_input_count` 不因 Top-K 改变；`disease_coverage` 分母为本次可用来源的完整已解析靶点，`herb_coverage` 分母为该药材通过项目符号校验的全部 BATMAN known 原符号。多对一基因映射保留批准符号/原符号两种计数；未接受原符号在 `excluded_known_symbols` 单独展示。
+
+来源缺失标 partial、`target_scope_complete=false`，零匹配返回空候选，两源不可用则失败。工程排序为唯一匹配靶点数降序、药材 ID 升序，不使用正向 confidence，不提供治疗概率。请求跟踪、页签接续和关闭停止复用现有任务管理器；反向与正向归档接口分别校验运行编号前缀。
+
 ## 流水线与 manifest
 
 - `pipeline`：`discovery`（四阶段反向发现）或 `analysis`（候选疾病机制分析，经 POST /api/analysis {discovery_run_id, disease, ...} 创建；任务快照继承来源任务的方剂/药材/阈值，记录 `analysis: {source_run_id, disease}`，缺省继承来源运行模式）。
