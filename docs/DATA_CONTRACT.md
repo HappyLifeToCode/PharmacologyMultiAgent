@@ -14,10 +14,10 @@
 |---|---|---|
 | preflight | availability.json | 每项本地数据 available=true/false、细节、缺失时 guidance；含疾病索引疾病数与样例 |
 | herb_targets | targets.json | herbs、threshold、relations、genes、unmatched_herbs、rejected_symbols、per_herb、source_counts、provenance |
-| disease_reverse | reverse/result.json、candidates.csv、evidence.csv、report.md、manifest.json | 逐疾病 matched/coverage/**confidence**/逐条证据、未命中靶点、索引 metadata、database 路径与 SHA-256；超 3000 靶点分块记录 chunking |
+| disease_reverse | reverse/result.json、summary.json、candidates_topk.csv、topk_target_evidence.csv、topk_hierarchy.json、report.md、manifest.json | 默认 compact：保存可配置 Top-K 候选及其逐条支持证据、完整/基础/严格层计数、未命中靶点、索引 metadata、database 路径与 SHA-256；超 3000 靶点分块记录 chunking |
 | review | verification.json + 运行根 report.md | 程序核对结果；报告含候选疾病概览（含置信度）与局限声明 |
 
-**confidence 字段**（result.json 每候选）：`{value, components: {match_score, input_coverage, disease_coverage, evidence_quality}, formula_version: "heuristic_v2", note}`——程序计算的透明启发式，固定权重 0.3/0.3/0.2/0.2，组件 null 剔除归一，零匹配 value=0.0；非统计检验，固定顺序非排名。candidates.csv 与 report.md 含同名列与声明。
+**confidence 字段**（result.json 每个 Top-K 候选）：`{value, components: {match_score, input_coverage, disease_coverage, evidence_quality}, formula_version: "heuristic_v2", note}`——程序计算的透明启发式，固定权重 0.3/0.3/0.2/0.2，组件 null 剔除归一，零匹配 value=0.0；非统计检验。`candidates_topk.csv` 与 report.md 含同名列与声明。
 
 ## analysis 四阶段产物
 
@@ -83,7 +83,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 - MONDO 只作为可选 `mondo_id` 映射字段（direct / dbxref / conflict / unmapped），不设为所有疾病的主键；没有 MONDO 映射的 EFO、HP、OBA、Orphanet 等实体必须保留。26.09 审计：45,896 条记录无 MONDO 冲突、无多记录共指（见 `local/open_targets_mondo_audit_20261009/`）。
 - 不按英文名称相似度自动合并疾病（heart failure 与 congestive heart failure、breast cancer 与 breast carcinoma 为不同 ID，必须并存）。
 - 父子疾病仅标记关系（`parent_candidate_ids` / `child_candidate_ids`），不合并分数，不删除任一实体。
-- 候选分层：完整层（全部候选与全部原始 direct association）→ 基础层（associationScore > 0.2）→ 严格层（>= 0.6）→ 展示层（entity_type == disease 后排序取 Top-50）；排序字段依次为 strict_supported、strict_support_target_count、support_target_count、max_association_score、score_sum、disease_id；Top-50 在 disease_id 聚合与实体过滤之后生成。
+- 候选分层：完整层（全部候选与全部原始 direct association）→ 基础层（associationScore > 0.2）→ 严格层（>= 0.6）→ 展示层（entity_type == disease 后排序取 Top-K）；排序字段依次为 strict_supported、strict_support_target_count、support_target_count、max_association_score、score_sum、disease_id；Top-K 在 disease_id 聚合与实体过滤之后生成。K 默认从 `configs/runtime.json` 的 `candidate_output_top_k` 读取（当前 50），可由任务同名字段或环境变量 `PHARM_CANDIDATE_OUTPUT_TOP_K` 覆盖（1—500），只影响持久化、报告和 UI，不截断完整计算。
+- `configs/runtime.json` 默认 `output_retention=compact`：完整层、基础层、严格层参与计算和计数，但只持久化 `summary.json` 中的计数、Top-K 候选、Top-K 逐条证据及 Top-K 层级；不生成 GB 级 `result_full.json`、全量 `evidence.csv` 或完整分层 CSV。显式设置任务 `output_retention=audit` 或 `PHARM_OUTPUT_RETENTION=audit` 才保留这些全量产物。
 - `top_k_per_target` / `top_k_per_disease` / `min_score` 只用于候选展示与排序，不删除完整层原始关联；启用这些过滤的批次 provenance 必须标记 `complete=false` 且 `raw_rows_complete=false`，不得称为完整层。
 - `associationScore` 是 Open Targets 关联强度分数，不是疗效概率，也不是临床适应症证据。
 
@@ -91,10 +92,10 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### Monarch Initiative（OMIM 功能替代来源，2026-10-12 接入）
 
-- 定位：Monarch KG 是本项目 OMIM 所需功能（基因—疾病、HPO 表型、遗传方式、PMID/ECO 证据）的替代来源；Open Targets 仍是主疾病关联来源，associationScore 与 Top-50 排序不受 Monarch 影响。
+- 定位：Monarch KG 是本项目 OMIM 所需功能（基因—疾病、HPO 表型、遗传方式、PMID/ECO 证据）的替代来源；Open Targets 仍是主疾病关联来源，associationScore 与 Top-K 排序不受 Monarch 影响。
 - 默认关闭：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true` 才启用；数据目录解析顺序为任务 `monarch_data_dir` > `PHARM_MONARCH_DATA_DIR` > `configs/monarch_data.local.json` > `data/monarch/<最新版本目录>`。无在线回退，缺文件明确报错。
 - 匹配规则：基因为 gene_id 命名空间 > HGNC symbol > UniProt > 记录 unresolved；疾病为 candidate.mondo_id > Monarch 明确 MONDO ID > 其他明确本体 ID > 记录 unresolved。禁止按英文名称模糊合并；MONDO 是跨库映射字段，不是所有疾病的强制主键；无 MONDO 映射的记录保留。
-- 当前只对 Top-50 候选做证据补充；产物独立保存：`monarch_gene_disease.csv`、`monarch_hpo.csv`、`monarch_inheritance.csv`、`monarch_publications.csv`、`monarch_unresolved.csv`、`monarch_provenance.json`（每条 HPO/遗传方式/PMID 单独一行），登记进运行 manifest 与下载白名单。
+- 当前只对 Top-K 候选做证据补充；产物独立保存：`monarch_gene_disease.csv`、`monarch_hpo.csv`、`monarch_inheritance.csv`、`monarch_publications.csv`、`monarch_unresolved.csv`、`monarch_provenance.json`（每条 HPO/遗传方式/PMID 单独一行），登记进运行 manifest 与下载白名单。
 - Monarch 证据不参与 Open Targets 分数计算与候选排序，不能解释为临床疗效或诊断结论。
 
 `heuristic_v2` 沿用权重，evidence_quality 仅取 BATMAN known 占比；原始关联分值不参与评分，缺失组件剔除。历史 v1 报告保留原版本。

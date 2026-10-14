@@ -742,21 +742,28 @@ async function renderResults(manifest, stage, role) {
     return;
   }
   panel.hidden = false;
-  // Top-50 优先：新产物用 candidate_layers.top，旧运行回退 result.candidates；UI 不改变后端排序
+  // Top-K 优先：K 由后端产物记录，UI 不改变后端排序；旧运行默认回退 50。
   const layers = result.candidate_layers || {};
   const allCandidates = Array.isArray(result.candidates) ? result.candidates : [];
   const hasTop = Array.isArray(layers.top) && layers.top.length > 0;
   const source = hasTop ? layers.top : allCandidates;
-  const candidates = source.filter(isDiseaseCandidate).slice(0, 50);
-  const completeCount = Array.isArray(layers.complete) ? layers.complete.length : allCandidates.length;
-  const baseCount = Array.isArray(layers.base) ? layers.base.length : null;
-  const strictCount = Array.isArray(layers.strict) ? layers.strict.length : null;
-  const hiddenPhenotypes = completeCount - allCandidates.filter(isDiseaseCandidate).length >= 0
-    ? completeCount - allCandidates.filter(isDiseaseCandidate).length : 0;
+  const requestedK = Number((result.summary && result.summary.candidate_output
+    && result.summary.candidate_output.requested_k) || (layers.rules && layers.rules.top_n) || 50);
+  const candidates = source.filter(isDiseaseCandidate).slice(0, requestedK);
+  const counts = layers.counts || {};
+  const completeCount = Number.isFinite(counts.complete)
+    ? counts.complete : (Array.isArray(layers.complete) ? layers.complete.length : allCandidates.length);
+  const baseCount = Number.isFinite(counts.base)
+    ? counts.base : (Array.isArray(layers.base) ? layers.base.length : null);
+  const strictCount = Number.isFinite(counts.strict)
+    ? counts.strict : (Array.isArray(layers.strict) ? layers.strict.length : null);
+  const diseaseEntities = Number.isFinite(counts.disease_entities)
+    ? counts.disease_entities : allCandidates.filter(isDiseaseCandidate).length;
+  const hiddenPhenotypes = Math.max(completeCount - diseaseEntities, 0);
   const statsParts = [`完整候选 ${completeCount}`];
   if (baseCount != null) statsParts.push(`基础 ${baseCount}`);
   if (strictCount != null) statsParts.push(`严格 ${strictCount}`);
-  statsParts.push(`Top-50 展示 ${candidates.length}`);
+  statsParts.push(`Top-${requestedK} 展示 ${candidates.length}`);
   statsParts.push(`已隐藏表型/测量性状 ${Math.max(hiddenPhenotypes, 0)}`);
   $("candidate-layer-stats").textContent = statsParts.join(" · ")
     + (hasTop ? "" : "（旧产物无 candidate_layers.top，回退到原始候选列表）");
@@ -1031,7 +1038,7 @@ function renderEvidence(candidate, allCandidates) {
     tbody.appendChild(tr);
   }
   $("evidence-note").textContent = (candidate.evidence || []).length > 100
-    ? "仅显示前 100 行，完整证据请下载 evidence.csv。"
+    ? "页面仅显示前 100 行，本候选的完整支持证据请下载 topk_target_evidence.csv。"
     : "";
 }
 

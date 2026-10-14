@@ -80,6 +80,14 @@ def test_new_tasks_default_to_open_targets():
     assert task["online_sources"] == ["open_targets"]
     assert task["online_diseases"] == []
     assert task["online_collect"] is False
+    assert "candidate_output_top_k" not in task
+    assert "output_retention" not in task
+
+
+def test_task_accepts_explicit_compact_output_controls():
+    task = prepare_task(dict(body(), candidate_output_top_k=25, output_retention="audit"))
+    assert task["candidate_output_top_k"] == 25
+    assert task["output_retention"] == "audit"
 
 
 @pytest.mark.parametrize("source", ["genecards", "omim"])

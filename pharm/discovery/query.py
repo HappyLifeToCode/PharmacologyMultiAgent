@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import shutil
 import sqlite3
 from collections import defaultdict
@@ -25,6 +26,9 @@ DISEASES = (
 )
 MAX_DISEASES = 500
 DEFAULT_DATABASE = Path("local/discovery/disease_index.sqlite")
+DEFAULT_CANDIDATE_OUTPUT_TOP_K = 50
+MAX_CANDIDATE_OUTPUT_TOP_K = 500
+OUTPUT_RETENTIONS = ("compact", "audit")
 LIMITATION = (
     "本地索引仅收录批次导入的疾病-基因关联；关键词检索关联不等于确诊疾病的因果或治疗证据。"
     "使用全部合格导出记录，不新增疗效筛选阈值。"
@@ -388,8 +392,44 @@ def _association_score(row: dict):
     return value if math.isfinite(value) else None
 
 
-def build_candidate_layers(candidates, *, base_score=0.2, strict_score=0.6, top_n=50):
+def candidate_output_top_k(value=None):
+    """Resolve the display/report Top-K without affecting complete lookup."""
+    if value is None:
+        configured = None
+        runtime_path = ROOT / "configs" / "runtime.json"
+        if runtime_path.is_file():
+            configured = read_json(runtime_path).get("candidate_output_top_k")
+        environment = os.environ.get("PHARM_CANDIDATE_OUTPUT_TOP_K", "").strip()
+        value = environment if environment else (
+            configured if configured is not None else DEFAULT_CANDIDATE_OUTPUT_TOP_K)
+    if isinstance(value, bool):
+        raise ValueError("candidate_output_top_k 必须是正整数")
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("candidate_output_top_k 必须是正整数") from exc
+    if not 1 <= value <= MAX_CANDIDATE_OUTPUT_TOP_K:
+        raise ValueError("candidate_output_top_k 必须在 1—%d 之间" % MAX_CANDIDATE_OUTPUT_TOP_K)
+    return value
+
+
+def output_retention(value=None):
+    """Compact is the production default; audit explicitly keeps full artifacts."""
+    if value is None:
+        configured = None
+        runtime_path = ROOT / "configs" / "runtime.json"
+        if runtime_path.is_file():
+            configured = read_json(runtime_path).get("output_retention")
+        value = os.environ.get("PHARM_OUTPUT_RETENTION", "").strip() or configured or "compact"
+    value = str(value).strip().lower()
+    if value not in OUTPUT_RETENTIONS:
+        raise ValueError("output_retention 只支持 compact 或 audit")
+    return value
+
+
+def build_candidate_layers(candidates, *, base_score=0.2, strict_score=0.6, top_n=None):
     """Build transparent Open Targets candidate layers after raw evidence lookup."""
+    top_n = candidate_output_top_k(top_n)
     enriched = []
     for candidate in candidates:
         scores = [score for score in (_association_score(row) for row in candidate.get("evidence", []))
@@ -480,7 +520,7 @@ def build_candidate_hierarchy(candidates):
             "relation_count": len(relations), "relations": relations}
 
 
-def query(database, *, herbs=None, genes=None):
+def query(database, *, herbs=None, genes=None, candidate_top_k=None):
     if (herbs is None) == (genes is None):
         raise ValueError("请选择药材或输入靶点，两种输入方式只能选一种")
     values = herbs if herbs is not None else genes
@@ -565,10 +605,10 @@ def query(database, *, herbs=None, genes=None):
         metadata["herb_catalog"] = [row for row in metadata["herb_catalog"] if row["herb"] in (herbs or [])]
     for candidate in candidates:
         candidate["confidence"] = _confidence(candidate, len(symbols), known, predicted)
-    layers = build_candidate_layers(candidates)
+    layers = build_candidate_layers(candidates, top_n=candidate_top_k)
     # 层级关系标记在 enriched 项上原地写入，complete/base/strict/top 共享同一批字典
     layers["hierarchy"] = build_candidate_hierarchy(layers["complete"])
-    # Monarch 证据补充：只在 Top-50 生成之后执行，不修改候选与分数（默认关闭）
+    # Monarch 证据补充：只在可配置 Top-K 生成之后执行，不修改候选与分数（默认关闭）
     from ..diseases import monarch as monarch_source
     monarch_evidence = monarch_source.enrich_open_targets_candidates(
         {"input": {"genes": symbols}, "candidate_layers": layers})
@@ -590,20 +630,109 @@ def query(database, *, herbs=None, genes=None):
     return result_payload
 
 
-def save_result(result, output):
+def _compact_evidence(row):
+    return {key: row.get(key) for key in (
+        "gene_symbol", "disease", "source", "source_file", "source_row", "relevance_score")}
+
+
+def _topk_hierarchy(layers, top_candidates):
+    top_ids = {str(candidate.get("disease_id") or "").strip() for candidate in top_candidates}
+    top_ids.discard("")
+    source = layers.get("hierarchy") or {}
+    relations = []
+    for relation in source.get("relations", []):
+        if relation.get("disease_id") not in top_ids:
+            continue
+        item = dict(relation)
+        for key in ("parent_candidate_ids", "child_candidate_ids"):
+            item[key] = [value for value in item.get(key, []) if value in top_ids]
+        if item["parent_candidate_ids"] or item["child_candidate_ids"]:
+            relations.append(item)
+    return {
+        "identity_key": source.get("identity_key", "disease_id"),
+        "policy": source.get("policy", "relations recorded only; no score merging"),
+        "relation_count": len(relations),
+        "relations": relations,
+        "scope": "top_k",
+    }
+
+
+def _compact_candidate(candidate, top_ids):
+    item = {key: value for key, value in candidate.items() if key != "evidence"}
+    item["evidence"] = [_compact_evidence(row) for row in candidate.get("evidence", [])]
+    for key in ("parent_candidate_ids", "child_candidate_ids", "related_candidate_ids"):
+        item[key] = [value for value in item.get(key, []) if value in top_ids]
+    item["is_parent_child_related"] = bool(item.get("related_candidate_ids"))
+    return item
+
+
+def _dataset_summary(dataset):
+    if not isinstance(dataset, dict):
+        return dataset
+    excluded = {"diseases", "herb_catalog"}
+    summary = {key: value for key, value in dataset.items() if key not in excluded}
+    summary["disease_count"] = len(dataset.get("diseases", []))
+    if "herb_catalog" in dataset:
+        summary["herb_catalog_count"] = len(dataset.get("herb_catalog", []))
+    return summary
+
+
+def save_result(result, output, retention=None):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    write_json(output / "result.json", result)
+    retention = output_retention(retention)
+    layers = result.get("candidate_layers") or {}
+    requested_k = int((layers.get("rules") or {}).get("top_n") or
+                      candidate_output_top_k())
+    original_top = list(layers.get("top") or [])[:requested_k]
+    top_ids = {str(candidate.get("disease_id") or "").strip() for candidate in original_top}
+    top_ids.discard("")
+    top_candidates = [_compact_candidate(candidate, top_ids) for candidate in original_top]
+    full_evidence_rows = sum(len(candidate.get("evidence", [])) for candidate in result.get("candidates", []))
+    top_evidence_rows = sum(len(candidate.get("evidence", [])) for candidate in top_candidates)
+    counts = {
+        "complete": len(layers.get("complete", result.get("candidates", []))),
+        "matched_candidates": sum(bool(candidate.get("matched_count"))
+                                  for candidate in result.get("candidates", [])),
+        "base": len(layers.get("base", [])),
+        "strict": len(layers.get("strict", [])),
+        "top_k": len(top_candidates),
+        "disease_entities": sum(candidate.get("entity_type") == "disease"
+                                for candidate in layers.get("complete", result.get("candidates", []))),
+        "evidence_rows_full": full_evidence_rows,
+        "evidence_rows_top_k": top_evidence_rows,
+    }
+    hierarchy = _topk_hierarchy(layers, top_candidates)
+    summary = {
+        "workflow": result["workflow"], "created_at": result.get("created_at"),
+        "retention": retention,
+        "candidate_output": {"requested_k": requested_k, "actual_count": len(top_candidates),
+                             "sort_policy": "candidate_layers.rules + deterministic disease_id tie-break"},
+        "counts": counts,
+        "input_count": result["input_count"],
+        "matched_input_count": result["matched_input_count"],
+        "unmatched_genes": result.get("unmatched_genes", []),
+        "layer_rules": layers.get("rules", {}),
+        "database_sha256": result.get("database_sha256"),
+        "dataset": _dataset_summary(result.get("dataset")),
+        "full_artifacts_persisted": retention == "audit",
+    }
+    compact_result = {key: value for key, value in result.items()
+                      if key not in ("candidates", "candidate_layers", "herb_relations")}
+    compact_result.update({
+        "candidates": top_candidates,
+        "candidate_layers": {"top": top_candidates, "counts": counts,
+                             "rules": layers.get("rules", {}), "hierarchy": hierarchy},
+        "summary": summary,
+        "retention": retention,
+        "dataset": summary["dataset"],
+    })
+    write_json(output / "result.json", compact_result)
+    write_json(output / "summary.json", summary)
     columns = ["disease", "disease_id", "disease_name", "canonical_disease_id", "canonical_name",
                "mondo_id", "mondo_mapping", "ontology", "entity_type", "matched_count",
                "unique_evidence_gene_count", "evidence_row_count", "indexed_target_count",
                "input_coverage", "disease_coverage", "confidence"]
-    with (output / "candidates.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, columns, extrasaction="ignore")
-        writer.writeheader()
-        for candidate in result["candidates"]:
-            writer.writerow({**candidate, "confidence": candidate.get("confidence", {}).get("value")})
-    layers = result.get("candidate_layers") or {}
     layer_columns = columns + ["strict_supported", "strict_support_target_count",
                                "support_target_count", "max_association_score", "score_sum",
                                "parent_candidate_ids", "child_candidate_ids",
@@ -616,42 +745,65 @@ def save_result(result, output):
             row[key] = "|".join(value) if isinstance(value, list) else ""
         return row
 
-    for filename, key in (("candidates_complete.csv", "complete"),
-                          ("candidates_base.csv", "base"),
-                          ("candidates_strict.csv", "strict"),
-                          ("candidates_top50.csv", "top")):
-        with (output / filename).open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.DictWriter(stream, layer_columns, extrasaction="ignore")
-            writer.writeheader()
-            for candidate in layers.get(key, []):
-                writer.writerow(_layer_row(candidate))
-    if layers.get("hierarchy"):
-        write_json(output / "candidate_hierarchy.json",
-                   {**layers["hierarchy"], "rules": layers.get("rules")})
+    with (output / "candidates_topk.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, layer_columns, extrasaction="ignore")
+        writer.writeheader()
+        for candidate in top_candidates:
+            writer.writerow(_layer_row(candidate))
+    write_json(output / "topk_hierarchy.json", {**hierarchy, "rules": layers.get("rules")})
     if result.get("monarch_evidence"):
         from ..diseases import monarch as monarch_source
         monarch_source.write_monarch_artifacts(result["monarch_evidence"], output)
 
-    columns = ["disease", "gene_symbol", "source", "source_file", "source_row", "relevance_score"]
-    with (output / "evidence.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, columns, extrasaction="ignore")
+    evidence_columns = ["disease", "disease_id", "gene_symbol", "source", "source_file",
+                        "source_row", "relevance_score"]
+    with (output / "topk_target_evidence.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, evidence_columns, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(row for candidate in result["candidates"] for row in candidate["evidence"])
+        for candidate in top_candidates:
+            for row in candidate.get("evidence", []):
+                writer.writerow({**row, "disease": candidate.get("disease"),
+                                 "disease_id": candidate.get("disease_id")})
+    if retention == "audit":
+        write_json(output / "result_full.json", result)
+        for filename, key in (("candidates_complete.csv", "complete"),
+                              ("candidates_base.csv", "base"),
+                              ("candidates_strict.csv", "strict")):
+            with (output / filename).open("w", encoding="utf-8-sig", newline="") as stream:
+                writer = csv.DictWriter(stream, layer_columns, extrasaction="ignore")
+                writer.writeheader()
+                for candidate in layers.get(key, []):
+                    writer.writerow(_layer_row(candidate))
+        with (output / "evidence.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, evidence_columns, extrasaction="ignore")
+            writer.writeheader()
+            for candidate in result.get("candidates", []):
+                for row in candidate.get("evidence", []):
+                    writer.writerow({**row, "disease_id": candidate.get("disease_id")})
     lines = ["# 本地疾病索引反向查询", "", result["limitation"], "",
              f"输入靶点 {result['input_count']} 个，至少命中一个关键词的靶点 {result['matched_input_count']} 个。",
              "", "| 疾病关键词 | 匹配置信度 | 匹配靶点 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: | ---: |"]
-    for candidate in result["candidates"]:
+    for candidate in top_candidates:
         confidence = candidate.get("confidence", {}).get("value")
         lines.append(f"| {candidate['disease']} | {confidence if confidence is not None else '—'} | {candidate['matched_count']} | {candidate['input_coverage']:.2%} | {candidate['indexed_target_count']} |")
-    lines.extend(["", "排列遵循固定疾病名称顺序，不是疗效排名。输入覆盖率分母为本次全部唯一输入靶点；疾病覆盖率分母为该疾病关键词在索引中的唯一靶点数。",
+    lines.extend(["", "本报告仅展示 Top-%d（实际 %d）候选；完整层用于计算与计数，compact 模式不持久化全量逐条证据。" % (requested_k, len(top_candidates)),
+                  "排序遵循 candidate_layers 中记录的固定规则，不是疗效排名。输入覆盖率分母为本次全部唯一输入靶点；疾病覆盖率分母为该疾病关键词在索引中的唯一靶点数。",
                   "置信度为程序计算的透明启发式（" + CONFIDENCE_VERSION + "：log 匹配数、输入/疾病覆盖率、证据质量的加权和），非统计检验，仅供排序参考；组件明细见 result.json。",
                   "", "未匹配靶点：" + (", ".join(result["unmatched_genes"]) or "无"),
-                  "", "完整来源、文件哈希、逐条匹配及药材成分关系见 result.json。未执行新的模型会话或科学人工审核。"])
+                  "", "Top-K 逐条支持证据见 topk_target_evidence.csv；完整结果可由版本化共享索引、输入靶点及 summary.json 参数重算。未执行新的模型会话或科学人工审核。"])
     (output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    artifact_names = ["result.json", "summary.json", "candidates_topk.csv",
+                      "topk_target_evidence.csv", "topk_hierarchy.json", "report.md"]
+    if retention == "audit":
+        artifact_names.extend(["result_full.json", "candidates_complete.csv",
+                               "candidates_base.csv", "candidates_strict.csv", "evidence.csv"])
+    from ..diseases import monarch as monarch_source
+    artifact_names.extend(name for name in monarch_source.MONARCH_ARTIFACTS if (output / name).is_file())
     write_json(output / "manifest.json", {
         "workflow": result["workflow"], "status": result["status"], "scientific_complete": False,
         "stages": result["stages"], "database_sha256": result["database_sha256"],
-        "artifacts": {name: digest(output / name) for name in ("result.json", "candidates.csv", "evidence.csv", "report.md")},
+        "retention": retention, "candidate_output": summary["candidate_output"],
+        "artifacts": {name: digest(output / name) for name in artifact_names},
     })
 
 

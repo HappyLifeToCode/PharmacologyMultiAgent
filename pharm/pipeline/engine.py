@@ -174,13 +174,13 @@ def _availability(task, database_override=None):
     return result
 
 
-def _reverse_lookup(database, genes, chunk_size=3000):
+def _reverse_lookup(database, genes, chunk_size=3000, candidate_top_k=None):
     """调 discovery.query 反查；超过单次上限时分块查询并合并（如实记录分块）。"""
     genes = list(genes)
     if len(genes) <= chunk_size:
-        return discovery.query(database, genes=genes), {"chunked": False}
+        return discovery.query(database, genes=genes, candidate_top_k=candidate_top_k), {"chunked": False}
     chunks = [genes[i:i + chunk_size] for i in range(0, len(genes), chunk_size)]
-    parts = [discovery.query(database, genes=part) for part in chunks]
+    parts = [discovery.query(database, genes=part, candidate_top_k=candidate_top_k) for part in chunks]
     diseases = [candidate["disease"] for candidate in parts[0]["candidates"]]
     candidates = []
     for position, disease in enumerate(diseases):
@@ -216,6 +216,10 @@ def _reverse_lookup(database, genes, chunk_size=3000):
              "count": sum(bool(candidate["matched_count"]) for candidate in candidates)},
         ],
     })
+    merged["candidate_layers"] = discovery.build_candidate_layers(
+        candidates, top_n=candidate_top_k)
+    merged["candidate_layers"]["hierarchy"] = discovery.build_candidate_hierarchy(
+        merged["candidate_layers"]["complete"])
     return merged, {"chunked": True, "chunk_size": chunk_size, "chunks": len(chunks)}
 
 
@@ -631,12 +635,16 @@ class Runner:
                         return
                     else:
                         database = Path(self.manifest.get("discovery_database") or discovery.database_path(ROOT))
-                result, chunked = _reverse_lookup(database, genes)
+                candidate_top_k = discovery.candidate_output_top_k(
+                    self.task.get("candidate_output_top_k"))
+                result, chunked = _reverse_lookup(
+                    database, genes, candidate_top_k=candidate_top_k)
                 result["evidence_type"] = targets["evidence_type"]
                 result["database"] = str(database)
                 if chunked.get("chunked"):
                     result["chunking"] = chunked
-            discovery.save_result(result, directory / "reverse")
+            retention = discovery.output_retention(self.task.get("output_retention"))
+            discovery.save_result(result, directory / "reverse", retention=retention)
             with LOCK:
                 self.manifest.setdefault("verified_targets", {})[role] = str((directory / "reverse" / "result.json").relative_to(self.directory)).replace("\\", "/")
                 self._reverse_metrics(result)
@@ -650,12 +658,9 @@ class Runner:
             if self.manifest["mode"] == "fixture":
                 findings.append("合成工程验证索引与靶点，非真实疾病关联")
             self.event(role, "tool.succeeded", summary)
-            stage_artifacts = ["reverse/result.json", "reverse/candidates.csv", "reverse/evidence.csv", "reverse/report.md", "reverse/manifest.json",
-                               "reverse/candidates_complete.csv", "reverse/candidates_base.csv",
-                               "reverse/candidates_strict.csv", "reverse/candidates_top50.csv",
-                               "reverse/candidate_hierarchy.json"]
-            from ..diseases import monarch as monarch_source
-            stage_artifacts += ["reverse/" + name for name in monarch_source.MONARCH_ARTIFACTS]
+            reverse_manifest = read_json(directory / "reverse" / "manifest.json")
+            stage_artifacts = ["reverse/" + name for name in reverse_manifest.get("artifacts", {})]
+            stage_artifacts.append("reverse/manifest.json")
             if self.task.get("online_collect") and self.manifest["mode"] != "fixture" and genes:
                 # Keep the online collection ledger visible and hash-checked;
                 # raw pages remain inside the archived attempt directory.
@@ -665,11 +670,15 @@ class Runner:
             stage_result = self._maybe_agent_review(role, stage_result, directory, {
                 "input_count": result["input_count"], "matched_input_count": result["matched_input_count"],
                 "chunking": result.get("chunking", {"chunked": False}),
+                "candidate_output": reverse_manifest.get("candidate_output"),
+                "layer_counts": {key: len((result.get("candidate_layers") or {}).get(key, []))
+                                 for key in ("complete", "base", "strict", "top")},
                 "candidates": [{"disease": c["disease"], "matched_count": c["matched_count"],
                                 "input_coverage": c["input_coverage"], "disease_coverage": c["disease_coverage"],
                                 "confidence": c.get("confidence"),
                                 "evidence_rows": c.get("evidence_row_count", len(c["evidence"])),
-                                "unique_evidence_gene_count": c.get("unique_evidence_gene_count", len({row["gene_symbol"] for row in c["evidence"]}))} for c in result["candidates"]],
+                                 "unique_evidence_gene_count": c.get("unique_evidence_gene_count", len({row["gene_symbol"] for row in c["evidence"]}))}
+                                for c in (result.get("candidate_layers") or {}).get("top", [])],
                 "unmatched_genes_sample": result["unmatched_genes"][:30],
                 "unmatched_total": len(result["unmatched_genes"])})
             self.finish(role, stage_result, directory)
@@ -677,10 +686,13 @@ class Runner:
             self.finish(role, {"status": "failed", "summary": str(exc), "blockers": [str(exc)], "artifacts": []}, directory)
 
     def _reverse_metrics(self, result):
+        counts = ((result.get("summary") or {}).get("counts") or {})
         self.manifest["metrics"].update(
             matched_targets=result["matched_input_count"],
-            candidate_diseases=sum(bool(candidate["matched_count"]) for candidate in result["candidates"]),
-            evidence_rows=sum(len(candidate["evidence"]) for candidate in result["candidates"]),
+            candidate_diseases=counts.get(
+                "matched_candidates", sum(bool(candidate["matched_count"]) for candidate in result["candidates"])),
+            evidence_rows=counts.get(
+                "evidence_rows_full", sum(len(candidate["evidence"]) for candidate in result["candidates"])),
             max_confidence=max((candidate.get("confidence", {}).get("value", 0.0)
                                 for candidate in result["candidates"]), default=0.0))
 
@@ -1052,7 +1064,10 @@ class Runner:
                 result = read_json(self.directory / self.manifest["verified_targets"]["disease_reverse"])
                 if result["input_count"] != len(targets["genes"]):
                     problems.append("反查输入数与靶点数不一致：%d != %d" % (result["input_count"], len(targets["genes"])))
-                evidence_rows = sum(len(candidate["evidence"]) for candidate in result["candidates"])
+                counts = ((result.get("summary") or {}).get("counts") or {})
+                evidence_rows = counts.get(
+                    "evidence_rows_full",
+                    sum(len(candidate.get("evidence", [])) for candidate in result["candidates"]))
                 if metrics.get("evidence_rows") != evidence_rows:
                     problems.append("证据行数不一致：metrics=%s result.json=%d" % (metrics.get("evidence_rows"), evidence_rows))
                 if self.manifest["mode"] == "fixture" and result.get("evidence_type") != SYNTHETIC:
@@ -1090,6 +1105,8 @@ class Runner:
             if result.get("candidates"):
                 lines.extend(["## 候选疾病（关键词关联，不是疗效排名）", "",
                               "| 疾病关键词 | 置信度 | 匹配靶点数 | 输入覆盖率 | 库内该病靶点数 |", "| --- | ---: | ---: | ---: | ---: |"])
+                requested_k = ((result.get("summary") or {}).get("candidate_output") or {}).get(
+                    "requested_k", len(result["candidates"]))
                 for candidate in result["candidates"]:
                     coverage = ("%.2f%%" % (candidate["input_coverage"] * 100)) if result["input_count"] else "—"
                     confidence = candidate.get("confidence", {}).get("value")
@@ -1097,7 +1114,8 @@ class Runner:
                         candidate["disease"],
                         confidence if confidence is not None else "—",
                         candidate["matched_count"], coverage, candidate["indexed_target_count"]))
-                lines.extend(["", "置信度为程序计算的透明启发式（" + discovery.CONFIDENCE_VERSION + "），非统计检验，仅供排序参考；组件明细见 reverse/result.json。",
+                lines.extend(["", "以上仅展示 Top-%s 精简候选；完整层用于计算与计数，默认不持久化百万行全量证据。" % requested_k,
+                              "置信度为程序计算的透明启发式（" + discovery.CONFIDENCE_VERSION + "），非统计检验，仅供排序参考；组件明细见 reverse/result.json，逐条支持证据见 reverse/topk_target_evidence.csv。",
                               "", "未匹配靶点：" + (", ".join(result["unmatched_genes"]) or "无"), ""])
         herb_path = manifest.get("verified_targets", {}).get("herb_targets")
         if herb_path and (self.directory / herb_path).is_file():
