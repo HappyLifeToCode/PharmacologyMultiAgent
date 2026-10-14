@@ -86,8 +86,23 @@ def _load(formula_stamp, herb_stamp, alias_stamp):
         identities = {(item["name"], item["latin"]) for item in matches}
         if len(identities) == 1:
             item = matches[0]
+            display_name, display_note = item["name"], ""
+            chinese_missing = not bool(re.search(r"[\u3400-\u9fff]", display_name))
+            # A real BATMAN record may exist but have Chinese.Name=NA. Fill
+            # only its display label from an already registered alias; its
+            # original compound record must remain the query candidate.
+            if chinese_missing:
+                display_note = "原药材记录缺少中文名，保留原检索名"
+                label_rule = aliases.get(key)
+                label_matches = herbs.get(normalise(label_rule["target"]), []) if label_rule else []
+                label_identities = {(row["name"], row["latin"]) for row in label_matches
+                                    if re.search(r"[\u3400-\u9fff]", row["name"])}
+                if len(label_identities) == 1:
+                    display_name = next(iter(label_identities))[0]
+                    display_note = f"原记录缺中文名，按已登记别名显示“{display_name}”；检索仍保留 {item['pinyin']} 原记录"
             return {"original": raw, "canonical": item["name"], "candidates": [item["pinyin"]],
-                    "status": "alias" if rule else "exact", "note": rule["note"] if rule else "BATMAN 药材表精确匹配"}
+                    "status": "alias" if rule else "exact", "note": rule["note"] if rule else "BATMAN 药材表精确匹配",
+                    "display_name": display_name, "display_note": display_note, "chinese_name_missing": chinese_missing}
         return {"original": raw, "canonical": raw, "candidates": [raw],
                 "status": "ambiguous" if matches else "unmatched",
                 "note": "药材名称存在不同记录，请明确药材" if matches else "未找到精确名称或已登记别名",

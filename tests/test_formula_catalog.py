@@ -157,6 +157,30 @@ def test_duplicate_herb_identity_does_not_pick_first(formula_data):
     assert selected["herb_candidates"]["DANG GUI"] == []
 
 
+def test_missing_chinese_label_uses_registered_alias_without_replacing_compounds(formula_data):
+    with (formula_data / "herb_browse.txt").open("a", encoding="utf-8") as stream:
+        stream.write("BAI SHAO YAO\tNA\t\tNA\tother-compound(999)\n")
+    mapping = catalog.catalog()["map_herb"]("BAI SHAO YAO")
+    assert mapping["display_name"] == "白芍"
+    assert "原记录" in mapping["display_note"]
+    assert mapping["chinese_name_missing"]
+    assert mapping["canonical"] == "BAI SHAO YAO"
+    assert mapping["candidates"] == ["BAI SHAO YAO"]
+    assert mapping["status"] == "exact"
+    resolved = catalog.resolve(herbs=["BAI SHAO YAO"])
+    assert resolved["herb_candidates"] == {"BAI SHAO YAO": ["BAI SHAO YAO"]}
+
+
+def test_missing_chinese_name_without_registered_alias_is_not_invented(formula_data):
+    with (formula_data / "herb_browse.txt").open("a", encoding="utf-8") as stream:
+        stream.write("CHI SHAO YAO\tNA\t\tNA\tother-compound(999)\n")
+    mapping = catalog.catalog()["map_herb"]("CHI SHAO YAO")
+    assert mapping["display_name"] == "CHI SHAO YAO"
+    assert mapping["chinese_name_missing"]
+    assert mapping["status"] == "exact"
+    assert mapping["candidates"] == ["CHI SHAO YAO"]
+
+
 def test_api_preflight_does_not_start_jobs_and_direct_ambiguous_post_is_blocked(formula_data, monkeypatch):
     calls = []
 

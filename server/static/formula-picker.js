@@ -10,6 +10,18 @@ window.FormulaPicker = (() => {
     return value;
   };
   const input = (body) => Object.fromEntries(inputKeys.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]));
+  function herbLabel(item) {
+    const label = item.display_name || item.canonical;
+    if (item.status === "unmatched") return label + "〔待匹配〕";
+    if (item.status === "ambiguous") return label + "〔需明确药材〕";
+    if (item.chinese_name_missing && !/[\u3400-\u9fff]/.test(label)) return label + "〔中文名缺失〕";
+    return label;
+  }
+  const mappingNote = (item) => [item.note, item.display_note].filter(Boolean).join("；");
+  const compositionNames = (input) => (input.herbs || []).map((name) => {
+    const mapping = input.formula_resolution?.mappings?.find((item) => item.canonical === name);
+    return mapping ? herbLabel(mapping) : name;
+  });
   const replaceInput = (body, resolved) => {
     const result = { ...body };
     inputKeys.forEach((key) => delete result[key]);
@@ -44,7 +56,7 @@ window.FormulaPicker = (() => {
       placeholder.value = "";
       select.append(placeholder);
       for (const [index, choice] of (preview.choices || []).entries()) {
-        const names = choice.mappings.map((item) => item.canonical);
+        const names = choice.mappings.map(herbLabel);
         const option = node("option", (choice.id.startsWith("builtin_") ? "当前内置组成" : "组成候选 " + (index + 1))
           + " · " + names.length + " 味 · " + names.join("、"));
         option.value = choice.id;
@@ -60,7 +72,7 @@ window.FormulaPicker = (() => {
       edit.rows = 4;
       edit.disabled = !select.value;
       editLabel.append(edit);
-      const hint = node("p", "未匹配的拼音可改为明确的中文药材名；白芍/赤芍及不同炮制形式需要分别确认。", "formula-note");
+      const hint = node("p", "清单保留原检索名，匹配说明提供中文帮助识别；修改名称后会重新匹配。未匹配项请明确填写药材，白芍/赤芍及炮制形式分别确认。", "formula-note");
       const reset = node("button", "使用候选原组成");
       reset.type = "button";
       reset.addEventListener("click", () => {
@@ -103,8 +115,8 @@ window.FormulaPicker = (() => {
           ? body.formula_herbs.join("、") : original;
         for (const item of choice.mappings) {
           const row = node("div", null, "formula-mapping-row");
-          row.append(node("span", item.original), node("strong", item.canonical));
-          row.append(node("small", item.note));
+          row.append(node("span", item.original), node("strong", herbLabel(item)));
+          row.append(node("small", mappingNote(item)));
           if (["unmatched", "ambiguous"].includes(item.status)) row.classList.add("unresolved");
           mapping.append(row);
         }
@@ -161,5 +173,5 @@ window.FormulaPicker = (() => {
     if (preview.status === "ready" && !(force && preview.formula)) return replaceInput(body, preview.query_input);
     return choose(preview, replaceInput(body, preview.query_input || query));
   }
-  return { prepare };
+  return { prepare, herbLabel, mappingNote, compositionNames };
 })();

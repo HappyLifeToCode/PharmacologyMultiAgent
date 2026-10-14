@@ -126,12 +126,13 @@ function renderForwardResult(result) {
   const candidates = Array.isArray(result.candidates) ? result.candidates : [];
   panel.hidden = false;
   const input = result.input || {};
+  const displayHerbs = FormulaPicker.compositionNames(input);
   const resolved = Array.isArray(result.resolved_herbs) ? result.resolved_herbs : [];
   if (input.formula) {
     $("forward-input-summary").textContent = "已识别方剂「" + input.formula + "」，自动展开 "
-      + (input.herbs || []).length + " 味药材：" + (input.herbs || []).join("、") + "。";
+      + (input.herbs || []).length + " 味药材：" + displayHerbs.join("、") + "。";
   } else {
-    $("forward-input-summary").textContent = "输入药材：" + (input.herbs || []).join("、");
+    $("forward-input-summary").textContent = "输入药材：" + displayHerbs.join("、");
   }
   const composition = $("forward-composition");
   composition.hidden = !resolved.length;
@@ -139,7 +140,8 @@ function renderForwardResult(result) {
   herbRows.innerHTML = "";
   for (const herb of resolved) {
     const row = document.createElement("tr");
-    const values = [herb.canonical, (herb.batman_candidates || []).join(" / "),
+    const label = FormulaPicker.compositionNames({ herbs: [herb.canonical], formula_resolution: input.formula_resolution })[0];
+    const values = [label, (herb.batman_candidates || []).join(" / "),
       herb.matched ? herb.batman_name : "未命中", String(herb.compound_count || 0), String(herb.relation_count || 0)];
     values.forEach((value) => {
       const cell = document.createElement("td");

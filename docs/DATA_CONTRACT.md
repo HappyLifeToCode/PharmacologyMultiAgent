@@ -69,6 +69,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+药材映射的 `display_name` / `display_note` 仅用于中文显示及名称说明，不替换 `canonical` / `candidates` 指向的原始药材条目。原药材表中文名缺失但已有登记别名时补中文显示，仍用原记录检索成分；没有可靠标签的精确命中条目标“中文名缺失”，未命中标“待匹配”，两者区别展示。剂量/说明混入拼音字段时不自动清洗成确定药材。
+
 - Open Targets 的 `associationScore`、Monarch 的 ClinGen/OMIM 证据和 BATMAN 的 known/predicted 关系分别保留，不跨来源相加。
 - `confidence` 是透明启发式候选排序分数，包含匹配靶点数、输入覆盖率和 BATMAN 证据质量；它不是统计检验、治疗有效率或疗效概率。
 - 正向查询当前不接入临床治疗证据、网络分析或富集分析；`scientific_complete` 保持 `false`。

@@ -178,9 +178,10 @@ function table(headers, rows, parent) {
 function renderComposition(result, content) {
   const input = result.input || {};
   const rows = result.resolved_herbs || [];
-  content.append(element("p", "", (input.formula ? input.formula + "的药材组成：" : "本次输入药材：") + (input.herbs || []).join("、")));
+  content.append(element("p", "", (input.formula ? input.formula + "的药材组成：" : "本次输入药材：") + FormulaPicker.compositionNames(input).join("、")));
   if (rows.length) table(["药材", "检索候选名", "BATMAN 命中名", "成分数", "靶点关系数"], rows.map((herb) => [
-    herb.canonical, (herb.batman_candidates || []).join(" / "), herb.matched ? herb.batman_name : "未命中", herb.compound_count || 0, herb.relation_count || 0,
+    FormulaPicker.compositionNames({ herbs: [herb.canonical], formula_resolution: input.formula_resolution })[0],
+    (herb.batman_candidates || []).join(" / "), herb.matched ? herb.batman_name : "未命中", herb.compound_count || 0, herb.relation_count || 0,
   ]), content);
   if (input.formula_source === "standard_reference_pending_user_confirmation") {
     content.append(element("p", "reply-note", "组成沿用内置参考表，来源尚待研究者确认；加减方请直接输入完整药材清单。"));
@@ -191,7 +192,7 @@ function renderComposition(result, content) {
       + (resolution.kind === "user_composition" ? "；本次药材清单由用户修改" : "")
       + (resolution.source_rows?.length ? "；原表行号：" + resolution.source_rows.join("、") : "")));
     if (resolution.mappings?.some((item) => item.status !== "legacy_reference")) {
-      table(["原始名称", "本次药材名称", "匹配说明"], resolution.mappings.map((item) => [item.original, item.canonical, item.note]), content);
+      table(["原始名称", "本次药材名称", "匹配说明"], resolution.mappings.map((item) => [item.original, FormulaPicker.herbLabel(item), FormulaPicker.mappingNote(item)]), content);
     }
     if (resolution.unresolved?.length) content.append(element("p", "source-state", "组成尚未完整匹配：" + resolution.unresolved.join("、")));
   }
