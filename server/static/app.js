@@ -161,6 +161,7 @@ function renderForwardResult(result) {
   $("forward-summary").textContent = "已解析 " + (result.input_genes || []).length
     + " 个 BATMAN 靶点，返回前 " + candidates.length + " 个候选疾病（全部候选 "
     + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个）。";
+  if (QueryProgress.cacheNote(result)) $("forward-summary").textContent += " " + QueryProgress.cacheNote(result);
   $("forward-limitation").textContent = result.limitation || "候选关联不等于疗效或治疗推荐。";
   const unmatched = [];
   if ((result.unmatched_herbs || []).length) unmatched.push("未命中药材：" + result.unmatched_herbs.join("、"));
@@ -222,11 +223,13 @@ async function submitForwardQuery(forceComposition = false) {
   $("forward-result").hidden = true;
   message.textContent = "正在识别输入、解析药材靶点并查询本地疾病证据…";
   let requestId;
+  let stopProgress;
   try {
     const query = await FormulaPicker.prepare({ text, top_k: topK }, { force: forceComposition === true });
     if (!query) { message.textContent = "已取消组成选择，本次未启动查询。"; return; }
     requestId = crypto.randomUUID();
     sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
+    stopProgress = QueryProgress.watch("forward", requestId, (status) => { message.textContent = QueryProgress.format(status); });
     const response = await postJSON("/api/agent/forward", {
       ...query, request_id: requestId, owner_id: QueryPresence.id,
       ...(previousForwardQuery ? { supersedes: previousForwardQuery } : {}),
@@ -243,6 +246,7 @@ async function submitForwardQuery(forceComposition = false) {
       message.textContent = "连接已中断，原查询可能仍在继续。刷新可恢复原查询；再次查询会先停止上一条。";
     }
   } finally {
+    stopProgress?.();
     button.disabled = false;
     button.textContent = "查询候选疾病";
   }
@@ -271,6 +275,7 @@ async function resumeForwardQuery() {
   try {
     while (!QueryPresence.leaving) {
       const status = await api("/api/agent/forward/request/" + encodeURIComponent(requestId));
+      $("forward-message").textContent = QueryProgress.format(status);
       if (status.status === "running") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;

@@ -212,8 +212,12 @@ def test_real_worker_dispatches_reverse(monkeypatch, tmp_path):
     calls = []
     def sample(**kwargs):
         calls.append(kwargs)
-        write_json(Path(kwargs["output_dir"]) / "result.json", {"direction": "reverse"})
+        result = {"direction": "reverse", "status": "succeeded"}
+        write_json(Path(kwargs["output_dir"]) / "result.json", result)
+        return {"run_id": kwargs["run_id"], "output_dir": kwargs["output_dir"], "result": result}
     monkeypatch.setattr(reverse, "query", sample)
+    from pharm.agent import query_cache
+    monkeypatch.setattr(query_cache, "fingerprint", lambda *args: None)
     jobs._worker({"disease_id": "MONDO_1", "top_k": 4}, tmp_path / "reverse_sample")
     assert calls[0]["disease_id"] == "MONDO_1"
     assert json.loads((tmp_path / "reverse_sample/worker_outcome.json").read_text())["status"] == "succeeded"

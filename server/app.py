@@ -17,6 +17,7 @@ from pharm.pipeline.engine import manifests, start
 from pharm.pipeline.tasks import save_task
 from pharm.discovery import query as discovery
 from pharm.agent import jobs as forward_jobs
+from pharm.agent import progress as query_progress
 from pharm.agent import disease_input
 from pharm.agent.forward import _top_k
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
@@ -91,6 +92,11 @@ def disease_labels_glossary():
 @app.get("/assets/query-presence.js")
 def query_presence_script():
     return FileResponse(ROOT / "server/static/query-presence.js", media_type="text/javascript")
+
+
+@app.get("/assets/query-progress.js")
+def query_progress_script():
+    return FileResponse(ROOT / "server/static/query-progress.js", media_type="text/javascript")
 
 
 @app.get("/assets/formula-picker.js")
@@ -355,6 +361,7 @@ def forward_request_status(request_id: str):
     )}
     if status.get("status") == "running" and status.get("service_instance_id") not in (None, forward_jobs.manager.instance_id):
         result.update(status="interrupted", error="原查询服务已重启或当前端口不是原服务，请核对后重新查询。")
+    result["progress"] = query_progress.snapshot(ROOT, status.get("run_id"))
     return result
 
 

@@ -18,6 +18,7 @@ from ..core.common import ROOT, now, write_json
 from ..discovery.query import CONFIDENCE_VERSION, _confidence
 from ..diseases.monarch_local import collect_monarch_by_targets
 from ..diseases.open_targets import collect_open_targets_by_targets
+from .progress import report
 
 
 LIMITATION = (
@@ -96,7 +97,9 @@ def _aggregate(herb_result, iter_associations, top_k):
     input_genes = sorted(set(herb_result["genes"]))
     associated_genes = set()
     candidates = {}
-    for row in iter_associations():
+    for row_number, row in enumerate(iter_associations(), 1):
+        if row_number % 100000 == 0:
+            report("aggregating", "汇总候选疾病", current=row_number, unit="条关联")
         gene = str(row.get("gene_symbol") or "").strip()
         if gene:
             associated_genes.add(gene)
@@ -158,6 +161,7 @@ def _aggregate(herb_result, iter_associations, top_k):
     full_count = len(result)
     selected = result[:top_k]
     selected_by_disease = {item["disease"]: item for item in selected}
+    report("evidence", "整理返回候选的完整证据", detail=f"已选出 {len(selected)} 个候选疾病")
     # Release unselected sets before rereading the frozen source files.
     del candidates, result
     if selected:
@@ -184,6 +188,7 @@ def _aggregate(herb_result, iter_associations, top_k):
 def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0.84, output_dir=None,
           monarch_data_dir=None, open_targets_data_dir=None, run_id=None,
           formula_variant_id=None, formula_herbs=None, formula_fingerprint=None):
+    report("input", "核对方剂或药材输入")
     resolved = formula_catalog.resolve(herbs, formula, text, formula_variant_id=formula_variant_id,
                                        formula_herbs=formula_herbs, formula_fingerprint=formula_fingerprint)
     if resolved["status"] != "ready":
@@ -198,6 +203,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     run_id = run_id or "forward_" + uuid4().hex
     directory = Path(output_dir) if output_dir else ROOT / "local" / "agent" / "forward" / run_id
     directory = directory.resolve()
+    report("batman", "解析 BATMAN 药材成分与已知靶点")
     herb_result = query_targets(herb_candidates, threshold=float(batman_threshold), local_query=query_local_targets)
     if not herb_result.get("genes"):
         raise RuntimeError("输入药材没有解析出可用 BATMAN 人源靶点")
@@ -209,6 +215,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     association_paths = []
     monarch_rows = []
     ot_dir = directory / "open_targets"
+    report("open_targets", "读取 Open Targets 靶点关联")
     try:
         ot_meta = collect_open_targets_by_targets(
             herb_result["genes"], ot_dir, top_k_per_target=None, min_score=0.0,
@@ -218,6 +225,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     except RuntimeError as exc:
         source_status["open_targets"] = {"status": "partial", "error": str(exc)}
 
+    report("monarch", "补充 Monarch 遗传学证据")
     try:
         monarch = collect_monarch_by_targets(herb_result["genes"], data_dir=monarch_data_dir)
         monarch_rows = monarch["records"]
@@ -230,6 +238,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
             yield from _read_associations(path)
         yield from monarch_rows
 
+    report("aggregating", "汇总候选疾病")
     selected, input_genes, full_count, associated_genes = _aggregate(herb_result, iter_associations, top_k)
     if not selected:
         raise RuntimeError("两个本地疾病关联来源均未产生可用候选疾病")
@@ -263,6 +272,7 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         "source_status": source_status,
         "confidence_version": CONFIDENCE_VERSION,
     }
+    report("writing", "保存查询结果与来源记录")
     write_json(directory / "result.json", result)
     write_json(directory / "herb_targets.json", herb_result)
     return {"run_id": run_id, "output_dir": str(directory), "result": result}

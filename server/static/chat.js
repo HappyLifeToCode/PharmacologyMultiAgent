@@ -236,6 +236,8 @@ function renderScore(result, content) {
 }
 
 function renderResult(result, message, content, sessionId) {
+  const cacheNote = QueryProgress.cacheNote(result);
+  if (cacheNote) content.append(element("p", "reply-note", cacheNote));
   if (result.direction === "reverse") { renderReverseResult(result, message, content, sessionId); return; }
   if (result.data_origin === "synthetic_engineering") content.append(element("p", "source-state", "合成工程测试数据，仅用于验证界面，不代表真实药理结果。"));
   const input = result.input || {};
@@ -313,7 +315,10 @@ function render() {
         continue;
       }
       if (message.kind === "pending") {
-        content.append(element("p", "pending-content", (queryDirection(message) === "reverse" ? "正在查询疾病靶点与候选药材" : "正在查询药材靶点和疾病关联") + "，请稍候…切换工作台或刷新后会继续本次查询。"));
+        const progress = element("p", "pending-content", message.progressStatus ? QueryProgress.format(message.progressStatus) : "正在准备查询…切换工作台或刷新后会继续本次查询。");
+        progress.dataset.queryProgress = message.queryId;
+        progress.setAttribute("role", "status");
+        content.append(progress);
         if (message.queryId && !appState.busy.has(session.id)) resumeQuery(session, message);
         continue;
       }
@@ -354,6 +359,7 @@ async function resumeQuery(session, message) {
   try {
     while (!QueryPresence.leaving) {
       const status = await request("/api/agent/" + queryDirection(message) + "/request/" + encodeURIComponent(message.queryId));
+      updateQueryProgress(message, status);
       if (status.status === "running") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
@@ -378,6 +384,13 @@ async function resumeQuery(session, message) {
     saveSessions();
     if (!QueryPresence.leaving) render();
   }
+}
+
+function updateQueryProgress(message, status) {
+  message.progressStatus = status;
+  document.querySelectorAll("[data-query-progress]").forEach((node) => {
+    if (node.dataset.queryProgress === message.queryId) node.textContent = QueryProgress.format(status);
+  });
 }
 
 function latestResultMessage(session) {
@@ -415,6 +428,7 @@ async function submitMessage(suppliedText, context) {
   saveSessions();
   render();
   byId("message-scroll").scrollTop = byId("message-scroll").scrollHeight;
+  let stopProgress;
   try {
     if (/^(你能做什么|怎么使用|如何使用|帮助)[？?]?$/.test(text)) {
       reply.kind = "text";
@@ -447,6 +461,8 @@ async function submitMessage(suppliedText, context) {
         const unfinished = [...session.messages].reverse().find((item) => item !== reply && item.queryId && !item.runId);
         const supersedes = context?.retryQueryId || unfinished?.queryId;
         saveSessions();
+        render();
+        stopProgress = QueryProgress.watch(reply.direction, reply.queryId, (status) => updateQueryProgress(reply, status));
         const response = await request("/api/agent/" + reply.direction, {
           ...body, request_id: reply.queryId, owner_id: QueryPresence.id,
           ...(supersedes ? { supersedes } : {}),
@@ -464,6 +480,7 @@ async function submitMessage(suppliedText, context) {
       reply.text = "连接已中断，原查询可能仍在继续。可恢复原查询；重新查询会先停止上一条。";
     }
   } finally {
+    stopProgress?.();
     appState.busy.delete(session.id);
     saveSessions();
     if (!QueryPresence.leaving) render();

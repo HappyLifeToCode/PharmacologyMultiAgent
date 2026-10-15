@@ -17,6 +17,7 @@ from datetime import date
 from pathlib import Path
 
 from ..core.common import ROOT, digest, now, read_json, write_json
+from ..agent.progress import report
 
 
 DOWNLOADS_URL = "https://platform.opentargets.org/downloads"
@@ -31,6 +32,25 @@ def _parquet():
             "本地 Open Targets 模式需要 pyarrow；请先安装 requirements.txt 中的依赖"
         ) from exc
     return parquet
+
+
+def _matching_rows(batch, column, wanted):
+    """Filter in Arrow before converting rows to Python; retain source order."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    values = pc.utf8_trim(batch.column(column), characters=" \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000")
+    mask = pc.is_in(values, value_set=pa.array(sorted(wanted), type=values.type))
+    return batch.filter(mask).to_pylist()
+
+
+def _write_associations(path, rows):
+    report("open_targets_write", "保存 Open Targets 原始关联", current=0, total=len(rows), unit="条")
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=["disease", "gene_symbol", "score", "source", "extra"])
+        writer.writeheader()
+        for start in range(0, len(rows), 10_000):
+            writer.writerows(rows[start:start + 10_000])
+            report("open_targets_write", "保存 Open Targets 原始关联", current=min(start + 10_000, len(rows)), total=len(rows), unit="条")
 
 
 def resolve_data_dir(data_dir=None) -> Path:
@@ -360,10 +380,12 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
         "targetId", "diseaseId", "aggregationType", "aggregationValue",
         "associationScore", "evidenceCount", "currentNovelty",
     ]
-    for entry in grouped["association_overall_direct"]:
+    for file_number, entry in enumerate(grouped["association_overall_direct"], 1):
+        report("open_targets", "读取 Open Targets 疾病关联", current=file_number - 1,
+               total=len(grouped["association_overall_direct"]), unit="个分片")
         reader = parquet.ParquetFile(local_dir / entry["dataset"] / entry["file"])
         for batch in reader.iter_batches(columns=association_columns, batch_size=100_000):
-            for row in batch.to_pylist():
+            for row in _matching_rows(batch, "diseaseId", wanted_diseases):
                 disease_id = str(row.get("diseaseId") or "").strip()
                 if disease_id not in wanted_diseases:
                     continue
@@ -381,7 +403,10 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
                 row["target_id"] = target_id
                 row["source_file"] = entry["file"]
                 rows_by_disease[disease_id].append(row)
+        report("open_targets", "读取 Open Targets 疾病关联", current=file_number,
+               total=len(grouped["association_overall_direct"]), unit="个分片")
 
+    report("open_targets_prepare", "整理 Open Targets 疾病关联证据")
     associations = []
     disease_keys = []
     selected_records = []
@@ -428,10 +453,7 @@ def collect_open_targets_local_by_diseases(diseases, output_dir,
     if not associations:
         raise RuntimeError("Open Targets 本地数据未产生有效疾病—基因关联")
     output_dir.mkdir(parents=True, exist_ok=True)
-    with (output_dir / "associations.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["disease", "gene_symbol", "score", "source", "extra"])
-        writer.writeheader()
-        writer.writerows(associations)
+    _write_associations(output_dir / "associations.csv", associations)
     with (raw_dir / "open_targets_local_selection.jsonl").open("w", encoding="utf-8") as stream:
         for record in selected_records:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -561,10 +583,12 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
         "targetId", "diseaseId", "aggregationType", "aggregationValue",
         "associationScore", "evidenceCount", "currentNovelty",
     ]
-    for entry in grouped["association_overall_direct"]:
+    for file_number, entry in enumerate(grouped["association_overall_direct"], 1):
+        report("open_targets", "读取 Open Targets 靶点关联", current=file_number - 1,
+               total=len(grouped["association_overall_direct"]), unit="个分片")
         reader = parquet.ParquetFile(local_dir / entry["dataset"] / entry["file"])
         for batch in reader.iter_batches(columns=association_columns, batch_size=100_000):
-            for row in batch.to_pylist():
+            for row in _matching_rows(batch, "targetId", wanted_targets):
                 target_id = str(row.get("targetId") or "").strip()
                 if target_id not in wanted_targets:
                     continue
@@ -578,7 +602,10 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
                 row["target_id"] = target_id
                 row["source_file"] = entry["file"]
                 rows_by_target[target_id].append(row)
+        report("open_targets", "读取 Open Targets 靶点关联", current=file_number,
+               total=len(grouped["association_overall_direct"]), unit="个分片")
 
+    report("open_targets_prepare", "整理 Open Targets 靶点关联证据")
     associations = []
     disease_keys = []
     selected_records = []
@@ -627,10 +654,7 @@ def collect_open_targets_local_by_targets(symbols, output_dir,
 
     if not associations:
         raise RuntimeError("Open Targets 本地数据未产生有效疾病—基因关联")
-    with (output_dir / "associations.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["disease", "gene_symbol", "score", "source", "extra"])
-        writer.writeheader()
-        writer.writerows(associations)
+    _write_associations(output_dir / "associations.csv", associations)
     with (raw_dir / "open_targets_local_target_selection.jsonl").open("w", encoding="utf-8") as stream:
         for record in selected_records:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")

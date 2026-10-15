@@ -29,28 +29,35 @@ def request_identifier(value):
 
 
 def _worker(body, directory):
-    from . import forward, reverse
+    from . import forward, reverse, progress, query_cache
 
     directory = Path(directory)
+    progress.bind(progress.path_for(directory))
+    progress.report("starting", "准备查询进程")
     try:
-        if directory.name.startswith("reverse_"):
-            response = reverse.query(text=body.get("text"), disease=body.get("disease"),
+        def compute():
+            if directory.name.startswith("reverse_"):
+                return reverse.query(text=body.get("text"), disease=body.get("disease"),
                                      disease_id=body.get("disease_id"), top_k=body.get("top_k"),
                                      output_dir=directory, run_id=directory.name)
-        else:
-            response = forward.query(body.get("herbs"), formula=body.get("formula"),
+            return forward.query(body.get("herbs"), formula=body.get("formula"),
                                  text=body.get("text"), top_k=body.get("top_k"),
                                  batman_threshold=body.get("batman_threshold", 0.84),
                                  formula_variant_id=body.get("formula_variant_id"),
                                  formula_herbs=body.get("formula_herbs"),
                                  formula_fingerprint=body.get("formula_fingerprint"),
                                  output_dir=directory, run_id=directory.name)
+        response = query_cache.execute(body, directory, "reverse" if directory.name.startswith("reverse_") else "forward", compute)
         write_json(directory / "worker_outcome.json", {"status": "succeeded", "run_id": directory.name})
+        progress.report("completed", "查询完成")
     except Exception as exc:
+        progress.report("failed", "查询未完成", detail=str(exc))
         write_json(directory / "worker_outcome.json", {
             "status": "failed", "error": str(exc),
             "http_status": 503 if isinstance(exc, OSError) else 400,
         })
+    finally:
+        progress.bind(None)
 
 
 def _stop_process(process):

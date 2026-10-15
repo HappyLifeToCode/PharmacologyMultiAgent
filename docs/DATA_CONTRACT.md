@@ -4,6 +4,8 @@
 
 ## 疾病到药材会话查询
 
+正反向 HTTP 查询共用实际进度与成功结果缓存。状态接口增加可空 `progress`，研究结果增加 `execution`（`cache_hit`、`source_fingerprint`，命中时还有 `reused_from`、`computed_at`）。缓存命中使用新的运行编号，保留原候选与证据；来源 CSV 继续留在被引用的原运行，不伪装为重新采集。完整字段及失效规则见 [查询执行说明](QUERY_EXECUTION.md)。
+
 独立于旧 discovery 的疾病到药材入口为 `POST /api/agent/reverse`，返回 `workflow=reverse_disease_target_herb_v1`、`direction=reverse`、`scientific_complete=false`，归档于 `local/agent/reverse/reverse_<id>/result.json`。`/reverse/resolve` 只解析名称，歧义需明确选择；原始 Open Targets ID 与 MONDO 对应保留，父子疾病不自动合并。
 
 BATMAN 派生索引由 herbs、herb_compounds、compound_targets 构成，只纳入 known，保留原始药材行号作为身份、文件哈希、拒绝记录和版本指纹。显示别名不替换查询条目。独立构建 CLI 和 HTTP 字段见 [疾病到药材](DISEASE_TO_HERB.md)。
@@ -130,7 +132,7 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 查询 POST 连接丢失或 `fetch` 报错本身不停止带 owner_id 的查询，前端可“恢复原查询”。`GET /api/agent/forward/request/<request_id>` 读取任务状态，首页/工作台返回后仅读取状态和结果，不新建计算。元数据记录 service_instance_id；原服务已重启的运行中状态返回 interrupted，避免无限等待。主动重试先停止 `supersedes` 指定的旧任务，停止失败不启动新的；显式取消/服务处理协程取消也终止对应子进程。未传 owner_id 的旧 API 客户端仍在自身 HTTP 连接断开时停止。纯 ASGI 中间件保留断开信号。归档 GET 失败只重读，不启动或取消研究计算。
 
-任务状态写入 `local/agent/jobs/<request_id>.json`，结束后在本次 `local/agent/forward/<run_id>/job.json` 留存，包含工作进程 PID、状态、取消原因与时间。未完成记录标为 cancelled/failed；中间文件保留，不改成成功、不删除历史完整结果。再次查询从头运行，不复用半成品；本轮不实现断点续算或生产缓存。停止仅针对本服务创建的查询子进程，服务与其他查询继续运行。
+任务状态写入 `local/agent/jobs/<request_id>.json`，结束后在本次 `local/agent/<direction>/<run_id>/job.json` 留存，包含工作进程 PID、状态、取消原因与时间。未完成记录标为 cancelled/failed；中间文件保留，不改成成功、不删除历史完整结果。重试不复用半成品、不提供断点续算；相同输入与数据/代码版本的已成功计算可按完整结果缓存规则复用。停止仅针对本服务创建的查询子进程，服务与其他查询继续运行。
 
 ## 归档布局
 
