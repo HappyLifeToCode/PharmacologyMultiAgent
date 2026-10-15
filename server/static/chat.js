@@ -3,7 +3,7 @@
 const byId = (id) => document.getElementById(id);
 const STORAGE_KEY = "pharmacology.chat.v1";
 const SETTINGS_KEY = "pharmacology.chat.settings.v1";
-const appState = { sessions: [], selected: null, renderedSession: null, formulas: [], results: new Map(), loading: new Map(), busy: new Set(), resuming: new Set() };
+const appState = { sessions: [], selected: null, viewport: null, scrollPositions: new Map(), formulas: [], results: new Map(), loading: new Map(), busy: new Set(), resuming: new Set() };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -125,6 +125,7 @@ function renderHistory() {
     const remove = action("", () => {
       if (!confirm("删除这段浏览器会话？已归档的查询结果仍会保留。")) return;
       appState.sessions = appState.sessions.filter((item) => item.id !== session.id);
+      appState.scrollPositions.delete(session.id);
       if (appState.selected === session.id) appState.selected = null;
       saveSessions();
       render();
@@ -139,6 +140,7 @@ function renderHistory() {
 
 function messageContent(message) {
   const article = element("article", "message " + message.role);
+  article.dataset.messageId = message.id;
   if (message.role === "user") {
     article.append(element("div", "user-content", message.text));
     return { article, content: null };
@@ -305,15 +307,50 @@ function conversationAtBottom() {
 
 function scrollToLatestMessage() {
   const scroll = byId("message-scroll");
+  if (appState.viewport) appState.viewport.position = { atBottom: true, top: 0 };
   scroll.scrollTo({ top: scroll.scrollHeight, behavior: "instant" });
+  if (appState.viewport) appState.viewport.appliedTop = scroll.scrollTop;
+}
+
+function layoutTop(node) {
+  let top = 0;
+  for (let current = node; current; current = current.offsetParent) top += current.offsetTop;
+  return top;
+}
+
+function rememberConversationPosition() {
+  const viewport = appState.viewport;
+  if (!viewport) return;
+  const scroll = byId("message-scroll");
+  // A partial archive can clamp the applied position. Keep the intended
+  // position until more content arrives, unless the reader has moved.
+  if (Math.abs(scroll.scrollTop - viewport.appliedTop) > 1) {
+    const origin = layoutTop(scroll);
+    const anchor = [...byId("messages").children].find((node) => layoutTop(node) - origin + node.offsetHeight > scroll.scrollTop);
+    viewport.position = { top: scroll.scrollTop, atBottom: conversationAtBottom(),
+      anchorId: anchor?.dataset.messageId, offset: anchor ? scroll.scrollTop - (layoutTop(anchor) - origin) : 0 };
+  }
+  appState.scrollPositions.set(viewport.sessionId, viewport.position);
+}
+
+function restoreConversationPosition() {
+  const viewport = appState.viewport;
+  if (!viewport) return;
+  const scroll = byId("message-scroll");
+  const position = viewport.position;
+  const anchor = [...byId("messages").children].find((node) => node.dataset.messageId === position.anchorId);
+  const top = anchor ? layoutTop(anchor) - layoutTop(scroll) + position.offset : position.top;
+  scroll.scrollTo({ top: position.atBottom ? scroll.scrollHeight : top, behavior: "instant" });
+  viewport.appliedTop = scroll.scrollTop;
 }
 
 function render() {
+  rememberConversationPosition();
   renderHistory();
   const session = currentSession();
-  const followLatest = appState.renderedSession !== (session?.id || null) || conversationAtBottom();
-  const previousScrollTop = byId("message-scroll").scrollTop;
-  appState.renderedSession = session?.id || null;
+  appState.viewport = session ? { sessionId: session.id, appliedTop: 0,
+    position: appState.scrollPositions.get(session.id) || { atBottom: true, top: 0 } } : null;
+  let rendering = true;
   byId("conversation-title").textContent = session ? session.title : "新对话";
   byId("welcome").hidden = Boolean(session && session.messages.length);
   const messages = byId("messages");
@@ -346,28 +383,30 @@ function render() {
       }
       const populate = (result) => {
         if (!article.isConnected) return;
-        const followLatest = conversationAtBottom();
+        if (!rendering) rememberConversationPosition();
         content.replaceChildren();
         if (message.kind === "query") renderResult(result, message, content, session.id);
         else if (message.kind === "evidence") renderEvidence(result, message.candidateIndex, content);
         else if (message.kind === "composition") renderComposition(result, content);
         else if (message.kind === "score") renderScore(result, content);
-        if (followLatest) scrollToLatestMessage();
+        if (!rendering) restoreConversationPosition();
       };
       if (appState.results.has(message.runId)) populate(appState.results.get(message.runId));
       else {
         content.append(element("p", "reply-note", "正在读取本次查询归档…"));
         resultFor(message).then(populate).catch((error) => {
           if (!article.isConnected) return;
+          rememberConversationPosition();
           content.replaceChildren(element("p", "source-state", error.message));
           content.append(action("重新读取结果", render));
+          restoreConversationPosition();
         });
       }
     }
   }
   byId("send-message").disabled = Boolean(session && appState.busy.has(session.id));
-  if (followLatest) scrollToLatestMessage();
-  else byId("message-scroll").scrollTo({ top: previousScrollTop, behavior: "instant" });
+  rendering = false;
+  restoreConversationPosition();
 }
 
 async function resumeQuery(session, message) {
@@ -406,11 +445,11 @@ async function resumeQuery(session, message) {
 
 function updateQueryProgress(message, status) {
   message.progressStatus = status;
-  const followLatest = conversationAtBottom();
+  rememberConversationPosition();
   document.querySelectorAll("[data-query-progress]").forEach((node) => {
     if (node.dataset.queryProgress === message.queryId) QueryProgress.render(node, status);
   });
-  if (followLatest) scrollToLatestMessage();
+  restoreConversationPosition();
 }
 
 function latestResultMessage(session) {
@@ -447,7 +486,7 @@ async function submitMessage(suppliedText, context) {
   appState.busy.add(session.id);
   saveSessions();
   render();
-  byId("message-scroll").scrollTop = byId("message-scroll").scrollHeight;
+  scrollToLatestMessage();
   let stopProgress;
   try {
     if (/^(你能做什么|怎么使用|如何使用|帮助)[？?]?$/.test(text)) {
@@ -504,7 +543,7 @@ async function submitMessage(suppliedText, context) {
     appState.busy.delete(session.id);
     saveSessions();
     if (!QueryPresence.leaving) render();
-    if (!QueryPresence.leaving && appState.selected === session.id) byId("message-scroll").scrollTop = byId("message-scroll").scrollHeight;
+    if (!QueryPresence.leaving && appState.selected === session.id) scrollToLatestMessage();
   }
 }
 
