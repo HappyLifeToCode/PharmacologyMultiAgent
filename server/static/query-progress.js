@@ -10,11 +10,24 @@ const QueryProgress = (() => {
       if (Number.isFinite(progress.total)) text += "/" + progress.total.toLocaleString();
       if (progress.unit) text += " " + progress.unit;
     }
-    const start = Date.parse(status?.created_at || "");
-    const elapsed = Number.isFinite(start) ? Math.max(0, Math.floor((Date.now() - start) / 1000)) : progress?.elapsed_seconds;
-    if (Number.isFinite(elapsed)) text += " · 已用时 " + Math.floor(elapsed / 60) + "分" + Math.floor(elapsed % 60) + "秒";
     if (progress?.detail) text += " · " + progress.detail;
     return text;
+  }
+
+  function render(node, status) {
+    let time = node.querySelector(".query-progress-time");
+    let stage = node.querySelector(".query-progress-stage");
+    if (!time || !stage) {
+      time = document.createElement("span");
+      time.className = "query-progress-time";
+      stage = document.createElement("span");
+      stage.className = "query-progress-stage";
+      node.replaceChildren(time, stage);
+    }
+    const start = Date.parse(status?.created_at || "");
+    const elapsed = Number.isFinite(start) ? Math.max(0, Math.floor((Date.now() - start) / 1000)) : status?.progress?.elapsed_seconds || 0;
+    time.textContent = "已用时 " + Math.floor(elapsed / 60) + "分" + Math.floor(elapsed % 60) + "秒";
+    stage.textContent = format(status);
   }
 
   function watch(direction, requestId, update) {
@@ -44,5 +57,5 @@ const QueryProgress = (() => {
     const execution = result?.execution;
     return execution?.cache_hit ? "已复用相同输入与数据版本的完成结果；原计算时间：" + execution.computed_at + "；原运行：" + execution.reused_from : "";
   }
-  return { format, watch, cacheNote };
+  return { format, render, watch, cacheNote };
 })();

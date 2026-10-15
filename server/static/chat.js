@@ -3,7 +3,7 @@
 const byId = (id) => document.getElementById(id);
 const STORAGE_KEY = "pharmacology.chat.v1";
 const SETTINGS_KEY = "pharmacology.chat.settings.v1";
-const appState = { sessions: [], selected: null, formulas: [], results: new Map(), loading: new Map(), busy: new Set(), resuming: new Set() };
+const appState = { sessions: [], selected: null, renderedSession: null, formulas: [], results: new Map(), loading: new Map(), busy: new Set(), resuming: new Set() };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -298,9 +298,22 @@ async function resultFor(message) {
   return pending;
 }
 
+function conversationAtBottom() {
+  const scroll = byId("message-scroll");
+  return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= 48;
+}
+
+function scrollToLatestMessage() {
+  const scroll = byId("message-scroll");
+  scroll.scrollTo({ top: scroll.scrollHeight, behavior: "instant" });
+}
+
 function render() {
   renderHistory();
   const session = currentSession();
+  const followLatest = appState.renderedSession !== (session?.id || null) || conversationAtBottom();
+  const previousScrollTop = byId("message-scroll").scrollTop;
+  appState.renderedSession = session?.id || null;
   byId("conversation-title").textContent = session ? session.title : "新对话";
   byId("welcome").hidden = Boolean(session && session.messages.length);
   const messages = byId("messages");
@@ -315,7 +328,8 @@ function render() {
         continue;
       }
       if (message.kind === "pending") {
-        const progress = element("p", "pending-content", message.progressStatus ? QueryProgress.format(message.progressStatus) : "正在准备查询…切换工作台或刷新后会继续本次查询。");
+        const progress = element("p", "pending-content");
+        QueryProgress.render(progress, message.progressStatus);
         progress.dataset.queryProgress = message.queryId;
         progress.setAttribute("role", "status");
         content.append(progress);
@@ -332,11 +346,13 @@ function render() {
       }
       const populate = (result) => {
         if (!article.isConnected) return;
+        const followLatest = conversationAtBottom();
         content.replaceChildren();
         if (message.kind === "query") renderResult(result, message, content, session.id);
         else if (message.kind === "evidence") renderEvidence(result, message.candidateIndex, content);
         else if (message.kind === "composition") renderComposition(result, content);
         else if (message.kind === "score") renderScore(result, content);
+        if (followLatest) scrollToLatestMessage();
       };
       if (appState.results.has(message.runId)) populate(appState.results.get(message.runId));
       else {
@@ -350,6 +366,8 @@ function render() {
     }
   }
   byId("send-message").disabled = Boolean(session && appState.busy.has(session.id));
+  if (followLatest) scrollToLatestMessage();
+  else byId("message-scroll").scrollTo({ top: previousScrollTop, behavior: "instant" });
 }
 
 async function resumeQuery(session, message) {
@@ -388,9 +406,11 @@ async function resumeQuery(session, message) {
 
 function updateQueryProgress(message, status) {
   message.progressStatus = status;
+  const followLatest = conversationAtBottom();
   document.querySelectorAll("[data-query-progress]").forEach((node) => {
-    if (node.dataset.queryProgress === message.queryId) node.textContent = QueryProgress.format(status);
+    if (node.dataset.queryProgress === message.queryId) QueryProgress.render(node, status);
   });
+  if (followLatest) scrollToLatestMessage();
 }
 
 function latestResultMessage(session) {

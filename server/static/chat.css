@@ -110,6 +110,8 @@ th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align
 .followups button { border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font-size: 11px; transition: background .15s ease; }
 .followups button:hover { background: var(--accent-soft); }
 .pending-content { color: var(--muted); font-size: 13px; }
+.query-progress-time { display: block; color: var(--muted); font-size: 12px; padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.query-progress-stage { display: block; color: var(--ink); line-height: 1.75; overflow-wrap: anywhere; }
 .composer-area { padding: 9px 32px 15px; flex-shrink: 0; }
 .composer { max-width: 800px; margin: auto; border: 1px solid #c98878; border-radius: 18px; background: var(--surface); padding: 15px 18px 11px; box-shadow: 0 7px 24px #5d382408; }
 .composer:focus-within { border-color: var(--accent); }

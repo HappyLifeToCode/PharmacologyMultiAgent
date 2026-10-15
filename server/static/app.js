@@ -229,7 +229,8 @@ async function submitForwardQuery(forceComposition = false) {
     if (!query) { message.textContent = "已取消组成选择，本次未启动查询。"; return; }
     requestId = crypto.randomUUID();
     sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
-    stopProgress = QueryProgress.watch("forward", requestId, (status) => { message.textContent = QueryProgress.format(status); });
+    QueryProgress.render(message, { created_at: new Date().toISOString() });
+    stopProgress = QueryProgress.watch("forward", requestId, (status) => QueryProgress.render(message, status));
     const response = await postJSON("/api/agent/forward", {
       ...query, request_id: requestId, owner_id: QueryPresence.id,
       ...(previousForwardQuery ? { supersedes: previousForwardQuery } : {}),
@@ -275,7 +276,7 @@ async function resumeForwardQuery() {
   try {
     while (!QueryPresence.leaving) {
       const status = await api("/api/agent/forward/request/" + encodeURIComponent(requestId));
-      $("forward-message").textContent = QueryProgress.format(status);
+      QueryProgress.render($("forward-message"), status);
       if (status.status === "running") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
