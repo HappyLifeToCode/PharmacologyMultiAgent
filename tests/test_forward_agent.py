@@ -56,6 +56,10 @@ def test_forward_aggregates_open_targets_and_monarch(monkeypatch, tmp_path):
     assert candidate["disease"] == "MONDO:1 | Disease A"
     assert candidate["matched_genes"] == ["EGFR", "TP53"]
     assert candidate["source_gene_counts"] == {"monarch_omim": 1, "open_targets": 1}
+    assert candidate["support_target_count"] == candidate["strict_support_target_count"] == 1
+    assert candidate["max_association_score"] == 0.8
+    assert payload["candidate_layers"]["counts"] == {"complete": 1, "base": 1, "strict": 1, "top": 1}
+    assert payload["candidate_layers"]["rules"]["monarch_ranking"] == "supplement_only"
     assert (tmp_path / "run" / "result.json").is_file()
 
 
@@ -185,21 +189,51 @@ def test_forward_streaming_preserves_counts_scores_and_selected_evidence():
         reads.append(True)
         yield from rows
 
-    selected, genes, total, associated = forward._aggregate(herbs, iter_rows, 1)
+    selected, genes, total, associated, layers = forward._aggregate(herbs, iter_rows, 2)
     assert len(reads) == 2
     assert genes == ["AKT1", "EGFR", "TP53"]
     assert associated == set(genes)  # phenotype associations still count as an input mapping
     assert total == 2
-    assert len(selected) == 1
-    candidate = selected[0]
+    assert layers == {"complete": 2, "base": 2, "strict": 2, "top": 2}
+    assert [candidate["disease"] for candidate in selected] == ["MONDO:2 | B", "MONDO:1 | A"]
+    candidate = selected[1]
     assert candidate["disease"] == "MONDO:1 | A"
     assert candidate["matched_count"] == 2
     assert candidate["evidence_row_count"] == len(candidate["evidence"]) == 3
     assert candidate["source_scores"] == {"open_targets": {"max": 0.8, "count": 2}}
     assert candidate["source_gene_counts"] == {"open_targets": 1, "monarch_omim": 1}
+    assert candidate["support_target_count"] == candidate["strict_support_target_count"] == 1
     assert candidate["input_coverage"] == 2 / 3
     assert candidate["evidence"][0]["record"]["marker"] == "first"
     assert candidate["evidence"][2]["source"] == "monarch_omim"
+
+
+def test_forward_layers_exclude_weak_associations_and_prioritise_strict_support():
+    herbs = {"genes": ["G1", "G2", "G3"], "relations": [
+        {"gene_symbol": "G1", "evidence": "known"},
+        {"gene_symbol": "G2", "evidence": "known"},
+        {"gene_symbol": "G3", "evidence": "known"},
+    ]}
+    rows = [
+        {"disease": "MONDO_1 | Weak", "gene_symbol": "G1", "source": "open_targets", "score": "0.1", "extra": "{}"},
+        {"disease": "MONDO_1 | Weak", "gene_symbol": "G2", "source": "open_targets", "score": "0.2", "extra": "{}"},
+        {"disease": "MONDO_2 | Base", "gene_symbol": "G1", "source": "open_targets", "score": "0.3", "extra": "{}"},
+        {"disease": "MONDO_2 | Base", "gene_symbol": "G2", "source": "open_targets", "score": "0.4", "extra": "{}"},
+        {"disease": "MONDO_3 | Strict", "gene_symbol": "G3", "source": "open_targets", "score": "0.6", "extra": "{}"},
+        {"disease": "MONDO_2 | Base", "gene_symbol": "G3", "source": "monarch_omim", "score": "0.99", "extra": "{}"},
+    ]
+
+    selected, genes, total, associated, layers = forward._aggregate(herbs, lambda: iter(rows), 3)
+
+    assert genes == ["G1", "G2", "G3"]
+    assert total == 3
+    assert associated == set(genes)
+    assert layers == {"complete": 3, "base": 2, "strict": 1, "top": 2}
+    assert [candidate["disease"] for candidate in selected] == ["MONDO:3 | Strict", "MONDO:2 | Base"]
+    assert selected[0]["strict_support_target_count"] == 1
+    assert selected[1]["support_target_count"] == 2
+    assert selected[1]["strict_support_target_count"] == 0
+    assert selected[1]["max_association_score"] == 0.4  # Monarch's numeric value cannot affect ranking.
 
 
 @pytest.mark.parametrize("body", [None, [], [""], ["白芍"]])

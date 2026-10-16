@@ -15,7 +15,13 @@ from ..batman.resolver import query_targets
 from ..batman.formulas import SOURCE as FORMULA_SOURCE, formula_candidates, list_formulas
 from ..batman import formula_catalog
 from ..core.common import ROOT, now, write_json
-from ..discovery.query import CONFIDENCE_VERSION, _confidence
+from ..discovery.query import (
+    BASE_ASSOCIATION_SCORE,
+    CONFIDENCE_VERSION,
+    STRICT_ASSOCIATION_SCORE,
+    _confidence,
+    candidate_layer_sort_key,
+)
 from ..diseases.monarch_local import collect_monarch_by_targets
 from ..diseases.open_targets import collect_open_targets_by_targets
 from .progress import report
@@ -91,7 +97,7 @@ def _record_extra(row):
 
 
 def _aggregate(herb_result, iter_associations, top_k):
-    """Summarise rows first; load full evidence only for the selected candidates."""
+    """Keep all associations, but rank candidates by the shared OT score layers."""
     known = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "known"}
     predicted = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "predicted"} - known
     input_genes = sorted(set(herb_result["genes"]))
@@ -115,9 +121,13 @@ def _aggregate(herb_result, iter_associations, top_k):
             "disease": disease,
             "entity_type": "disease",
             "matched_genes": set(),
+            "base_supported_genes": set(),
+            "strict_supported_genes": set(),
             "evidence_row_count": 0,
             "source_gene_counts": defaultdict(set),
             "source_scores": {},
+            "max_association_score": None,
+            "score_sum": 0.0,
         })
         candidate["matched_genes"].add(gene)
         source = str(row.get("source") or "associations")
@@ -132,6 +142,16 @@ def _aggregate(herb_result, iter_associations, top_k):
             score_summary = candidate["source_scores"].setdefault(source, {"max": numeric_score, "count": 0})
             score_summary["max"] = max(score_summary["max"], numeric_score)
             score_summary["count"] += 1
+        # Monarch is an OMIM-like evidence supplement. Only Open Targets scores
+        # determine the base/strict layers and candidate ordering.
+        if source == "open_targets" and numeric_score is not None and math.isfinite(numeric_score):
+            candidate["max_association_score"] = numeric_score if candidate["max_association_score"] is None else max(
+                candidate["max_association_score"], numeric_score)
+            candidate["score_sum"] += numeric_score
+            if numeric_score > BASE_ASSOCIATION_SCORE:
+                candidate["base_supported_genes"].add(gene)
+            if numeric_score >= STRICT_ASSOCIATION_SCORE:
+                candidate["strict_supported_genes"].add(gene)
 
     result = []
     for candidate in candidates.values():
@@ -148,18 +168,21 @@ def _aggregate(herb_result, iter_associations, top_k):
             "disease_coverage": None,
             "source_gene_counts": {source: len(genes) for source, genes in candidate["source_gene_counts"].items()},
             "source_scores": candidate["source_scores"],
+            "support_target_count": len(candidate["base_supported_genes"]),
+            "strict_support_target_count": len(candidate["strict_supported_genes"]),
+            "strict_supported": bool(candidate["strict_supported_genes"]),
+            "max_association_score": candidate["max_association_score"],
+            "score_sum": round(candidate["score_sum"], 12),
             "evidence": [],
         }
         item["confidence"] = _confidence(item, len(input_genes), known, predicted)
         result.append(item)
-    result.sort(key=lambda item: (
-        -float(item["confidence"]["value"]),
-        -int(item["matched_count"]),
-        -len(item["source_gene_counts"]),
-        item["disease"],
-    ))
     full_count = len(result)
-    selected = result[:top_k]
+    base = [item for item in result if item["support_target_count"] > 0]
+    strict_count = sum(item["strict_supported"] for item in base)
+    selected = sorted(base, key=candidate_layer_sort_key)[:top_k]
+    layer_counts = {"complete": full_count, "base": len(base), "strict": strict_count,
+                    "top": len(selected)}
     selected_by_disease = {item["disease"]: item for item in selected}
     report("evidence", "整理返回候选的完整证据", detail=f"已选出 {len(selected)} 个候选疾病")
     # Release unselected sets before rereading the frozen source files.
@@ -182,7 +205,7 @@ def _aggregate(herb_result, iter_associations, top_k):
                 "source": str(row.get("source") or "associations"),
                 "relevance_score": numeric_score, "record": extra,
             })
-    return selected, input_genes, full_count, associated_genes
+    return selected, input_genes, full_count, associated_genes, layer_counts
 
 
 def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0.84, output_dir=None,
@@ -239,9 +262,10 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         yield from monarch_rows
 
     report("aggregating", "汇总候选疾病")
-    selected, input_genes, full_count, associated_genes = _aggregate(herb_result, iter_associations, top_k)
+    selected, input_genes, full_count, associated_genes, layer_counts = _aggregate(
+        herb_result, iter_associations, top_k)
     if not selected:
-        raise RuntimeError("两个本地疾病关联来源均未产生可用候选疾病")
+        raise RuntimeError("Open Targets 未产生 associationScore > 0.2 的基础候选疾病")
     result = {
         "workflow": "forward_herb_target_disease_v1",
         "status": "succeeded" if all(item.get("status") == "succeeded" for item in source_status.values()) else "partial",
@@ -269,6 +293,14 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         "batman_source": herb_result.get("retrieval", {"mode": "local"}),
         "candidates": selected,
         "candidate_count": full_count,
+        "candidate_layers": {
+            "counts": layer_counts,
+            "rules": {"base_score": "> %.6g" % BASE_ASSOCIATION_SCORE,
+                      "strict_score": ">= %.6g" % STRICT_ASSOCIATION_SCORE,
+                      "ranking": ["strict_supported", "strict_support_target_count",
+                                  "support_target_count", "max_association_score", "score_sum", "disease_id"],
+                      "monarch_ranking": "supplement_only"},
+        },
         "source_status": source_status,
         "confidence_version": CONFIDENCE_VERSION,
     }

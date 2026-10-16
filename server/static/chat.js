@@ -228,12 +228,22 @@ function renderEvidence(result, index, content) {
 function renderScore(result, content) {
   if (result.direction === "reverse") { renderReverseMetrics(result, content); return; }
   const version = (result.candidates || []).find((item) => item.confidence)?.confidence?.formula_version || "当前版本";
-  content.append(element("p", "", "匹配支持度由匹配靶点数、输入覆盖率、疾病覆盖率和证据质量加权得到。缺失项不参与计算，剩余权重重新归一；数值用于核查关联线索。"));
-  content.append(element("p", "reply-note", "本次公式版本：" + version + "。证据质量来自 BATMAN 已知证据占比；Open Targets 和 Monarch 的原始关联分值单独展示。"));
-  table(["候选疾病", "匹配数组件", "输入覆盖率", "疾病覆盖率", "证据质量"], (result.candidates || []).map((candidate) => {
-    const parts = (candidate.confidence || {}).components || {};
+  const layered = Boolean(result.candidate_layers?.rules?.base_score);
+  if (!layered) {
+    content.append(element("p", "", "这是修补前生成的历史结果，尚未记录 Open Targets 基础层和严格层；需要重新查询才能按新规则排序。"));
+    table(["候选疾病", "全量命中靶点", "旧匹配支持度"], (result.candidates || []).map((candidate) => [
+      diseaseName(candidate), candidate.matched_count || 0,
+      candidate.confidence?.value == null ? "无数据" : Number(candidate.confidence.value).toFixed(4),
+    ]), content);
+    return;
+  }
+  content.append(element("p", "", "候选先按 Open Targets 关联分值分层：>0.2 为基础支持，≥0.6 为严格支持；排序依次使用严格支持、严格靶点数、基础靶点数、最高分和分数总和。"));
+  content.append(element("p", "reply-note", "Monarch 只补充表型、遗传方式和文献，不参与排名。旧匹配支持度（" + version + "）继续保留用于核查组成，不作为当前候选顺序。"));
+  table(["候选疾病", "严格支持靶点", "基础支持靶点", "最高关联分值", "全量命中靶点", "旧匹配支持度"], (result.candidates || []).map((candidate) => {
     const format = (value) => value == null ? "无数据" : Number(value).toFixed(4);
-    return [diseaseName(candidate), format(parts.match_score), format(parts.input_coverage), format(parts.disease_coverage), format(parts.evidence_quality)];
+    return [diseaseName(candidate), candidate.strict_support_target_count || 0,
+      candidate.support_target_count || 0, format(candidate.max_association_score),
+      candidate.matched_count || 0, format(candidate.confidence?.value)];
   }), content);
 }
 
@@ -251,12 +261,17 @@ function renderResult(result, message, content, sessionId) {
   if (batmanLabels[batmanMode]) content.append(element("p", "reply-note", batmanLabels[batmanMode]));
   const composition = details("查看药材组成与 BATMAN 命中", content);
   renderComposition(result, composition);
-  content.append(element("p", "", "查询得到 " + (result.input_genes || []).length + " 个唯一靶点，找到 " + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个候选关联，当前展示 " + candidates.length + " 个。"));
+  const layerCounts = result.candidate_layers?.counts || {};
+  const layered = Boolean(result.candidate_layers?.rules?.base_score);
+  content.append(element("p", "", "查询得到 " + (result.input_genes || []).length + " 个唯一靶点，完整候选 "
+    + (layerCounts.complete ?? result.candidate_count ?? candidates.length) + " 个，基础层 "
+    + (layerCounts.base ?? "未记录") + " 个，严格层 " + (layerCounts.strict ?? "未记录")
+    + " 个，当前展示 " + candidates.length + " 个。"));
   for (const [source, status] of Object.entries(result.source_status || {})) {
     if (status.status !== "succeeded") content.append(element("p", "source-state", sourceLabel(source) + "暂不可用：" + (status.error || "请检查本机数据配置")));
   }
   const title = element("div", "result-heading", "候选疾病");
-  title.append(element("small", "", "按匹配支持度排列"));
+  title.append(element("small", "", layered ? "按 Open Targets 严格层与基础层排列" : "历史结果：按旧匹配支持度排列"));
   content.append(title);
   const list = element("div", "candidate-list");
   candidates.forEach((candidate, index) => {
@@ -264,10 +279,13 @@ function renderResult(result, message, content, sessionId) {
     const name = element("div");
     name.append(element("span", "candidate-title", diseaseName(candidate)));
     const sources = Object.keys(candidate.source_gene_counts || {}).map(sourceLabel).join(" · ");
-    name.append(element("span", "candidate-meta", candidate.matched_count + " 个匹配靶点 · " + sources));
-    const confidence = candidate.confidence || {};
-    const score = element("div", "candidate-score", confidence.value == null ? "—" : Number(confidence.value).toFixed(2));
-    score.append(element("small", "", "匹配支持度"));
+    name.append(element("span", "candidate-meta", layered
+      ? "严格 " + (candidate.strict_support_target_count || 0) + " · 基础 " + (candidate.support_target_count || 0)
+        + " · 全量 " + candidate.matched_count + " · " + sources
+      : candidate.matched_count + " 个全量命中靶点 · 分层未记录 · " + sources));
+    const scoreValue = layered ? candidate.max_association_score : candidate.confidence?.value;
+    const score = element("div", "candidate-score", scoreValue == null ? "—" : Number(scoreValue).toFixed(2));
+    score.append(element("small", "", layered ? "最高关联分值" : "旧匹配支持度"));
     const inspect = action("查看证据", () => submitMessage("展开第" + (index + 1) + "个疾病的证据", { message, index, sessionId }));
     row.append(element("span", "candidate-number", String(index + 1).padStart(2, "0")), name, score, inspect);
     list.append(row);
