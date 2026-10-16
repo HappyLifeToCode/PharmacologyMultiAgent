@@ -36,7 +36,7 @@
 
 最新起点 main/`be2409c`，默认首页是会话，研究工作台在 `/workbench`；自然问句方剂识别与 BATMAN 本地优先回退已经合入，不能把下方 10-12 页面状态当最新。10-14 新增疾病中文名称展示与正向请求取消，不改变研究数据和排序。
 
-首页/工作台共用 `server/static/disease-labels.js` 与提交的本地 `disease-labels.json`：2,620 个 MONDO ID、66 个精确英文名/别名，来源 Wikidata CC0 标签与 `pharm/diseases/chinese_labels_overrides.json` 的项目译名。旧归档读取后直接显示中文，无需重算、不回写旧文件；未知译名明确标注。维护与来源见 DATA_CONTRACT，更新脚本不在用户查询时运行。
+首页/工作台共用 `server/static/disease-labels.js` 与提交的本地 `disease-labels.json`：2,621 个 MONDO ID、68 个精确英文名/别名，来源 Wikidata CC0 标签与 `pharm/diseases/chinese_labels_overrides.json` 的项目译名。反向查询可使用词表中文名和明确维护的 `input_aliases` 从完整问句提取疾病实体，仍以原始 ID 查询；旧归档读取后直接显示中文，无需重算、不回写旧文件。未知译名明确标注，维护与来源见 DATA_CONTRACT，更新脚本不在用户查询时运行。
 
 用户最后指令为“关闭页签才自动停止”，覆盖先前的页面离开/连接报错即取消策略。`pharm/agent/jobs.py` 管理独立子进程，`query-presence.js` 用 sessionStorage 页签编号 + SSE 持续连接跟踪 owner_id；项目内导航/刷新重连同页签、切换标签继续，断开超过 10 秒才停止该页签的查询。POST 断开/前端报错可恢复原查询，状态接口 `/api/agent/forward/request/<request_id>` 支持接续；服务实例变更的运行记录返回 interrupted。主动重试 supersedes 先等待旧任务退出，显式 cancel 入口仍保留；无 owner_id 的旧 API 仍在 HTTP 断开时停止。任务记录见 local/agent/jobs/ 与查询目录 job.json，重试从头运行、不自动续算。纯 ASGI 保留访问校验/断开信号；工作台新标签页打开，归档 GET 可只重读。
 

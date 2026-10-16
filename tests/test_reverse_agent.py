@@ -37,12 +37,13 @@ def snapshot(tmp_path):
         (ot / dataset).mkdir(parents=True)
     pq.write_table(pa.table({"id": ["ENSG1", "ENSG2", "ENSG3"], "approvedSymbol": ["TP53", "EGFR", "PIK3CA"],
                             "symbolSynonyms": [[], [{"label": "ERBB1"}], []], "obsoleteSymbols": [[], [], []], "synonyms": [[], [], []]}), ot / "target/data.parquet")
-    pq.write_table(pa.table({"id": ["MONDO_0007254", "MONDO_9999", "EFO_9999", "OBA_1"],
-                            "name": ["breast cancer", "breast cancer subtype", "lung adenocarcinoma", "Trait"],
-                            "dbXRefs": [[], [], ["MONDO:0005061"], []],
-                            "exactSynonyms": [["BC"], ["BC"], [], []],
-                            "parents": [[], ["MONDO_0007254"], ["MONDO_0007254"], []],
-                            "ancestors": [[], ["MONDO_0007254"], [], []]}), ot / "disease/data.parquet")
+    pq.write_table(pa.table({"id": ["MONDO_0007254", "MONDO_9999", "EFO_9999", "OBA_1", "MONDO_0005010"],
+                            "name": ["breast cancer", "breast cancer subtype", "lung adenocarcinoma", "Trait",
+                                     "coronary artery disorder"],
+                            "dbXRefs": [[], [], ["MONDO:0005061"], [], []],
+                            "exactSynonyms": [["BC"], ["BC"], [], [], ["coronary artery disease"]],
+                            "parents": [[], ["MONDO_0007254"], ["MONDO_0007254"], [], []],
+                            "ancestors": [[], ["MONDO_0007254"], [], [], []]}), ot / "disease/data.parquet")
     pq.write_table(pa.table({"targetId": ["ENSG1", "ENSG2", "ENSG3", "ENSG3"],
                             "diseaseId": ["MONDO_0007254", "MONDO_0007254", "MONDO_0007254", "MONDO_9999"],
                             "aggregationType": ["mean"] * 4, "aggregationValue": ["0.8"] * 4,
@@ -113,9 +114,14 @@ def test_multiple_batman_aliases_keep_native_and_disease_counts_separate(snapsho
 def test_disease_names_chinese_ids_and_ambiguity(snapshot):
     _, ot, mon = snapshot
     args = {"data_dir": ot, "monarch_data_dir": mon}
-    for text in ("乳腺癌", "查询乳腺癌关联哪些药材", "MONDO:0007254", "BREAST CANCER"):
+    for text in ("乳腺癌", "查询乳腺癌关联哪些药材", "什么中药可以治疗乳腺癌？",
+                 "乳腺癌可能被什么药物缓解或者治疗呢？", "MONDO:0007254", "BREAST CANCER"):
         result = disease_input.resolve(text, **args)
         assert result["status"] == "ready" and result["disease"]["disease_id"] == "MONDO_0007254"
+    coronary = disease_input.resolve("冠心病可能被什么药物缓解或者治疗呢？", **args)
+    assert coronary["status"] == "ready" and coronary["query"] == "冠心病"
+    assert coronary["match_type"] == "embedded_alias"
+    assert coronary["disease"]["disease_id"] == "MONDO_0005010"
     ambiguous = disease_input.resolve("BC", **args)
     assert ambiguous["status"] == "needs_selection" and ambiguous["candidate_count"] == 2
     assert disease_input.resolve("BC", disease_id="MONDO_9999", **args)["status"] == "ready"

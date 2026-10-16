@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-14T04:23:19.307421+00:00",
+  "generated_at": "2026-10-16T09:34:49.865002+00:00",
   "sources": {
     "wikidata": {
       "url": "https://query.wikidata.org/sparql",
@@ -3902,6 +3902,13 @@
       "label": "肾脏透明细胞肉瘤",
       "source": "wikidata",
       "wikidata_id": "Q5130614"
+    },
+    "MONDO:0005010": {
+      "label": "冠状动脉疾病",
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
     },
     "MONDO:0005015": {
       "label": "糖尿病",
@@ -13177,7 +13184,24 @@
     },
     "coronary artery disease": {
       "label": "冠状动脉疾病",
-      "source": "project_glossary"
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
+    },
+    "coronary artery disorder": {
+      "label": "冠状动脉疾病",
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
+    },
+    "coronary heart disease": {
+      "label": "冠状动脉疾病",
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
     },
     "crohn disease": {
       "label": "克罗恩病",

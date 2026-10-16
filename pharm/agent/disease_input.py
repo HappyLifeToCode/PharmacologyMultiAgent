@@ -16,6 +16,10 @@ def normalise(value):
     return re.sub(r"\s+", " ", str(value).strip()).casefold().replace("mondo:", "mondo_").replace("efo:", "efo_")
 
 
+def _contains_chinese(value):
+    return bool(re.search(r"[\u3400-\u9fff]", str(value)))
+
+
 def extract(text):
     if not isinstance(text, str) or not 1 <= len(text.strip()) <= 1000:
         raise ValueError("疾病名称或问句必须是 1—1000 个字符")
@@ -65,14 +69,23 @@ def _catalog(directory, stamp, monarch_directory, monarch_stamp, glossary_stamp)
         for name in [row["disease_name"], *row.get("aliases", [])]:
             names[normalise(name)].add(identifier)
         label = glossary.get("by_id", {}).get(str(row.get("mondo_id") or identifier).replace("MONDO_", "MONDO:"))
-        label = label or glossary.get("by_name", {}).get(row["disease_name"].casefold())
+        if not label:
+            for english_name in [row["disease_name"], *row.get("aliases", [])]:
+                label = glossary.get("by_name", {}).get(str(english_name).casefold())
+                if label:
+                    break
         if label:
             row["chinese_name"] = label["label"]
             names[normalise(label["label"])].add(identifier)
-    return entities, names, identifiers, errors
+            for alias in label.get("input_aliases", []):
+                if isinstance(alias, str) and alias.strip():
+                    names[normalise(alias)].add(identifier)
+    phrase_names = tuple(sorted((name for name in names if _contains_chinese(name)),
+                                key=lambda name: (-len(name), name)))
+    return entities, names, identifiers, phrase_names, errors
 
 
-def catalog(data_dir=None, monarch_data_dir=None):
+def _catalog_result(data_dir=None, monarch_data_dir=None):
     directory = ot.resolve_data_dir(data_dir)
     mon = Path(monarch_data_dir or monarch.DEFAULT_DATA_DIR).resolve()
     paths = [directory / "manifest.json", *(directory / "disease").glob("*.parquet")]
@@ -80,6 +93,30 @@ def catalog(data_dir=None, monarch_data_dir=None):
     mon_stamps = tuple(_stamp(mon / name) for name in monarch.REQUIRED_FILES)
     return _catalog(str(directory), stamps, str(mon), mon_stamps,
                     _stamp(ROOT / "server/static/disease-labels.json"))
+
+
+def catalog(data_dir=None, monarch_data_dir=None):
+    entities, names, identifiers, _, errors = _catalog_result(data_dir, monarch_data_dir)
+    return entities, names, identifiers, errors
+
+
+def _embedded_match(value, names, identifiers, phrase_names):
+    key = normalise(value)
+    id_hits = []
+    for token in re.findall(r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*[:_]\d+)(?![A-Za-z0-9])", key):
+        matches = identifiers.get(normalise(token), set())
+        if matches:
+            id_hits.append((token, matches))
+    if id_hits:
+        term, matches = id_hits[0]
+        return term, set(matches), "embedded_id"
+    found = [name for name in phrase_names if name in key]
+    if not found:
+        return None, set(), None
+    longest = len(found[0])
+    selected = [name for name in found if len(name) == longest]
+    matches = set().union(*(names[name] for name in selected))
+    return " | ".join(selected), matches, "embedded_alias"
 
 
 def resolve(text=None, *, disease=None, disease_id=None, data_dir=None, monarch_data_dir=None):
@@ -91,23 +128,33 @@ def resolve(text=None, *, disease=None, disease_id=None, data_dir=None, monarch_
     query = extract(value)
     if not query:
         raise ValueError("请填写具体疾病名称或标准 ID")
-    entities, names, identifiers, errors = catalog(data_dir, monarch_data_dir)
+    entities, names, identifiers, phrase_names, errors = _catalog_result(data_dir, monarch_data_dir)
     key = normalise(query)
     direct = [identifier for identifier in entities if normalise(identifier) == key]
     matches = set(direct) or identifiers.get(key, set()) or names.get(key, set())
     exact = bool(matches)
+    match_type = "exact" if matches else None
+    if not matches:
+        matched_term, matches, match_type = _embedded_match(query, names, identifiers, phrase_names)
+        if matches:
+            query = matched_term
+            exact = True
     if not matches:
         # Partial names produce choices even when only one suggestion exists.
         matches = {identifier for name, ids in names.items() if key and key in name for identifier in ids}
+        match_type = "partial" if matches else None
     if disease_id is not None:
         selected = next((identifier for identifier in entities if normalise(identifier) == normalise(disease_id)), None)
         if selected is None or selected not in matches:
             raise ValueError("所选疾病不属于本次名称的候选，请重新核对")
-        return {"status": "ready", "query": query, "disease": dict(entities[selected]), "source_errors": errors}
+        return {"status": "ready", "query": query, "match_type": match_type,
+                "disease": dict(entities[selected]), "source_errors": errors}
     if len(matches) == 1 and exact:
         selected = next(iter(matches))
-        return {"status": "ready", "query": query, "disease": dict(entities[selected]), "source_errors": errors}
+        return {"status": "ready", "query": query, "match_type": match_type,
+                "disease": dict(entities[selected]), "source_errors": errors}
     return {"status": "needs_selection" if matches else "not_found", "query": query, "exact": exact,
+            "match_type": match_type,
             "choices": [dict(entities[identifier]) for identifier in sorted(matches)[:100]],
             "candidate_count": len(matches), "source_errors": errors,
             "message": "请明确选择疾病及亚型；父子疾病不自动合并" if matches else "本地疾病目录未找到该名称，请尝试英文名或标准 ID"}

@@ -18,7 +18,7 @@
     {"name": "essential hypertension", "label": "原发性高血压"},
     {"name": "heart failure", "label": "心力衰竭"},
     {"name": "congestive heart failure", "label": "充血性心力衰竭"},
-    {"name": "coronary artery disease", "label": "冠状动脉疾病"},
+    {"id": "MONDO:0005010", "name": "coronary artery disorder", "aliases": ["coronary artery disease", "coronary heart disease"], "label": "冠状动脉疾病", "input_aliases": ["冠心病"]},
     {"name": "myocardial infarction", "label": "心肌梗死"},
     {"name": "atherosclerosis", "label": "动脉粥样硬化"},
     {"name": "atrial fibrillation", "label": "心房颤动"},

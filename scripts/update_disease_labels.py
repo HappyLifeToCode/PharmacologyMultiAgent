@@ -42,6 +42,9 @@ def build_glossary(payload, overrides):
     by_name = {}
     for row in overrides["entries"]:
         entry = {"label": row["label"], "source": "project_glossary"}
+        input_aliases = [str(value).strip() for value in row.get("input_aliases", []) if str(value).strip()]
+        if input_aliases:
+            entry["input_aliases"] = input_aliases
         if row.get("id"):
             by_id[row["id"]] = entry
         for name in [row["name"], *row.get("aliases", [])]:

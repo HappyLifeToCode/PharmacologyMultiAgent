@@ -116,9 +116,9 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ## 中文疾病名称展示
 
-首页与工作台通过 `server/static/disease-labels.js` 读取 `disease-labels.json`，按精确 `disease_id`、`mondo_id` 或 `disease` 中的 ID 匹配，统一 `MONDO_`/`MONDO:`；最后可回退项目词表内的精确英文名。不做模糊翻译、不按中文名称合并实体，`breast cancer` 与 `breast carcinoma` 仍是两个原 ID。
+首页与工作台通过 `server/static/disease-labels.js` 读取 `disease-labels.json`，按精确 `disease_id`、`mondo_id` 或 `disease` 中的 ID 匹配，统一 `MONDO_`/`MONDO:`；最后可回退项目词表内的精确英文名。反向查询还可在完整问句中按最长中文名称或明确维护的 `input_aliases` 提取疾病实体，随后直接使用本地数据库原始 ID；不做模糊翻译、不按中文名称合并实体，`breast cancer` 与 `breast carcinoma` 仍是两个原 ID。
 
-当前词表包含 2,620 个 MONDO ID、66 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
+当前词表包含 2,621 个 MONDO ID、68 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名和查询别名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
 
 人工维护常用词条后，显式运行 `python scripts/update_disease_labels.py --proxy http://127.0.0.1:7890` 更新提交的本地词表；也可用 `--input <保存的 SPARQL JSON>` 离线生成。用户查询时不会联网翻译。未知词条显示“中文名未收录”，加载失败显示“中文名暂不可用”；名称本已中文时不重复追加。
 
