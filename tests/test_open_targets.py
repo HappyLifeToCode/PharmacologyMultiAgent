@@ -231,6 +231,31 @@ def test_local_open_targets_by_target_reads_parquet(tmp_path):
     assert "MONDO_1 | Disease A,P53,0.7" in rows
 
 
+def test_local_open_targets_by_target_streams_without_materialising_csv(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    output = tmp_path / "streamed"
+    _write_local_open_targets_snapshot(snapshot)
+    stream = open_targets.collect_open_targets_by_targets(
+        ["EGFR", "P53"], output, mode="local", data_dir=snapshot, stream=True)
+
+    rows = list(stream.iter_rows())
+    assert len(rows) == 3
+    assert {row["disease"] for row in rows} == {
+        "MONDO:1 | Disease A", "MONDO:2 | Disease B"}
+    assert all(isinstance(row["extra"], dict) for row in rows)
+    assert not output.exists()
+
+    selected = list(stream.iter_rows(
+        {"MONDO:1 | Disease A"}, full_extra=True))
+    assert len(selected) == 2
+    assert {row["gene_symbol"] for row in selected} == {"EGFR", "P53"}
+    assert all(row["extra"]["disease_id"] == "MONDO_1" for row in selected)
+    metadata = stream.metadata()
+    assert metadata["associations"] == 3
+    assert metadata["provenance"]["collection"]["materialized_associations_csv"] is False
+    assert metadata["provenance"]["sources"]["associations"]["complete"] is True
+
+
 def test_online_pipeline_uses_batman_targets_when_only_open_targets_selected(monkeypatch, tmp_path):
     def fake_collect(symbols, output_dir, **kwargs):
         assert symbols == ["EGFR"]

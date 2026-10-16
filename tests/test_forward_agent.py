@@ -63,6 +63,53 @@ def test_forward_aggregates_open_targets_and_monarch(monkeypatch, tmp_path):
     assert (tmp_path / "run" / "result.json").is_file()
 
 
+def test_forward_uses_two_pass_open_targets_stream(monkeypatch, tmp_path):
+    herb_result = {
+        "genes": ["EGFR", "TP53"],
+        "relations": [
+            {"herb": "白芍", "gene_symbol": "EGFR", "evidence": "known", "score": None},
+            {"herb": "白芍", "gene_symbol": "TP53", "evidence": "predicted", "score": 0.9},
+        ],
+        "unmatched": [],
+    }
+    rows = [
+        {"disease": "MONDO:1 | Disease A", "gene_symbol": "EGFR", "score": "0.8",
+         "source": "open_targets", "extra": {"entity_type": "disease"}},
+        {"disease": "MONDO:2 | Disease B", "gene_symbol": "TP53", "score": "0.7",
+         "source": "open_targets", "extra": {"entity_type": "disease"}},
+    ]
+    calls = []
+
+    class FakeStream:
+        def iter_rows(self, selected_diseases=None, full_extra=False):
+            calls.append((selected_diseases, full_extra))
+            for row in rows:
+                if selected_diseases is None or row["disease"] in selected_diseases:
+                    yield row
+
+        def metadata(self):
+            return {"associations": 2, "provenance": {"collection": {
+                "materialized_associations_csv": False}}}
+
+    def fake_open_targets(symbols, output_dir, **kwargs):
+        assert symbols == ["EGFR", "TP53"]
+        assert kwargs["stream"] is True
+        assert kwargs["top_k_per_target"] is None and kwargs["min_score"] is None
+        return FakeStream()
+
+    monkeypatch.setattr(forward, "query_local_targets", lambda *args, **kwargs: herb_result)
+    monkeypatch.setattr(forward, "collect_open_targets_by_targets", fake_open_targets)
+    monkeypatch.setattr(forward, "collect_monarch_by_targets",
+                        lambda *args, **kwargs: {"records": [], "stats": {}, "snapshot": {}})
+
+    payload = forward.query(["白芍"], top_k=1, output_dir=tmp_path / "run")["result"]
+
+    assert calls == [(None, False), ({"MONDO:1 | Disease A"}, True)]
+    assert payload["candidates"][0]["disease"] == "MONDO:1 | Disease A"
+    assert payload["source_status"]["open_targets"]["meta"]["associations"] == 2
+    assert not (tmp_path / "run" / "open_targets" / "associations.csv").exists()
+
+
 @pytest.mark.parametrize("query_input", [{"formula": " 温经汤 "}, {"text": " 温经汤\n"},
                                         {"text": "温经汤可能与哪些疾病有关？"},
                                         {"text": "请问，温经汤可能与哪些疾病有关？"}])

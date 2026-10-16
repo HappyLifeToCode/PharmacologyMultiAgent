@@ -96,7 +96,7 @@ def _record_extra(row):
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _aggregate(herb_result, iter_associations, top_k):
+def _aggregate(herb_result, iter_associations, top_k, iter_selected_associations=None):
     """Keep all associations, but rank candidates by the shared OT score layers."""
     known = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "known"}
     predicted = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "predicted"} - known
@@ -188,7 +188,9 @@ def _aggregate(herb_result, iter_associations, top_k):
     # Release unselected sets before rereading the frozen source files.
     del candidates, result
     if selected:
-        for row in iter_associations():
+        selected_rows = (iter_selected_associations(set(selected_by_disease))
+                         if iter_selected_associations is not None else iter_associations())
+        for row in selected_rows:
             disease = _normalise_disease_key(row.get("disease"))
             if disease not in selected_by_disease:
                 continue
@@ -237,14 +239,21 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     source_status = {}
     association_paths = []
     monarch_rows = []
+    ot_stream = None
     ot_dir = directory / "open_targets"
     report("open_targets", "读取 Open Targets 靶点关联")
     try:
-        ot_meta = collect_open_targets_by_targets(
-            herb_result["genes"], ot_dir, top_k_per_target=None, min_score=0.0,
-            mode="local", data_dir=open_targets_data_dir)
-        association_paths.append(ot_dir / "associations.csv")
-        source_status["open_targets"] = {"status": "succeeded", "meta": ot_meta}
+        ot_source = collect_open_targets_by_targets(
+            herb_result["genes"], ot_dir, top_k_per_target=None, min_score=None,
+            mode="local", data_dir=open_targets_data_dir, stream=True)
+        if hasattr(ot_source, "iter_rows") and hasattr(ot_source, "metadata"):
+            ot_stream = ot_source
+            source_status["open_targets"] = {"status": "succeeded", "meta": None}
+        else:
+            # Compatibility path for injected collectors and explicit legacy
+            # adapters that still materialise the generic CSV contract.
+            association_paths.append(ot_dir / "associations.csv")
+            source_status["open_targets"] = {"status": "succeeded", "meta": ot_source}
     except RuntimeError as exc:
         source_status["open_targets"] = {"status": "partial", "error": str(exc)}
 
@@ -257,13 +266,29 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         source_status["monarch"] = {"status": "partial", "error": str(exc)}
 
     def iter_associations():
+        if ot_stream is not None:
+            yield from ot_stream.iter_rows()
         for path in association_paths:
             yield from _read_associations(path)
         yield from monarch_rows
 
+    def iter_selected_associations(selected_diseases):
+        if ot_stream is not None:
+            yield from ot_stream.iter_rows(
+                selected_diseases=selected_diseases, full_extra=True)
+        for path in association_paths:
+            for row in _read_associations(path):
+                if _normalise_disease_key(row.get("disease")) in selected_diseases:
+                    yield row
+        for row in monarch_rows:
+            if _normalise_disease_key(row.get("disease")) in selected_diseases:
+                yield row
+
     report("aggregating", "汇总候选疾病")
     selected, input_genes, full_count, associated_genes, layer_counts = _aggregate(
-        herb_result, iter_associations, top_k)
+        herb_result, iter_associations, top_k, iter_selected_associations)
+    if ot_stream is not None:
+        source_status["open_targets"]["meta"] = ot_stream.metadata()
     if not selected:
         raise RuntimeError("Open Targets 未产生 associationScore > 0.2 的基础候选疾病")
     result = {
