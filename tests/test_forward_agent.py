@@ -56,7 +56,58 @@ def test_forward_aggregates_open_targets_and_monarch(monkeypatch, tmp_path):
     assert candidate["disease"] == "MONDO:1 | Disease A"
     assert candidate["matched_genes"] == ["EGFR", "TP53"]
     assert candidate["source_gene_counts"] == {"monarch_omim": 1, "open_targets": 1}
+    assert candidate["support_target_count"] == candidate["strict_support_target_count"] == 1
+    assert candidate["max_association_score"] == 0.8
+    assert payload["candidate_layers"]["counts"] == {"complete": 1, "base": 1, "strict": 1, "top": 1}
+    assert payload["candidate_layers"]["rules"]["monarch_ranking"] == "supplement_only"
     assert (tmp_path / "run" / "result.json").is_file()
+
+
+def test_forward_uses_two_pass_open_targets_stream(monkeypatch, tmp_path):
+    herb_result = {
+        "genes": ["EGFR", "TP53"],
+        "relations": [
+            {"herb": "白芍", "gene_symbol": "EGFR", "evidence": "known", "score": None},
+            {"herb": "白芍", "gene_symbol": "TP53", "evidence": "predicted", "score": 0.9},
+        ],
+        "unmatched": [],
+    }
+    rows = [
+        {"disease": "MONDO:1 | Disease A", "gene_symbol": "EGFR", "score": "0.8",
+         "source": "open_targets", "extra": {"entity_type": "disease"}},
+        {"disease": "MONDO:2 | Disease B", "gene_symbol": "TP53", "score": "0.7",
+         "source": "open_targets", "extra": {"entity_type": "disease"}},
+    ]
+    calls = []
+
+    class FakeStream:
+        def iter_rows(self, selected_diseases=None, full_extra=False):
+            calls.append((selected_diseases, full_extra))
+            for row in rows:
+                if selected_diseases is None or row["disease"] in selected_diseases:
+                    yield row
+
+        def metadata(self):
+            return {"associations": 2, "provenance": {"collection": {
+                "materialized_associations_csv": False}}}
+
+    def fake_open_targets(symbols, output_dir, **kwargs):
+        assert symbols == ["EGFR", "TP53"]
+        assert kwargs["stream"] is True
+        assert kwargs["top_k_per_target"] is None and kwargs["min_score"] is None
+        return FakeStream()
+
+    monkeypatch.setattr(forward, "query_local_targets", lambda *args, **kwargs: herb_result)
+    monkeypatch.setattr(forward, "collect_open_targets_by_targets", fake_open_targets)
+    monkeypatch.setattr(forward, "collect_monarch_by_targets",
+                        lambda *args, **kwargs: {"records": [], "stats": {}, "snapshot": {}})
+
+    payload = forward.query(["白芍"], top_k=1, output_dir=tmp_path / "run")["result"]
+
+    assert calls == [(None, False), ({"MONDO:1 | Disease A"}, True)]
+    assert payload["candidates"][0]["disease"] == "MONDO:1 | Disease A"
+    assert payload["source_status"]["open_targets"]["meta"]["associations"] == 2
+    assert not (tmp_path / "run" / "open_targets" / "associations.csv").exists()
 
 
 @pytest.mark.parametrize("query_input", [{"formula": " 温经汤 "}, {"text": " 温经汤\n"},
@@ -185,21 +236,58 @@ def test_forward_streaming_preserves_counts_scores_and_selected_evidence():
         reads.append(True)
         yield from rows
 
-    selected, genes, total, associated = forward._aggregate(herbs, iter_rows, 1)
+    context = {}
+    selected, genes, total, associated = forward._aggregate(herbs, iter_rows, 2, selection=context)
+    layers = context["layer_counts"]
     assert len(reads) == 2
     assert genes == ["AKT1", "EGFR", "TP53"]
     assert associated == set(genes)  # phenotype associations still count as an input mapping
     assert total == 2
-    assert len(selected) == 1
+    assert layers == {"complete": 2, "base": 2, "strict": 2, "top": 2}
+    assert [candidate["disease"] for candidate in selected] == ["MONDO:1 | A", "MONDO:2 | B"]
+    assert [candidate["disease"] for candidate in context["layered_candidates"]] == ["MONDO:2 | B", "MONDO:1 | A"]
     candidate = selected[0]
     assert candidate["disease"] == "MONDO:1 | A"
     assert candidate["matched_count"] == 2
     assert candidate["evidence_row_count"] == len(candidate["evidence"]) == 3
     assert candidate["source_scores"] == {"open_targets": {"max": 0.8, "count": 2}}
     assert candidate["source_gene_counts"] == {"open_targets": 1, "monarch_omim": 1}
+    assert candidate["support_target_count"] == candidate["strict_support_target_count"] == 1
     assert candidate["input_coverage"] == 2 / 3
     assert candidate["evidence"][0]["record"]["marker"] == "first"
     assert candidate["evidence"][2]["source"] == "monarch_omim"
+
+
+def test_forward_layers_exclude_weak_associations_and_prioritise_strict_support():
+    herbs = {"genes": ["G1", "G2", "G3"], "relations": [
+        {"gene_symbol": "G1", "evidence": "known"},
+        {"gene_symbol": "G2", "evidence": "known"},
+        {"gene_symbol": "G3", "evidence": "known"},
+    ]}
+    rows = [
+        {"disease": "MONDO_1 | Weak", "gene_symbol": "G1", "source": "open_targets", "score": "0.1", "extra": "{}"},
+        {"disease": "MONDO_1 | Weak", "gene_symbol": "G2", "source": "open_targets", "score": "0.2", "extra": "{}"},
+        {"disease": "MONDO_2 | Base", "gene_symbol": "G1", "source": "open_targets", "score": "0.3", "extra": "{}"},
+        {"disease": "MONDO_2 | Base", "gene_symbol": "G2", "source": "open_targets", "score": "0.4", "extra": "{}"},
+        {"disease": "MONDO_3 | Strict", "gene_symbol": "G3", "source": "open_targets", "score": "0.6", "extra": "{}"},
+        {"disease": "MONDO_2 | Base", "gene_symbol": "G3", "source": "monarch_omim", "score": "0.99", "extra": "{}"},
+    ]
+
+    context = {}
+    selected, genes, total, associated = forward._aggregate(herbs, lambda: iter(rows), 3, selection=context)
+    layers = context["layer_counts"]
+
+    assert genes == ["G1", "G2", "G3"]
+    assert total == 3
+    assert associated == set(genes)
+    assert layers == {"complete": 3, "base": 2, "strict": 1, "top": 2}
+    assert [candidate["disease"] for candidate in selected] == ["MONDO:2 | Base", "MONDO:1 | Weak", "MONDO:3 | Strict"]
+    reference = context["layered_candidates"]
+    assert [candidate["disease"] for candidate in reference] == ["MONDO:3 | Strict", "MONDO:2 | Base"]
+    assert reference[0]["strict_support_target_count"] == 1
+    assert reference[1]["support_target_count"] == 2
+    assert reference[1]["strict_support_target_count"] == 0
+    assert reference[1]["max_association_score"] == 0.4  # Monarch's numeric value cannot affect OT reference ranking.
 
 
 @pytest.mark.parametrize("body", [None, [], [""], ["白芍"]])

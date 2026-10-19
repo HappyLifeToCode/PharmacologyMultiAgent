@@ -4,7 +4,7 @@
 
 ## 疾病到药材会话查询
 
-正反向 HTTP 查询共用实际进度与成功结果缓存。状态接口增加可空 `progress`，研究结果增加 `execution`（`cache_hit`、`source_fingerprint`，命中时还有 `reused_from`、`computed_at`）。缓存命中使用新的运行编号，保留原候选与证据；来源 CSV 继续留在被引用的原运行，不伪装为重新采集。完整字段及失效规则见 [查询执行说明](QUERY_EXECUTION.md)。
+正反向 HTTP 查询共用实际进度与成功结果缓存。状态接口增加可空 `progress`，研究结果增加 `execution`（`cache_hit`、`source_fingerprint`，命中时还有 `reused_from`、`computed_at`）。缓存命中使用新的运行编号，保留原候选与证据；旧来源 CSV 继续留在被引用的原运行，新正向流式结果保留源Parquet元数据及证据，不伪装为重新采集。完整字段及失效规则见 [查询执行说明](QUERY_EXECUTION.md)。
 
 独立于旧 discovery 的疾病到药材入口为 `POST /api/agent/reverse`，返回 `workflow=reverse_disease_target_herb_v1`、`direction=reverse`、`scientific_complete=false`，归档于 `local/agent/reverse/reverse_<id>/result.json`。`/reverse/resolve` 只解析名称，歧义需明确选择；原始 Open Targets ID 与 MONDO 对应保留，父子疾病不自动合并。
 
@@ -76,10 +76,12 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 - `POST /api/formulas/preference`：明确选择组成 ID 后，将默认组成及可选编辑清单保存到本机 `local/agent/formula_preferences.json`；选择是输入偏好，不是科学签字。保存数据指纹（方剂/药材/别名表哈希及内置表）；数据变化后重新核对。新方剂没有任何明确匹配的药材时必须先修改清单。中文/拼音及原表明确给出的括号别名共用已选版本。
 - `POST /api/agent/forward`：正向 Agent 对话查询，`text`、`formula` 与 `herbs` 三种输入只能选择一种。对话框使用 `{"text":"温经汤","top_k":10}`；也支持显式 `{"formula":"温经汤"}` 或原接口 `{"herbs":["白芍"],"top_k":10,"batman_threshold":0.84}`。`text` 最多 10000 字符，后端识别单个本地收录方剂名并展开，或按换行、逗号、顿号、分号拆分药材；混合方剂/药材拒绝。可追加经组成核对返回的 `formula_variant_id`、`formula_herbs`（编辑清单，1—100 个名称）和 `formula_fingerprint`；有歧义且未选组成时返回 HTTP 409 的结构化 `detail`，不创建计算进程；数据指纹变化时阻止旧选择进入计算。未知方剂拒绝，不猜测组成。直接 `herbs` 为 1—30 个名称，`top_k` 为 1—100。结果写入 `local/agent/forward/<run_id>/`，不进入旧 discovery manifest。
 - 正向结果的 `input` 保留原始 `text`、识别出的 `formula`、`formula_source`、展开后的 `herbs` 与实际参数。内置来源保持 `standard_reference_pending_user_confirmation`；本地方剂表为 `batman_local_formula_table`。新增 `formula_resolution` 保留组成 ID、原记录组成/行号、实际原名映射、编辑类型、未匹配项、数据文件哈希及 `reference:null`（原表无出处）。编辑清单不覆盖原始组成。项目显式别名表仅列常用简称，规则随结果保留，不猜测 `SHAO YAO` 的芍药类别、不合并炮制形式；原四方既有候选规则保留。`resolved_herbs` 逐味记录 `canonical`、候选名、实际命中名、成分与关系数；`matched` 仅表示目录命中。未匹配项不被丢弃，`unmatched_herbs` 继续保留；历史结果不回写。
-- 正向聚合逐行读取冻结的来源文件，先汇总全部合格候选并排序，再仅加载返回候选的逐条完整证据。`candidate_count` 是截断前的候选数，`candidates` 仍按用户 `top_k` 截断；`evidence_row_count` 保留重复来源行计数，`matched_count` 仍按基因去重。完整 Open Targets 采集文件继续保存于本次目录 `open_targets/associations.csv`，不因只展示前 K 项而删减。
+- 正向交互查询直接流式读取本地 Open Targets Parquet：第一遍汇总全部合格候选并排序，第二遍只读取返回候选的逐条完整证据，不再为每次运行生成 GB 级 `open_targets/associations.csv`。`candidate_count` 是截断前的候选数，`candidates` 仍按用户 `top_k` 截断；`evidence_row_count` 保留重复来源行计数，`matched_count` 仍按基因去重。用于反向查询、共享索引和正式导入的显式采集接口仍保留通用 `associations.csv` 合同。
 - 产物下载 `GET /artifacts/{run_id}/{path}`：仅 manifest 登记且通过 public_artifact 白名单的文件；提示词、模型原始响应、私有日志不公开（Agent 会话仅 agent/execution.json 公开）。
 
 ### 正向 Agent 结果边界
+
+合并远端后保留Open Targets基础/严格分层计数及layered_candidates完整参考（>0.2/≥0.6），仅OT分值参与此参考排序；默认仍遵循用户最新确认的support，背景仍为可选对照。分层参考不替换两种主视图。来源改为流式Parquet，旧CSV归档保留，新查询不生成GB级CSV。
 
 正向新结果将大类单独返回 `broad_candidates`，默认 `candidates` 为按原支持度排序的非大类Top-K；`background_candidates` 独立保存完整候选集合的背景校正Top-K及逐条证据，页面切换不计算。`ranking.default_order=support`，`background_algorithm` 记录独立公式，科学验证状态仍待完成。原 `heuristic_v2` 分数不改写，反向不变；导出 `export_view` 只标记显示选择，不改写研究数组。字段、公式与初步文献对照见 [正向疾病排序](FORWARD_RANKING.md)。
 
@@ -108,6 +110,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### Monarch Initiative（OMIM 功能替代来源，2026-10-12 接入）
 
+本节“默认关闭/Top-K补充/不参与排序”描述旧discovery工作流及OT分层参考。正向会话沿用原支持度时，Monarch匹配基因可参与多来源匹配数与并列来源数；其原始分值不与OT分数相加，也不参与背景校正或OT分层排序。
+
 - 定位：Monarch KG 是本项目 OMIM 所需功能（基因—疾病、HPO 表型、遗传方式、PMID/ECO 证据）的替代来源；Open Targets 仍是主疾病关联来源，associationScore 与 Top-K 排序不受 Monarch 影响。
 - 默认关闭：`PHARM_MONARCH_ENABLED=true` 或任务 `monarch_enabled=true` 才启用；数据目录解析顺序为任务 `monarch_data_dir` > `PHARM_MONARCH_DATA_DIR` > `configs/monarch_data.local.json` > `data/monarch/<最新版本目录>`。无在线回退，缺文件明确报错。
 - 匹配规则：基因为 gene_id 命名空间 > HGNC symbol > UniProt > 记录 unresolved；疾病为 candidate.mondo_id > Monarch 明确 MONDO ID > 其他明确本体 ID > 记录 unresolved。禁止按英文名称模糊合并；MONDO 是跨库映射字段，不是所有疾病的强制主键；无 MONDO 映射的记录保留。
@@ -118,9 +122,11 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ## 中文疾病名称展示
 
+反向解析保留远端新增的最长中文名称/显式input_aliases问句提取；冠心病精确映射MONDO_0005010，不以中文名替换数据库身份。
+
 首页与工作台通过 `server/static/disease-labels.js` 读取 `disease-labels.json`，按精确 `disease_id`、`mondo_id` 或 `disease` 中的 ID 匹配，统一 MONDO/EFO/HP/OBA/DOID/Orphanet/OTAR 的下划线及冒号格式；最后可回退项目词表内的精确英文名。不做模糊翻译、不按中文名称合并实体，`breast cancer` 与 `breast carcinoma` 仍是两个原 ID。
 
-当前词表包含 2,639 个疾病/性状 ID、87 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
+当前词表包含 2,645 个疾病/性状 ID、94 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
 
 明确区分 `obesity disorder`（肥胖症，MONDO:0011122）、`binge eating disorder`（暴食障碍，MONDO:0005582）及 `bulimia nervosa`（神经性贪食症，MONDO:0005452）。补齐胎儿水肿、抑郁障碍、MC4R受体缺乏所致肥胖症等本次结果中漏译的明确实体；显示翻译不替换ID或科学结果。
 

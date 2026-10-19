@@ -353,7 +353,7 @@ def collect_open_targets_by_targets(symbols, output_dir, page_size: int = 1000,
                                     top_k_per_target: int | None = None,
                                     min_score: float | None = None,
                                     mode: str | None = None,
-                                    data_dir=None) -> dict:
+                                     data_dir=None, stream: bool = False):
     """Collect BATMAN target -> disease associations for formula discovery."""
     # Open Targets is now a local-only source for the main workflow.  Keep
     # ``online`` available as an explicit opt-in for diagnostics, but never
@@ -361,11 +361,23 @@ def collect_open_targets_by_targets(symbols, output_dir, page_size: int = 1000,
     selected_mode = (mode or os.environ.get("PHARM_OPEN_TARGETS_MODE", "local")).strip().lower()
     if selected_mode not in ("online", "local"):
         raise ValueError("PHARM_OPEN_TARGETS_MODE 只能是 online 或 local")
+    if not isinstance(stream, bool):
+        raise ValueError("stream 必须是布尔值")
     if selected_mode == "local":
-        from .open_targets_local import collect_open_targets_local_by_targets
+        from .open_targets_local import (
+            collect_open_targets_local_by_targets,
+            stream_open_targets_local_by_targets,
+        )
+        if stream:
+            if top_k_per_target is not None or min_score is not None:
+                raise ValueError("流式完整层不接受 top_k_per_target 或 min_score 预过滤")
+            return stream_open_targets_local_by_targets(
+                symbols, output_dir=output_dir, data_dir=data_dir)
         return collect_open_targets_local_by_targets(
             symbols, output_dir, top_k_per_target=top_k_per_target,
             min_score=min_score, data_dir=data_dir)
+    if stream:
+        raise ValueError("Open Targets 在线诊断模式暂不支持流式返回")
     if not isinstance(symbols, (list, tuple)) or not symbols:
         raise ValueError("symbols 必须是非空 BATMAN 基因符号列表")
     clean_symbols = []

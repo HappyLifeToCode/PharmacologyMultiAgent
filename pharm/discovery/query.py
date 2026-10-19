@@ -28,6 +28,8 @@ MAX_DISEASES = 500
 DEFAULT_DATABASE = Path("local/discovery/disease_index.sqlite")
 DEFAULT_CANDIDATE_OUTPUT_TOP_K = 50
 MAX_CANDIDATE_OUTPUT_TOP_K = 500
+BASE_ASSOCIATION_SCORE = 0.2
+STRICT_ASSOCIATION_SCORE = 0.6
 OUTPUT_RETENTIONS = ("compact", "audit")
 LIMITATION = (
     "本地索引仅收录批次导入的疾病-基因关联；关键词检索关联不等于确诊疾病的因果或治疗证据。"
@@ -427,7 +429,20 @@ def output_retention(value=None):
     return value
 
 
-def build_candidate_layers(candidates, *, base_score=0.2, strict_score=0.6, top_n=None):
+def candidate_layer_sort_key(item):
+    """Shared deterministic ordering for persisted and conversational candidates."""
+    return (
+        -int(item["strict_supported"]),
+        -item["strict_support_target_count"],
+        -item["support_target_count"],
+        -(item["max_association_score"] or 0.0),
+        -item["score_sum"],
+        str(item.get("disease_id") or item.get("disease")),
+    )
+
+
+def build_candidate_layers(candidates, *, base_score=BASE_ASSOCIATION_SCORE,
+                           strict_score=STRICT_ASSOCIATION_SCORE, top_n=None):
     """Build transparent Open Targets candidate layers after raw evidence lookup."""
     top_n = candidate_output_top_k(top_n)
     enriched = []
@@ -448,21 +463,13 @@ def build_candidate_layers(candidates, *, base_score=0.2, strict_score=0.6, top_
     # 基础层/严格层不按实体类型过滤；disease 过滤只发生在最终展示层（top）
     base = [item for item in enriched if item["support_target_count"] > 0]
     strict = [item for item in enriched if item["strict_supported"]]
-    ranking = lambda item: (
-        -int(item["strict_supported"]),
-        -item["strict_support_target_count"],
-        -item["support_target_count"],
-        -(item["max_association_score"] or 0.0),
-        -item["score_sum"],
-        str(item.get("disease_id") or item.get("disease")),
-    )
     # Top-N 在 disease_id 聚合（上游候选已是聚合态）与实体过滤之后生成
     top = sorted((item for item in base if item.get("entity_type") == "disease"),
-                 key=ranking)[:max(1, int(top_n))]
+                 key=candidate_layer_sort_key)[:max(1, int(top_n))]
     return {
         "complete": enriched,
-        "base": sorted(base, key=ranking),
-        "strict": sorted(strict, key=ranking),
+        "base": sorted(base, key=candidate_layer_sort_key),
+        "strict": sorted(strict, key=candidate_layer_sort_key),
         "top": top,
         "rules": {"complete": "全部候选与全部原始 evidence；Top-K/min_score 仅用于展示排序，不删除 direct association",
                   "base_score": "> %.6g" % base_score,

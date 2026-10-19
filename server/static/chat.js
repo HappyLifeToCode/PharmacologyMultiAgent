@@ -204,7 +204,7 @@ function renderComposition(result, content) {
 }
 
 function forwardRankingOrder(result, message) {
-  const native = result.ranking?.default_order || (result.ranking?.background_status === "succeeded" ? "background" : "support");
+  const native = result.ranking?.default_order || (result.ranking?.background_status === "succeeded" ? "background" : result.candidate_layers ? "layers" : "support");
   if (native === "support" && Array.isArray(result.background_candidates)
       && result.ranking?.available_orders?.includes("background") && message?.rankingView === "background") return "background";
   return native;
@@ -241,7 +241,7 @@ function renderEvidence(result, index, content) {
 
 function renderScore(result, content) {
   if (result.direction === "reverse") { renderReverseMetrics(result, content); return; }
-  if (result.display_order) content.append(element("p", "reply-note", "当前查看：" + (result.display_order === "background" ? "背景校正（探索性对照）" : "原支持度") + "。下方分别列出两个指标的组成，数值不能直接当作同一种分数比较。"));
+  if (result.display_order) content.append(element("p", "reply-note", "当前查看：" + (result.display_order === "background" ? "背景校正（探索性对照）" : result.display_order === "layers" ? "归档OT证据分层" : "原支持度") + "。下方分别列出指标组成，数值不能直接当作同一种分数比较。"));
   const version = (result.candidates || []).find((item) => item.confidence)?.confidence?.formula_version || "当前版本";
   content.append(element("p", "", "匹配支持度由匹配靶点数、输入覆盖率、疾病覆盖率和证据质量加权得到。缺失项不参与计算，剩余权重重新归一；数值用于核查关联线索。"));
   content.append(element("p", "reply-note", "本次公式版本：" + version + "。证据质量来自 BATMAN 已知证据占比；Open Targets 和 Monarch 的原始关联分值单独展示。"));
@@ -260,6 +260,10 @@ function renderScore(result, content) {
         score ? (100 * score.disease_coverage).toFixed(2) + "%" : "—"];
     }), content);
   }
+  if (result.candidate_layers) {
+    content.append(element("p", "reply-note", "Open Targets 分层参考：>0.2为基础支持，≥0.6为严格支持；仅OT分值参与此分层，Monarch不加入分层分数。分层参考不替换当前默认支持度或背景对照。"));
+    table(["候选", "基础靶点", "严格靶点", "最高OT分值"], (result.candidates || []).map((item) => [diseaseName(item), item.support_target_count, item.strict_support_target_count, item.max_association_score]), content);
+  }
 }
 
 function renderResult(result, message, content, sessionId) {
@@ -276,13 +280,19 @@ function renderResult(result, message, content, sessionId) {
   if (batmanLabels[batmanMode]) content.append(element("p", "reply-note", batmanLabels[batmanMode]));
   const composition = details("查看药材组成与 BATMAN 命中", content);
   renderComposition(result, composition);
-  content.append(element("p", "", "查询得到 " + (result.input_genes || []).length + " 个唯一靶点，找到 " + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个候选关联，当前展示 " + candidates.length + " 个。"));
+  const layerCounts = result.candidate_layers?.counts || {};
+  content.append(element("p", "", "查询得到 " + (result.input_genes || []).length + " 个唯一靶点，完整候选 "
+    + (layerCounts.complete ?? result.candidate_count ?? candidates.length) + " 个，基础层 "
+    + (layerCounts.base ?? "未记录") + " 个，严格层 " + (layerCounts.strict ?? "未记录")
+    + " 个，当前展示 " + candidates.length + " 个。"));
   for (const [source, status] of Object.entries(result.source_status || {})) {
     if (status.status !== "succeeded") content.append(element("p", "source-state", sourceLabel(source) + "暂不可用：" + (status.error || "请检查本机数据配置")));
   }
-  const corrected = forwardRankingOrder(result, message) === "background";
+  const nativeOrder = forwardRankingOrder(result, message);
+  const corrected = nativeOrder === "background";
+  const archivedLayers = nativeOrder === "layers";
   const title = element("div", "result-heading", result.ranking ? "具体疾病候选" : "候选疾病");
-  title.append(element("small", "", corrected ? "按背景校正匹配度排列" : "按原匹配支持度排列"));
+  title.append(element("small", "", corrected ? "按背景校正匹配度排列" : archivedLayers ? "历史结果：按OT证据分层排列" : "按原匹配支持度排列"));
   content.append(title);
   if (result.ranking) {
     content.append(element("p", "reply-note", "疾病大类单独列在下方，不占本列表名额；器官疾病与其亚型仍保留独立 ID，不合并证据。"));
@@ -313,9 +323,9 @@ function renderResult(result, message, content, sessionId) {
       + (result.ranking ? (corrected ? " · 原支持度 " + Number(candidate.confidence?.value || 0).toFixed(2) : " · 背景校正 " + (candidate.specificity ? Number(candidate.specificity.score).toFixed(3) : "背景不足"))
         + (candidate.specificity ? " · 疾病背景 " + candidate.specificity.disease_target_count + " 个靶点" : " · 背景不足，未计算校正值") : "")));
     const confidence = candidate.confidence || {};
-    const value = corrected ? candidate.specificity?.score : confidence.value;
+    const value = corrected ? candidate.specificity?.score : archivedLayers ? candidate.max_association_score : confidence.value;
     const score = element("div", "candidate-score", value == null ? "—" : Number(value).toFixed(corrected ? 3 : 2));
-    score.append(element("small", "", corrected ? "背景校正匹配度" : "原匹配支持度"));
+    score.append(element("small", "", corrected ? "背景校正匹配度" : archivedLayers ? "最高关联分值" : "原匹配支持度"));
     const inspect = action("查看证据", () => submitMessage("展开第" + (index + 1) + "个疾病的证据", { message, index, sessionId }));
     row.append(element("span", "candidate-number", String(index + 1).padStart(2, "0")), name, score, inspect);
     list.append(row);
@@ -339,6 +349,17 @@ function renderResult(result, message, content, sessionId) {
       item.raw_rank, diseaseName(item), item.disease_scope === "category" ? "疾病大类" : "疾病候选", item.matched_count, item.confidence?.value,
     ]), raw);
     raw.append(element("p", "reply-note", "仅保存原排序摘要；完整原始关联继续保留于本次来源归档。默认候选和所列大类的逐条证据随 JSON 导出。"));
+  }
+  if (result.layered_candidates?.length) {
+    const reference = details("Open Targets 证据分层参考（非默认排序）", content);
+    reference.append(element("p", "reply-note", "保留按严格支持、严格/基础靶点数、最高分和分数和排序的独立参考；不改变已选择的两种主视图。"));
+    for (const [index, item] of result.layered_candidates.entries()) {
+      const evidence = details(diseaseName(item) + " · 严格 " + item.strict_support_target_count + " / 基础 " + item.support_target_count, reference);
+      let loaded = false;
+      evidence.addEventListener("toggle", () => {
+        if (evidence.open && !loaded) { loaded = true; renderEvidence({ ...result, candidates: result.layered_candidates }, index, evidence); }
+      });
+    }
   }
   if ((result.unmatched_genes || []).length) {
     const unmatched = details("未命中疾病关联的靶点（" + result.unmatched_genes.length + " 个）", content);

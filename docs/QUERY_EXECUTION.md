@@ -14,7 +14,11 @@ HTTP 工作进程默认在 `local/agent/query-cache/` 保存成功结果；直�
 
 每次缓存命中仍创建新的运行编号和结果归档。结果增加 `execution.cache_hit=true`、`source_fingerprint`、`reused_from`、`computed_at`；`created_at` 是本次归档时间，`computed_at` 是原计算时间。界面明确显示复用及原运行。候选、排序、分值、覆盖率、逐条证据和 `scientific_complete=false` 保留。冷计算记录 `cache_hit=false`；无法生成缓存键时 `source_fingerprint=null`。
 
-缓存命中的新归档保存 `result.json` 和原有 `herb_targets.json`（如有），不会复制数 GiB 的来源 CSV。`source_status` 中的采集元数据继续指向原始计算目录，其时间和来源不伪装成本次重新采集；原始证据文件校验通过才允许复用。需要完整来源文件时按 `reused_from` 读取原运行；丢失原运行后下一次查询会重算。缓存不可用不应将已完成的计算改成失败。
+缓存命中的新归档保存 `result.json` 和原有 `herb_targets.json`（如有），不会复制来源产物。`source_status` 保留原始计算的数据版本和流式采集元数据，其时间和来源不伪装成本次重新采集；原运行的持久化结果与证据摘要校验通过才允许复用。丢失原运行后下一次查询会重算。缓存不可用不应将已完成的计算改成失败。
+
+## 正向流式查询与双排序
+
+正向会话以两遍本地Parquet流式处理代替每次保存GB级关联CSV：首遍汇总完整候选，第二遍提取原支持度、背景校正、大类及OT分层参考的联合候选完整证据。默认原支持度、背景可选；切换已返回列表不重复采集或启动研究POST。旧CSV归档和显式采集接口保留；新查询来源由Parquet版本、路径和哈希追溯。历史单/双列表计时属于旧CSV路径，不能代表当前流式性能，见[RANKING_COMPARISON.md](RANKING_COMPARISON.md)。
 
 ## Open Targets 本地筛选
 

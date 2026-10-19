@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+from array import array
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -44,8 +45,22 @@ def _matching_rows(batch, column, wanted):
     import pyarrow as pa
     import pyarrow.compute as pc
     values = _trim_ids(batch.column(column))
-    mask = pc.is_in(values, value_set=pa.array(sorted(wanted), type=values.type))
+    mask = pc.is_in(values, value_set=_arrow_string_array(sorted(wanted), pa))
     return batch.filter(mask).to_pylist()
+
+
+def _arrow_string_array(values, pa=None):
+    """Build an Arrow string array without importing optional pandas helpers."""
+    if pa is None:
+        import pyarrow as pa
+    encoded = [str(value).encode("utf-8") for value in values]
+    offsets = array("i", [0])
+    for value in encoded:
+        offsets.append(offsets[-1] + len(value))
+    return pa.Array.from_buffers(
+        pa.string(), len(encoded),
+        [None, pa.py_buffer(offsets.tobytes()), pa.py_buffer(b"".join(encoded))],
+    )
 
 
 def _write_associations(path, rows):
@@ -531,6 +546,249 @@ def _clean_symbols(symbols):
     if not clean:
         raise ValueError("symbols 不能全为空")
     return clean
+
+
+def _display_disease_key(disease_id, disease_name):
+    identifier = str(disease_id or "").strip()
+    for prefix in ("MONDO", "EFO", "OBA", "HP", "DOID", "Orphanet", "DECIPHER"):
+        marker = prefix + "_"
+        if identifier.startswith(marker):
+            identifier = prefix + ":" + identifier[len(marker):]
+            break
+    return identifier + " | " + str(disease_name or "").strip()
+
+
+class LocalTargetAssociationStream:
+    """Two-pass target-to-disease reader for the interactive forward query.
+
+    The first iteration emits lightweight rows for candidate aggregation.  A
+    second iteration can restrict the scan to selected diseases and attach the
+    full evidence metadata.  No per-run ``associations.csv`` is materialised.
+    """
+
+    def __init__(self, symbols, *, output_dir=None, data_dir=None):
+        if not isinstance(symbols, (list, tuple)) or not symbols:
+            raise ValueError("symbols 必须是非空 BATMAN 基因符号列表")
+        self.clean_symbols = _clean_symbols(symbols)
+        self.output_dir = Path(output_dir).resolve() if output_dir is not None else None
+        self.local_dir = resolve_data_dir(data_dir)
+        self.started_at = now()
+        self.finished_at = None
+        self.manifest, self.grouped = _load_manifest(self.local_dir)
+        self.targets, aliases, approved_symbols = _load_targets(
+            self.local_dir, self.grouped["target"])
+        self.diseases_by_id = _load_diseases(self.local_dir, self.grouped["disease"])
+        self.disease_metadata = _load_disease_metadata(
+            self.local_dir, self.grouped["disease"])
+        self.disease_entity_types = _load_disease_entity_types(
+            self.local_dir, self.grouped["disease"])
+
+        self.resolved = []
+        self.unresolved = []
+        input_to_target = {}
+        for symbol in self.clean_symbols:
+            approved_matches = approved_symbols.get(symbol.casefold(), set())
+            matches = approved_matches or aliases.get(symbol.casefold(), set())
+            if len(matches) == 1:
+                target_id = next(iter(matches))
+                input_to_target[symbol] = target_id
+                self.resolved.append({
+                    "symbol": symbol,
+                    "ensembl_id": target_id,
+                    "approved_symbol": self.targets[target_id]["approved_symbol"],
+                    "mapping": "approved_symbol" if approved_matches else "target_alias",
+                })
+            elif not matches:
+                self.unresolved.append({
+                    "gene_symbol": symbol,
+                    "reason": "target symbol or alias not found",
+                })
+            else:
+                self.unresolved.append({
+                    "gene_symbol": symbol,
+                    "reason": "target alias is ambiguous",
+                    "candidate_target_ids": sorted(matches),
+                })
+        if not self.resolved:
+            raise RuntimeError("Open Targets 本地数据未解析任何 BATMAN 靶点")
+
+        self.target_to_symbols = defaultdict(list)
+        for symbol, target_id in input_to_target.items():
+            self.target_to_symbols[target_id].append(symbol)
+        self.wanted_targets = set(self.target_to_symbols)
+        self.association_rows_seen = 0
+        self.association_rows = 0
+        self.missing_disease_ids = set()
+        self.disease_keys = set()
+        self.summary_complete = False
+
+    def _selected_ids(self, selected_diseases):
+        if selected_diseases is None:
+            return None
+        selected = set(selected_diseases)
+        return {
+            disease_id for disease_id, name in self.diseases_by_id.items()
+            if _display_disease_key(disease_id, name) in selected
+        }
+
+    def iter_rows(self, selected_diseases=None, *, full_extra=False):
+        """Yield CSV-compatible dictionaries directly from the Parquet snapshot."""
+        import pyarrow.compute as pc
+
+        selected_ids = self._selected_ids(selected_diseases)
+        summary_pass = selected_ids is None
+        if selected_ids is not None and not selected_ids:
+            return
+        if summary_pass:
+            self.association_rows_seen = 0
+            self.association_rows = 0
+            self.missing_disease_ids.clear()
+            self.disease_keys.clear()
+            self.summary_complete = False
+
+        parquet = _parquet()
+        target_values = _arrow_string_array(sorted(self.wanted_targets))
+        disease_values = _arrow_string_array(sorted(selected_ids)) if selected_ids is not None else None
+        entries = self.grouped["association_overall_direct"]
+        phase = "open_targets" if summary_pass else "open_targets_evidence"
+        message = "流式汇总 Open Targets 疾病关联" if summary_pass else "读取 Top-K Open Targets 逐条证据"
+        for file_number, entry in enumerate(entries, 1):
+            report(phase, message, current=file_number - 1, total=len(entries), unit="个分片")
+            reader = parquet.ParquetFile(
+                self.local_dir / entry["dataset"] / entry["file"])
+            for batch in reader.iter_batches(columns=[
+                    "targetId", "diseaseId", "aggregationType", "aggregationValue",
+                    "associationScore", "evidenceCount", "currentNovelty"],
+                    batch_size=100_000):
+                target_mask = pc.is_in(_trim_ids(batch.column("targetId")), value_set=target_values)
+                if disease_values is not None:
+                    disease_mask = pc.is_in(_trim_ids(batch.column("diseaseId")), value_set=disease_values)
+                    target_mask = pc.and_(target_mask, disease_mask)
+                for row in batch.filter(target_mask).to_pylist():
+                    target_id = str(row.get("targetId") or "").strip()
+                    if target_id not in self.wanted_targets:
+                        continue
+                    if summary_pass:
+                        self.association_rows_seen += 1
+                    score = row.get("associationScore")
+                    if not isinstance(score, (int, float)) or not math.isfinite(float(score)) or float(score) < 0:
+                        continue
+                    disease_id = str(row.get("diseaseId") or "").strip()
+                    disease_name = self.diseases_by_id.get(disease_id)
+                    if not disease_id or not disease_name:
+                        if summary_pass and disease_id:
+                            self.missing_disease_ids.add(disease_id)
+                        continue
+                    disease_key = _display_disease_key(disease_id, disease_name)
+                    if summary_pass:
+                        self.disease_keys.add(disease_key)
+                    if full_extra:
+                        extra = {
+                            "data_mode": "local_snapshot",
+                            "direction": "target_to_disease",
+                            "release": self.manifest["release"],
+                            "target_id": target_id,
+                            "ensembl_id": target_id,
+                            "approved_symbol": self.targets[target_id]["approved_symbol"],
+                            "disease_name": disease_name,
+                            "entity_type": self.disease_entity_types.get(disease_id, "phenotype"),
+                            "aggregation_type": row.get("aggregationType"),
+                            "aggregation_value": row.get("aggregationValue"),
+                            "association_score": row.get("associationScore"),
+                            "evidence_count": row.get("evidenceCount"),
+                            "current_novelty": row.get("currentNovelty"),
+                            "source_file": entry["file"],
+                        }
+                        extra.update(_disease_extra(self.disease_metadata, disease_id))
+                    else:
+                        extra = {"entity_type": self.disease_entity_types.get(
+                            disease_id, "phenotype")}
+                    for symbol in self.target_to_symbols[target_id]:
+                        if summary_pass:
+                            self.association_rows += 1
+                        yield {
+                            "disease": disease_key,
+                            "gene_symbol": symbol,
+                            "score": "%.12g" % float(score),
+                            "source": "open_targets",
+                            "extra": extra,
+                        }
+            report(phase, message, current=file_number, total=len(entries), unit="个分片")
+        if summary_pass:
+            self.summary_complete = True
+            self.finished_at = now()
+
+    def metadata(self):
+        if not self.summary_complete:
+            raise RuntimeError("Open Targets 流式关联尚未完成首遍扫描")
+        manifest_path = self.local_dir / "manifest.json"
+        provenance = {
+            "sources": {"associations": {
+                "complete": True,
+                "source_url": DOWNLOADS_URL,
+                "accessed_at": str(self.manifest.get("downloaded_at") or date.today().isoformat()).split("T", 1)[0],
+                "mode": "local_snapshot_streaming",
+                "direction": "target_to_disease",
+                "release": self.manifest["release"],
+                "data_dir": str(self.local_dir),
+                "manifest_sha256": digest(manifest_path),
+                "raw_files": [],
+                "dataset": "association_overall_direct",
+                "dataset_files": [entry for entry in self.grouped["association_overall_direct"]],
+                "queried_symbols": self.clean_symbols,
+                "resolved_symbols": [item["symbol"] for item in self.resolved],
+                "unresolved_symbols": [item["gene_symbol"] for item in self.unresolved],
+                "missing_disease_ids": sorted(self.missing_disease_ids),
+                "diseases": sorted(self.disease_keys),
+                "selection": {
+                    "top_k_per_target": None,
+                    "min_score": None,
+                    "raw_rows_complete": True,
+                    "score_field": "associationScore",
+                    "datasource_scores_available": False,
+                    "persistence": "Top-K evidence only; full rows processed but not materialised",
+                },
+                "coverage": {
+                    "target_files": len(self.grouped["target"]),
+                    "disease_files": len(self.grouped["disease"]),
+                    "association_files": len(self.grouped["association_overall_direct"]),
+                    "resolved_target_count": len(self.wanted_targets),
+                    "association_rows_seen": self.association_rows_seen,
+                },
+            }},
+            "mapping": {
+                "confirmed": True,
+                "method": "Open Targets approvedSymbol plus symbolSynonyms/obsoleteSymbols/synonyms; Ensembl target IDs retained",
+                "version": "Open Targets Platform release " + self.manifest["release"],
+                "raw_files": [],
+            },
+            "collection": {
+                "started_at": self.started_at,
+                "finished_at": self.finished_at,
+                "association_rows": self.association_rows,
+                "resolved_count": len(self.resolved),
+                "unresolved_count": len(self.unresolved),
+                "top_k_per_target": None,
+                "min_score": None,
+                "mode": "local_snapshot_streaming",
+                "direction": "target_to_disease",
+                "materialized_associations_csv": False,
+            },
+        }
+        return {
+            "output_dir": str(self.output_dir) if self.output_dir is not None else None,
+            "associations": self.association_rows,
+            "diseases": len(self.disease_keys),
+            "resolved": len(self.resolved),
+            "unresolved": len(self.unresolved),
+            "provenance": provenance,
+        }
+
+
+def stream_open_targets_local_by_targets(symbols, output_dir=None, data_dir=None):
+    """Prepare the non-materialising reader used by the forward agent."""
+    return LocalTargetAssociationStream(
+        symbols, output_dir=output_dir, data_dir=data_dir)
 
 
 def collect_open_targets_local_by_targets(symbols, output_dir,

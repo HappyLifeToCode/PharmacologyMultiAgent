@@ -30,7 +30,9 @@ def snapshot(root):
     pairs += [("MONDO_99", 0, .8), ("HP_1", 2, .9), ("MONDO_2", 0, float("nan")), ("MONDO_2", 1, -.1)]
     tables["association_overall_direct"] = pa.table({
         "diseaseId": [d for d, _, _ in pairs], "targetId": ["T" + str(t) for _, t, _ in pairs],
-        "associationScore": [s for _, _, s in pairs]})
+        "associationScore": [s for _, _, s in pairs], "aggregationType": ["mean"] * len(pairs),
+        "aggregationValue": ["mean"] * len(pairs), "evidenceCount": [1] * len(pairs),
+        "currentNovelty": [0.1] * len(pairs)})
     for dataset, table in tables.items():
         directory = root / dataset
         directory.mkdir(parents=True)
@@ -190,3 +192,26 @@ def test_query_integration_exposes_background_or_fallback(monkeypatch, tmp_path,
         assert result["candidates"][0]["specificity"]["score"] == 1
         assert result["ranking"]["source_fingerprint"] == value["fingerprint"]
         assert result["ranking"]["available_orders"] == ["support", "background"]
+
+
+def test_real_stream_retains_both_views_and_layer_reference_without_csv(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    snapshot(data)
+    value = background.load(data, cache_dir=tmp_path / "cache")
+    monkeypatch.setattr(background, "load", lambda *args, **kwargs: value)
+    monkeypatch.setattr(forward, "query_targets", lambda *args, **kwargs: {
+        "genes": ["CFTR", "EGFR"], "relations": [{"gene_symbol": gene, "evidence": "known"} for gene in ["CFTR", "EGFR"]],
+        "per_herb": {}, "unmatched": []})
+    monkeypatch.setattr(forward, "collect_monarch_by_targets", lambda *args, **kwargs: {"records": [], "stats": {}, "snapshot": {}})
+    directory = tmp_path / "query"
+    result = forward.query(["白芍"], top_k=1, open_targets_data_dir=data, output_dir=directory)["result"]
+    assert result["ranking"]["default_order"] == "support"
+    assert result["candidates"][0]["disease_id"] == "MONDO_1"
+    assert result["background_candidates"][0]["disease_id"] == "MONDO_2"
+    assert result["layered_candidates"][0]["disease_id"] == "MONDO_0004992"
+    assert result["candidate_layers"]["purpose"].startswith("reference_only")
+    for item in result["candidates"] + result["background_candidates"] + result["broad_candidates"] + result["layered_candidates"]:
+        assert item["evidence"] and len(item["evidence"]) == item["evidence_row_count"]
+        assert item["evidence"][0]["record"]["approved_symbol"]
+    assert result["source_status"]["open_targets"]["meta"]["provenance"]["collection"]["materialized_associations_csv"] is False
+    assert not (directory / "open_targets/associations.csv").exists()

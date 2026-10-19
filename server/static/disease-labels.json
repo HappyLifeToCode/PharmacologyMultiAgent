@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-19T11:52:23.485333+00:00",
+  "generated_at": "2026-10-19T13:00:06.105598+00:00",
   "sources": {
     "wikidata": {
       "url": "https://query.wikidata.org/sparql",
@@ -31,6 +31,10 @@
     },
     "EFO:0600064": {
       "label": "血清脂多糖活性（指标）",
+      "source": "project_glossary"
+    },
+    "EFO:1001461": {
+      "label": "内皮功能障碍",
       "source": "project_glossary"
     },
     "MONDO:0000004": {
@@ -2018,6 +2022,10 @@
       "source": "wikidata",
       "wikidata_id": "Q9386865"
     },
+    "MONDO:0002025": {
+      "label": "精神障碍",
+      "source": "project_glossary"
+    },
     "MONDO:0002026": {
       "label": "念珠菌症",
       "source": "wikidata",
@@ -3904,6 +3912,10 @@
       "source": "wikidata",
       "wikidata_id": "Q847583"
     },
+    "MONDO:0004995": {
+      "label": "心血管疾病",
+      "source": "project_glossary"
+    },
     "MONDO:0005002": {
       "label": "慢性阻塞性肺病",
       "source": "wikidata",
@@ -3918,6 +3930,13 @@
       "label": "肾脏透明细胞肉瘤",
       "source": "wikidata",
       "wikidata_id": "Q5130614"
+    },
+    "MONDO:0005010": {
+      "label": "冠状动脉疾病",
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
     },
     "MONDO:0005015": {
       "label": "糖尿病",
@@ -3972,6 +3991,10 @@
       "label": "高血压",
       "source": "wikidata",
       "wikidata_id": "Q41861"
+    },
+    "MONDO:0005046": {
+      "label": "免疫系统疾病",
+      "source": "project_glossary"
     },
     "MONDO:0005047": {
       "label": "不孕",
@@ -4379,6 +4402,10 @@
       "label": "龋齿",
       "source": "wikidata",
       "wikidata_id": "Q133772"
+    },
+    "MONDO:0005277": {
+      "label": "偏头痛",
+      "source": "project_glossary"
     },
     "MONDO:0005279": {
       "label": "肺栓塞",
@@ -13254,6 +13281,10 @@
       "label": "癌症",
       "source": "project_glossary"
     },
+    "cardiovascular disorder": {
+      "label": "心血管疾病",
+      "source": "project_glossary"
+    },
     "chronic kidney disease": {
       "label": "慢性肾脏病",
       "source": "project_glossary"
@@ -13280,7 +13311,24 @@
     },
     "coronary artery disease": {
       "label": "冠状动脉疾病",
-      "source": "project_glossary"
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
+    },
+    "coronary artery disorder": {
+      "label": "冠状动脉疾病",
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
+    },
+    "coronary heart disease": {
+      "label": "冠状动脉疾病",
+      "source": "project_glossary",
+      "input_aliases": [
+        "冠心病"
+      ]
     },
     "crohn disease": {
       "label": "克罗恩病",
@@ -13304,6 +13352,10 @@
     },
     "drug dependence": {
       "label": "药物依赖",
+      "source": "project_glossary"
+    },
+    "endothelial dysfunction": {
+      "label": "内皮功能障碍",
       "source": "project_glossary"
     },
     "epilepsy": {
@@ -13370,6 +13422,10 @@
       "label": "甲状腺功能减退症",
       "source": "project_glossary"
     },
+    "immune system disorder": {
+      "label": "免疫系统疾病",
+      "source": "project_glossary"
+    },
     "inflammatory bowel disease": {
       "label": "炎症性肠病",
       "source": "project_glossary"
@@ -13404,6 +13460,10 @@
     },
     "methamphetamine dependence": {
       "label": "甲基苯丙胺依赖",
+      "source": "project_glossary"
+    },
+    "migraine disorder": {
+      "label": "偏头痛",
       "source": "project_glossary"
     },
     "multiple sclerosis": {
@@ -13484,6 +13544,10 @@
     },
     "psoriasis": {
       "label": "银屑病",
+      "source": "project_glossary"
+    },
+    "psychiatric disorder": {
+      "label": "精神障碍",
       "source": "project_glossary"
     },
     "rheumatoid arthritis": {

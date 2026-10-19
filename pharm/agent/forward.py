@@ -15,7 +15,13 @@ from ..batman.resolver import query_targets
 from ..batman.formulas import SOURCE as FORMULA_SOURCE, formula_candidates, list_formulas
 from ..batman import formula_catalog
 from ..core.common import ROOT, now, write_json
-from ..discovery.query import CONFIDENCE_VERSION, _confidence
+from ..discovery.query import (
+    BASE_ASSOCIATION_SCORE,
+    CONFIDENCE_VERSION,
+    STRICT_ASSOCIATION_SCORE,
+    _confidence,
+    candidate_layer_sort_key,
+)
 from ..diseases.monarch_local import collect_monarch_by_targets
 from ..diseases.open_targets import collect_open_targets_by_targets
 from .progress import report
@@ -91,7 +97,7 @@ def _record_extra(row):
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _aggregate(herb_result, iter_associations, top_k, *, background=None, selection=None, audit=None):
+def _aggregate(herb_result, iter_associations, top_k, iter_selected_associations=None, *, background=None, selection=None, audit=None):
     """Summarise rows first; load full evidence only for the selected candidates."""
     known = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "known"}
     predicted = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "predicted"} - known
@@ -116,9 +122,13 @@ def _aggregate(herb_result, iter_associations, top_k, *, background=None, select
             "disease": disease,
             "entity_type": "disease",
             "matched_genes": set(),
+            "base_supported_genes": set(),
+            "strict_supported_genes": set(),
             "evidence_row_count": 0,
             "source_gene_counts": defaultdict(set),
             "source_scores": {},
+            "max_association_score": None,
+            "score_sum": 0.0,
         })
         candidate["matched_genes"].add(gene)
         source = str(row.get("source") or "associations")
@@ -133,6 +143,16 @@ def _aggregate(herb_result, iter_associations, top_k, *, background=None, select
             score_summary = candidate["source_scores"].setdefault(source, {"max": numeric_score, "count": 0})
             score_summary["max"] = max(score_summary["max"], numeric_score)
             score_summary["count"] += 1
+        # Monarch is an OMIM-like evidence supplement. Only Open Targets scores
+        # determine the base/strict reference layers, not the default order.
+        if source == "open_targets" and numeric_score is not None and math.isfinite(numeric_score):
+            candidate["max_association_score"] = numeric_score if candidate["max_association_score"] is None else max(
+                candidate["max_association_score"], numeric_score)
+            candidate["score_sum"] += numeric_score
+            if numeric_score > BASE_ASSOCIATION_SCORE:
+                candidate["base_supported_genes"].add(gene)
+            if numeric_score >= STRICT_ASSOCIATION_SCORE:
+                candidate["strict_supported_genes"].add(gene)
 
     prepared = disease_background.prepare_inputs(input_genes, background) if background else None
     result = []
@@ -150,6 +170,11 @@ def _aggregate(herb_result, iter_associations, top_k, *, background=None, select
             "disease_coverage": None,
             "source_gene_counts": {source: len(genes) for source, genes in candidate["source_gene_counts"].items()},
             "source_scores": candidate["source_scores"],
+            "support_target_count": len(candidate["base_supported_genes"]),
+            "strict_support_target_count": len(candidate["strict_supported_genes"]),
+            "strict_supported": bool(candidate["strict_supported_genes"]),
+            "max_association_score": candidate["max_association_score"],
+            "score_sum": round(candidate["score_sum"], 12),
             "evidence": [],
         }
         item["confidence"] = _confidence(item, len(input_genes), known, predicted)
@@ -157,13 +182,13 @@ def _aggregate(herb_result, iter_associations, top_k, *, background=None, select
             candidate["disease"], candidate["source_gene_counts"].get("open_targets", set()), input_genes, background, prepared=prepared)
         item.update(scope, specificity=specificity)
         result.append(item)
-    result.sort(key=lambda item: (
-        -float(item["confidence"]["value"]),
-        -int(item["matched_count"]),
-        -len(item["source_gene_counts"]),
-        item["disease"],
-    ))
+    result.sort(key=lambda item: (-float(item["confidence"]["value"]), -item["matched_count"],
+                                 -len(item["source_gene_counts"]), item["disease"]))
     full_count = len(result)
+    base = [item for item in result if item["support_target_count"] > 0]
+    layered = sorted(base, key=candidate_layer_sort_key)[:top_k]
+    layer_counts = {"complete": full_count, "base": len(base),
+                    "strict": sum(item["strict_supported"] for item in base), "top": len(layered)}
     for rank, item in enumerate(result, 1):
         item["raw_rank"] = rank
     raw_ranking = [{key: item[key] for key in ("disease", "disease_id", "raw_rank", "matched_count", "confidence", "disease_scope")}
@@ -188,13 +213,15 @@ def _aggregate(herb_result, iter_associations, top_k, *, background=None, select
     if selection is not None:
         selection.update(broad_candidates=broad, raw_ranking=raw_ranking,
                          background_candidates=alternative,
+                         layered_candidates=layered, layer_counts=layer_counts,
                          specific_candidate_count=len(specific), category_count=len(categories))
-    selected_by_disease = {item["disease"]: item for item in selected + alternative + broad}
+    selected_by_disease = {item["disease"]: item for item in selected + alternative + broad + layered}
     report("evidence", "整理两种排序的完整证据", detail=f"默认 {len(selected)} 项，背景对照 {len(alternative)} 项，大类 {len(broad)} 项")
     # Release unselected sets before rereading the frozen source files.
-    del candidates, result, specific, categories
+    del candidates, result, specific, categories, base
     if selected_by_disease:
-        for row in iter_associations():
+        selected_rows = iter_selected_associations(set(selected_by_disease)) if iter_selected_associations is not None else iter_associations()
+        for row in selected_rows:
             disease = _normalise_disease_key(row.get("disease"))
             if disease not in selected_by_disease:
                 continue
@@ -243,14 +270,21 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     source_status = {}
     association_paths = []
     monarch_rows = []
+    ot_stream = None
     ot_dir = directory / "open_targets"
     report("open_targets", "读取 Open Targets 靶点关联")
     try:
-        ot_meta = collect_open_targets_by_targets(
-            herb_result["genes"], ot_dir, top_k_per_target=None, min_score=0.0,
-            mode="local", data_dir=open_targets_data_dir)
-        association_paths.append(ot_dir / "associations.csv")
-        source_status["open_targets"] = {"status": "succeeded", "meta": ot_meta}
+        ot_source = collect_open_targets_by_targets(
+            herb_result["genes"], ot_dir, top_k_per_target=None, min_score=None,
+            mode="local", data_dir=open_targets_data_dir, stream=True)
+        if hasattr(ot_source, "iter_rows") and hasattr(ot_source, "metadata"):
+            ot_stream = ot_source
+            source_status["open_targets"] = {"status": "succeeded", "meta": None}
+        else:
+            # Compatibility path for injected collectors and explicit legacy
+            # adapters that still materialise the generic CSV contract.
+            association_paths.append(ot_dir / "associations.csv")
+            source_status["open_targets"] = {"status": "succeeded", "meta": ot_source}
     except RuntimeError as exc:
         source_status["open_targets"] = {"status": "partial", "error": str(exc)}
 
@@ -263,14 +297,16 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         source_status["monarch"] = {"status": "partial", "error": str(exc)}
 
     def iter_associations():
+        if ot_stream is not None:
+            yield from ot_stream.iter_rows()
         for path in association_paths:
             yield from _read_associations(path)
         yield from monarch_rows
 
     background, background_error = None, None
-    ot_source = source_status.get("open_targets", {})
-    metadata = ot_source.get("meta", {}).get("provenance", {}).get("sources", {}).get("associations", {})
-    if ot_source.get("status") == "succeeded" and metadata.get("mode") == "local_snapshot":
+    ot_status = source_status.get("open_targets", {})
+    metadata = (ot_status.get("meta") or {}).get("provenance", {}).get("sources", {}).get("associations", {})
+    if ot_status.get("status") == "succeeded" and (getattr(ot_stream, "local_dir", None) is not None or metadata.get("mode") == "local_snapshot"):
         try:
             background = disease_background.load(open_targets_data_dir)
         except (RuntimeError, OSError, ValueError) as exc:
@@ -278,9 +314,24 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
     else:
         background_error = "完整 Open Targets 背景不可用，本次只分出已登记大类，沿用原支持度排序"
     selection = {}
+    def iter_selected_associations(selected_diseases):
+        if ot_stream is not None:
+            yield from ot_stream.iter_rows(selected_diseases=selected_diseases, full_extra=True)
+        for path in association_paths:
+            for row in _read_associations(path):
+                if _normalise_disease_key(row.get("disease")) in selected_diseases:
+                    yield row
+        for row in monarch_rows:
+            if _normalise_disease_key(row.get("disease")) in selected_diseases:
+                yield row
+
     report("aggregating", "汇总候选疾病")
     selected, input_genes, full_count, associated_genes = _aggregate(
-        herb_result, iter_associations, top_k, background=background, selection=selection)
+        herb_result, iter_associations, top_k, iter_selected_associations,
+        background=background, selection=selection)
+    layer_counts = selection.pop("layer_counts")
+    if ot_stream is not None:
+        source_status["open_targets"]["meta"] = ot_stream.metadata()
     if not selected and not selection["broad_candidates"]:
         raise RuntimeError("两个本地疾病关联来源均未产生可用候选疾病")
     result = {
@@ -310,6 +361,15 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         "batman_source": herb_result.get("retrieval", {"mode": "local"}),
         "candidates": selected,
         "candidate_count": full_count,
+        "candidate_layers": {
+            "counts": layer_counts,
+            "purpose": "reference_only; default_order=support",
+            "rules": {"base_score": "> %.6g" % BASE_ASSOCIATION_SCORE,
+                      "strict_score": ">= %.6g" % STRICT_ASSOCIATION_SCORE,
+                      "ranking": ["strict_supported", "strict_support_target_count",
+                                  "support_target_count", "max_association_score", "score_sum", "disease_id"],
+                      "monarch_ranking": "supplement_only"},
+        },
         "source_status": source_status,
         "confidence_version": CONFIDENCE_VERSION,
         **selection,

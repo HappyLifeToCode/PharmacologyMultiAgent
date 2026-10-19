@@ -123,11 +123,15 @@ function renderForwardEvidence(candidate) {
 
 function renderForwardResult(result, order) {
   const panel = $("forward-result");
-  const nativeOrder = result.ranking?.default_order || (result.ranking?.background_status === "succeeded" ? "background" : "support");
+  const nativeOrder = result.ranking?.default_order || (result.ranking?.background_status === "succeeded" ? "background" : result.candidate_layers ? "layers" : "support");
   const switchable = nativeOrder === "support" && Array.isArray(result.background_candidates);
   const selectedOrder = switchable && order === "background" && result.ranking?.available_orders?.includes("background") ? "background" : nativeOrder;
   const candidates = selectedOrder === "background" && Array.isArray(result.background_candidates) ? result.background_candidates : result.candidates || [];
   const orderSelect = $("forward-ranking-order");
+  orderSelect.querySelector('[value="layers"]')?.remove();
+  if (nativeOrder === "layers") {
+    const option = document.createElement("option"); option.value = "layers"; option.textContent = "归档OT分层排序"; orderSelect.append(option);
+  }
   orderSelect.disabled = !switchable;
   orderSelect.querySelector('[value="background"]').disabled = result.ranking?.background_status !== "succeeded";
   orderSelect.value = selectedOrder;
@@ -194,6 +198,18 @@ function renderForwardResult(result, order) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     }
     rawRows.append(row);
+  }
+  const layered = $("forward-layered-reference");
+  const layeredCandidates = result.layered_candidates || (nativeOrder === "layers" ? result.candidates : []) || [];
+  layered.hidden = !layeredCandidates.length;
+  const layeredRows = layered.querySelector("tbody"); layeredRows.replaceChildren();
+  for (const candidate of layeredCandidates) {
+    const row = document.createElement("tr");
+    for (const value of [DiseaseLabels.format(candidate, true), candidate.strict_support_target_count,
+      candidate.support_target_count, candidate.max_association_score]) {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    }
+    row.addEventListener("click", () => renderForwardEvidence(candidate)); layeredRows.append(row);
   }
   $("forward-limitation").textContent = result.limitation || "候选关联不等于疗效或治疗推荐。";
   const unmatched = [];

@@ -1,5 +1,11 @@
 # 项目交接说明
 
+## 2026-10-19 远端合并与当前known-only对照
+
+合并远端2434ec4及其流式读取、中文自然问句疾病解析、OT证据分层实现。默认仍按用户最新选择保留原支持度，背景为可选主视图；layered_candidates及candidate_layers只提供独立OT参考和完整证据，不作为第三种主排序。旧分层归档保留原生顺序，资源版本已更新。
+
+用当前known-only重新查询后，温经汤-PCOS完整非大类名次104→27，半夏白术天麻汤-原发性高血压330→501；两例均未进Top-20，不能判定普遍优劣。旧温经汤归档含预测关系，旧103→38/316→458及CSV性能对照仅保留历史意义。新真实响应、完整名次及验证见local/checks/merge-ranking-20261019/和RANKING_COMPARISON.md；不回写旧归档。生产8766继续用户终端管理。
+
 ## 2026-10-19 默认支持度、双视图对照与中文补充
 
 后续用户确认默认回到分出大类后的原支持度，背景校正仅为辅助/可选排序。`candidates` 为原支持度非大类Top-K，`background_candidates` 独立从完整集合选择背景Top-K；两者及大类的完整证据共用两次来源扫描，前端切换不发新查询。首页追问保存排序快照，切换原消息不改变旧追问的对应疾病；导出含双列表和export_view。旧单列表归档保持原生顺序且禁用切换。
@@ -18,7 +24,7 @@
 
 ## 2026-10-15 查询加速与进度
 
-新增 `pharm/agent/progress.py`、`query_cache.py` 与前端 `query-progress.js`。实际阶段/计数通过原 request 状态接口读取，首次 POST 等待期间及刷新恢复均显示；进度文件独立于归档，不因轮询失败取消任务。Open Targets 采集先用 Arrow 过滤 ID，保留原完整证据和计算语义。缓存严格核对输入、源文件真实哈希、代码、配置及原归档，成功才保存；命中仍创建新运行，明确引用原计算，不复用半成品。来源 CSV 留在原运行，缓存清理不删研究归档。完整行为与关闭方式见 [查询执行说明](QUERY_EXECUTION.md)。
+新增 `pharm/agent/progress.py`、`query_cache.py` 与前端 `query-progress.js`。实际阶段/计数通过原 request 状态接口读取，首次 POST 等待期间及刷新恢复均显示；进度文件独立于归档，不因轮询失败取消任务。Open Targets 采集先用 Arrow 过滤 ID，保留原完整证据和计算语义。缓存严格核对输入、源文件真实哈希、代码、配置及原归档，成功才保存；命中仍创建新运行，明确引用原计算，不复用半成品。旧来源 CSV 留在原运行；新正向流式来源改为Parquet版本/哈希及返回证据，缓存清理不删研究归档。完整行为与关闭方式见 [查询执行说明](QUERY_EXECUTION.md)。
 
 全量 **322 passed, 3 skipped**；JavaScript 语法与 diff 空白检查通过，真实 14 分片筛选结果哈希一致。工程验证不构成科学验收。未操作生产 8766，加载新版后端需用户在自己的终端重启；本机验证及最终 Git 状态见 AGENTS.md。
 
@@ -52,7 +58,7 @@
 
 最新起点 main/`be2409c`，默认首页是会话，研究工作台在 `/workbench`；自然问句方剂识别与 BATMAN 本地优先回退已经合入，不能把下方 10-12 页面状态当最新。10-14 新增疾病中文名称展示与正向请求取消，不改变研究数据和排序。
 
-首页/工作台共用 `server/static/disease-labels.js` 与提交的本地 `disease-labels.json`：2,620 个 MONDO ID、66 个精确英文名/别名，来源 Wikidata CC0 标签与 `pharm/diseases/chinese_labels_overrides.json` 的项目译名。旧归档读取后直接显示中文，无需重算、不回写旧文件；未知译名明确标注。维护与来源见 DATA_CONTRACT，更新脚本不在用户查询时运行。
+首页/工作台共用 `server/static/disease-labels.js` 与提交的本地 `disease-labels.json`：2,621 个 MONDO ID、68 个精确英文名/别名，来源 Wikidata CC0 标签与 `pharm/diseases/chinese_labels_overrides.json` 的项目译名。反向查询可使用词表中文名和明确维护的 `input_aliases` 从完整问句提取疾病实体，仍以原始 ID 查询；旧归档读取后直接显示中文，无需重算、不回写旧文件。未知译名明确标注，维护与来源见 DATA_CONTRACT，更新脚本不在用户查询时运行。
 
 用户最后指令为“关闭页签才自动停止”，覆盖先前的页面离开/连接报错即取消策略。`pharm/agent/jobs.py` 管理独立子进程，`query-presence.js` 用 sessionStorage 页签编号 + SSE 持续连接跟踪 owner_id；项目内导航/刷新重连同页签、切换标签继续，断开超过 10 秒才停止该页签的查询。POST 断开/前端报错可恢复原查询，状态接口 `/api/agent/forward/request/<request_id>` 支持接续；服务实例变更的运行记录返回 interrupted。主动重试 supersedes 先等待旧任务退出，显式 cancel 入口仍保留；无 owner_id 的旧 API 仍在 HTTP 断开时停止。任务记录见 local/agent/jobs/ 与查询目录 job.json，重试从头运行、不自动续算。纯 ASGI 保留访问校验/断开信号；工作台新标签页打开，归档 GET 可只重读。
 
