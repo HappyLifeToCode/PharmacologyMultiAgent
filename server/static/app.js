@@ -121,9 +121,17 @@ function renderForwardEvidence(candidate) {
     : "";
 }
 
-function renderForwardResult(result) {
+function renderForwardResult(result, order) {
   const panel = $("forward-result");
-  const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+  const nativeOrder = result.ranking?.default_order || (result.ranking?.background_status === "succeeded" ? "background" : "support");
+  const switchable = nativeOrder === "support" && Array.isArray(result.background_candidates);
+  const selectedOrder = switchable && order === "background" && result.ranking?.available_orders?.includes("background") ? "background" : nativeOrder;
+  const candidates = selectedOrder === "background" && Array.isArray(result.background_candidates) ? result.background_candidates : result.candidates || [];
+  const orderSelect = $("forward-ranking-order");
+  orderSelect.disabled = !switchable;
+  orderSelect.querySelector('[value="background"]').disabled = result.ranking?.background_status !== "succeeded";
+  orderSelect.value = selectedOrder;
+  orderSelect.onchange = () => renderForwardResult(result, orderSelect.value);
   panel.hidden = false;
   const input = result.input || {};
   const displayHerbs = FormulaPicker.compositionNames(input);
@@ -163,6 +171,7 @@ function renderForwardResult(result) {
     + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个）。";
   if (QueryProgress.cacheNote(result)) $("forward-summary").textContent += " " + QueryProgress.cacheNote(result);
   $("forward-ranking-note").textContent = result.ranking ? result.ranking.note
+    + (switchable ? " 当前排序：" + (selectedOrder === "background" ? "背景校正（探索）" : "原支持度") + "；切换不重新计算。" : " 此归档仅保留生成时排序。")
     + (result.ranking.background_error ? " 背景说明：" + result.ranking.background_error : "") : "旧归档保留原排序，未回写或重新计算。";
   const categories = $("forward-categories");
   categories.hidden = !result.broad_candidates?.length;

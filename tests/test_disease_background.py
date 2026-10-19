@@ -107,19 +107,32 @@ def test_corrected_ranking_separates_categories_and_preserves_original_evidence(
     selection = {}
     selected, _, total, _ = forward._aggregate(herbs, lambda: iter(rows), 3, background=value, selection=selection)
     assert total == 4
-    assert selected[0]["disease"] == "MONDO:2 | Specific disease"
-    assert selected[-1]["disease"] == "MONDO:999 | Monarch-only disease"
-    assert selected[-1]["specificity"] is None
+    assert [item["disease"] for item in selected] == [item["disease"] for item in legacy]
+    assert selection["background_candidates"][0]["disease"] == "MONDO:2 | Specific disease"
+    assert selection["background_candidates"][-1]["disease"] == "MONDO:999 | Monarch-only disease"
+    assert selection["background_candidates"][-1]["specificity"] is None
     assert len(selected) == 3 and len(selection["broad_candidates"]) == 1
     assert selection["broad_candidates"][0]["disease"] == "MONDO:0004992 | cancer"
     by_name = {item["disease"]: item for item in legacy}
-    for candidate in selected + selection["broad_candidates"]:
+    for candidate in selected + selection["background_candidates"] + selection["broad_candidates"]:
         assert candidate["evidence_row_count"] == len(candidate["evidence"])
         if candidate["disease"] in by_name:
             assert candidate["confidence"] == by_name[candidate["disease"]]["confidence"]
             assert candidate["evidence"] == by_name[candidate["disease"]]["evidence"]
     assert selection["specific_candidate_count"] == 3 and selection["category_count"] == 1
     assert selection["raw_ranking"][0]["raw_rank"] == 1
+    # Each view selects from the complete candidate population before Top-K.
+    top = {}
+    main = forward._aggregate(herbs, lambda: iter(rows), 1, background=value, selection=top)[0]
+    assert main[0]["disease"] != top["background_candidates"][0]["disease"]
+    assert top["background_candidates"][0]["evidence"]
+    audit = {}
+    repeated = {}
+    forward._aggregate(herbs, lambda: iter(reversed(rows)), 3, background=value, selection=repeated, audit=audit)
+    assert [item["disease"] for item in repeated["background_candidates"]] == [item["disease"] for item in selection["background_candidates"]]
+    assert [item["specificity"] for item in repeated["background_candidates"]] == [item["specificity"] for item in selection["background_candidates"]]
+    assert sorted(item["support_rank"] for item in audit.values()) == [1, 2, 3]
+    assert sorted(item["background_rank"] for item in audit.values()) == [1, 2, 3]
 
 
 def test_only_category_results_and_unavailable_background_are_explicit():
@@ -166,9 +179,14 @@ def test_query_integration_exposes_background_or_fallback(monkeypatch, tmp_path,
     assert result["candidates"][0]["disease_id"] == "MONDO_2"
     assert result["broad_candidates"][0]["disease_id"] == "MONDO_0004992"
     assert result["ranking"]["background_status"] == ("unavailable" if unavailable else "succeeded")
+    assert result["ranking"]["default_order"] == "support"
+    assert result["ranking"]["scientific_validation"] == "pending_literature_benchmark"
     if unavailable:
         assert result["candidates"][0]["specificity"] is None
         assert result["ranking"]["background_error"] == "background unavailable"
+        assert result["ranking"]["available_orders"] == ["support"]
+        assert result["background_candidates"] == []
     else:
         assert result["candidates"][0]["specificity"]["score"] == 1
         assert result["ranking"]["source_fingerprint"] == value["fingerprint"]
+        assert result["ranking"]["available_orders"] == ["support", "background"]

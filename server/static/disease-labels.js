@@ -6,12 +6,12 @@ const DiseaseLabels = (() => {
   let pending = null;
 
   function identifier(value) {
-    return String(value || "").trim().replace(/^MONDO_/, "MONDO:");
+    return String(value || "").trim().replace(/^(MONDO|EFO|HP|OBA|DOID|Orphanet|OTAR)_/, "$1:");
   }
 
   async function load() {
     if (!pending) {
-      pending = fetch("/assets/disease-labels.json").then(async (response) => {
+      pending = fetch("/assets/disease-labels.json?v=20261019-expanded", { cache: "no-cache" }).then(async (response) => {
         if (!response.ok) throw new Error("中文疾病词表暂不可用");
         const data = await response.json();
         if (!data.by_id || !data.by_name) throw new Error("中文疾病词表格式异常");

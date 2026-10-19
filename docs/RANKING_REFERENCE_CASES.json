@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "status": "provisional_retrieval_reference_not_clinical_ground_truth",
+  "fixed_before_rank_evaluation": true,
+  "evaluation_cutoffs": [10, 20, 50],
+  "notes": [
+    "两例仅供初步关联检索对照，不足以判断两种算法谁更准确。",
+    "方剂名称相符；研究的具体组成、剂量、加减和本项目内置组成尚未逐味核对。",
+    "文献可能已被关联数据库收录，不是独立外部验证集；没有负例，不计算precision或临床疗效。",
+    "只按指定疾病ID评估，父病/亚型不自动合并或算作命中。"
+  ],
+  "cases": [
+    {
+      "case_id": "wenjing_pcos",
+      "formula": "温经汤",
+      "disease_id": "MONDO_0008487",
+      "disease_name": "polycystic ovary syndrome",
+      "pmid": "16552830",
+      "doi": "10.1142/S0192415X06003746",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/16552830/",
+      "title": "Effects of switching to wen-jing-tang (unkei-to) from preceding herbal preparations selected by eight-principle pattern identification on endocrinological status and ovulatory induction in women with polycystic ovary syndrome.",
+      "evidence_note": "2006年研究；摘要记载54名此前未排卵患者分为两组各27名。特定人群和换方设计，不能推广为所有患者的适应症。"
+    },
+    {
+      "case_id": "banxia_essential_hypertension",
+      "formula": "半夏白术天麻汤",
+      "disease_id": "MONDO_0001134",
+      "disease_name": "essential hypertension",
+      "pmid": "23320025",
+      "doi": "10.1155/2012/271462",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/23320025/",
+      "title": "Banxia baizhu tianma decoction for essential hypertension: a systematic review of randomized controlled trials.",
+      "evidence_note": "2012年系统综述纳入16项试验，作者指出方法学质量普遍较低、证据仍弱且安全性不确定；部分试验为加减方或合用降压药。"
+    }
+  ]
+}

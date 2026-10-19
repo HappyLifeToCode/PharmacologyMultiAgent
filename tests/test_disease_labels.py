@@ -1,4 +1,6 @@
 from scripts.update_disease_labels import build_glossary
+import json
+from pathlib import Path
 
 
 def test_glossary_language_priority_conflicts_and_exact_overrides():
@@ -16,3 +18,16 @@ def test_glossary_language_priority_conflicts_and_exact_overrides():
     assert data["excluded_conflicting_ids"] == ["MONDO:0000002"]
     assert "MONDO:0000003" not in data["by_id"]
     assert data["by_name"]["disease a"]["label"] == "疾病甲"
+
+
+def test_obesity_and_binge_eating_are_distinct_display_entities():
+    root = Path(__file__).resolve().parents[1]
+    data = json.loads((root / "server/static/disease-labels.json").read_text(encoding="utf-8"))
+    assert data["by_id"]["MONDO:0011122"]["label"] == "肥胖症"
+    assert data["by_id"]["MONDO:0005582"]["label"] == "暴食障碍"
+    assert data["by_id"]["MONDO:0005452"]["label"] == "神经性贪食症"
+    assert data["by_name"]["obesity disorder"]["label"] != data["by_name"]["binge eating disorder"]["label"]
+    assert data["by_name"]["depressive disorder"]["label"] == "抑郁障碍"
+    assert data["by_name"]["major depressive disorder"]["label"] == "重性抑郁障碍"
+    assert data["by_id"]["EFO:0009833"]["label"] == "肾损伤"
+    assert "指标" in data["by_id"]["EFO:0600064"]["label"]

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-14T04:23:19.307421+00:00",
+  "generated_at": "2026-10-19T11:52:23.485333+00:00",
   "sources": {
     "wikidata": {
       "url": "https://query.wikidata.org/sparql",
@@ -21,6 +21,18 @@
   },
   "excluded_conflicting_ids": [],
   "by_id": {
+    "EFO:0006890": {
+      "label": "纤维化（病理改变）",
+      "source": "project_glossary"
+    },
+    "EFO:0009833": {
+      "label": "肾损伤",
+      "source": "project_glossary"
+    },
+    "EFO:0600064": {
+      "label": "血清脂多糖活性（指标）",
+      "source": "project_glossary"
+    },
     "MONDO:0000004": {
       "label": "肾上腺皮质功能减退",
       "source": "wikidata",
@@ -2040,6 +2052,10 @@
       "label": "低血小板计数",
       "source": "wikidata",
       "wikidata_id": "Q585285"
+    },
+    "MONDO:0002050": {
+      "label": "抑郁障碍",
+      "source": "project_glossary"
     },
     "MONDO:0002052": {
       "label": "淋巴腺炎",
@@ -4439,6 +4455,10 @@
       "source": "wikidata",
       "wikidata_id": "Q8277"
     },
+    "MONDO:0005303": {
+      "label": "药物依赖",
+      "source": "project_glossary"
+    },
     "MONDO:0005305": {
       "label": "流鼻血",
       "source": "wikidata",
@@ -4679,6 +4699,10 @@
       "source": "wikidata",
       "wikidata_id": "Q133087"
     },
+    "MONDO:0005394": {
+      "label": "脑梗死",
+      "source": "project_glossary"
+    },
     "MONDO:0005396": {
       "label": "主動脈瘤",
       "source": "wikidata",
@@ -4713,6 +4737,10 @@
       "label": "膽癌",
       "source": "wikidata",
       "wikidata_id": "Q977787"
+    },
+    "MONDO:0005419": {
+      "label": "甲基苯丙胺依赖",
+      "source": "project_glossary"
     },
     "MONDO:0005420": {
       "label": "甲状腺功能减退症",
@@ -4753,6 +4781,10 @@
       "label": "进食障碍",
       "source": "wikidata",
       "wikidata_id": "Q373822"
+    },
+    "MONDO:0005452": {
+      "label": "神经性贪食症",
+      "source": "project_glossary"
     },
     "MONDO:0005457": {
       "label": "急性壓力障礙",
@@ -4974,9 +5006,8 @@
       "wikidata_id": "Q170990"
     },
     "MONDO:0005582": {
-      "label": "神经性贪食",
-      "source": "wikidata",
-      "wikidata_id": "Q64513386"
+      "label": "暴食障碍",
+      "source": "project_glossary"
     },
     "MONDO:0005583": {
       "label": "动物疾病",
@@ -6143,6 +6174,10 @@
       "source": "wikidata",
       "wikidata_id": "Q3144934"
     },
+    "MONDO:0006515": {
+      "label": "急性胰腺炎",
+      "source": "project_glossary"
+    },
     "MONDO:0006516": {
       "label": "老年性肌少症",
       "source": "wikidata",
@@ -7098,6 +7133,10 @@
       "source": "wikidata",
       "wikidata_id": "Q9390205"
     },
+    "MONDO:0007079": {
+      "label": "酒精依赖",
+      "source": "project_glossary"
+    },
     "MONDO:0007080": {
       "label": "糖皮质类固醇可抑制性醛固酮症",
       "source": "wikidata",
@@ -7955,6 +7994,10 @@
       "label": "甲狀腺毒性週期性麻痺症",
       "source": "wikidata",
       "wikidata_id": "Q2702863"
+    },
+    "MONDO:0008575": {
+      "label": "尼古丁依赖",
+      "source": "project_glossary"
     },
     "MONDO:0008599": {
       "label": "三叉神經痛",
@@ -9130,6 +9173,10 @@
       "source": "wikidata",
       "wikidata_id": "Q7234989"
     },
+    "MONDO:0011122": {
+      "label": "肥胖症",
+      "source": "project_glossary"
+    },
     "MONDO:0011184": {
       "label": "兒童期言語失用症",
       "source": "wikidata",
@@ -9639,6 +9686,10 @@
       "label": "炎症性肠病",
       "source": "wikidata",
       "wikidata_id": "Q917447"
+    },
+    "MONDO:0015193": {
+      "label": "胎儿水肿",
+      "source": "project_glossary"
     },
     "MONDO:0015194": {
       "label": "铁粒幼细胞性贫血",
@@ -10850,6 +10901,10 @@
       "source": "wikidata",
       "wikidata_id": "Q17154378"
     },
+    "MONDO:0018177": {
+      "label": "胶质母细胞瘤",
+      "source": "project_glossary"
+    },
     "MONDO:0018178": {
       "label": "小肠淋巴管扩张症",
       "source": "wikidata",
@@ -11429,6 +11484,10 @@
       "label": "胡桃夹综合征",
       "source": "wikidata",
       "wikidata_id": "Q1504516"
+    },
+    "MONDO:0019115": {
+      "label": "黑皮质素4受体缺乏所致肥胖症",
+      "source": "project_glossary"
     },
     "MONDO:0019117": {
       "label": "遗传性神经系统疾病",
@@ -13064,10 +13123,18 @@
       "source": "wikidata",
       "wikidata_id": "Q929963"
     },
+    "MONDO:0043510": {
+      "label": "脑损伤",
+      "source": "project_glossary"
+    },
     "MONDO:0044302": {
       "label": "先天性心脏病、面部异常及智力障碍相关疾病",
       "source": "wikidata",
       "wikidata_id": "Q69642903"
+    },
+    "MONDO:0045057": {
+      "label": "谵妄",
+      "source": "project_glossary"
     },
     "MONDO:0100177": {
       "label": "过敏性鼻炎",
@@ -13078,6 +13145,10 @@
       "label": "酮症倾向糖尿病",
       "source": "wikidata",
       "wikidata_id": "Q6395440"
+    },
+    "MONDO:0100192": {
+      "label": "肝衰竭",
+      "source": "project_glossary"
     },
     "MONDO:0100459": {
       "label": "无精症",
@@ -13108,9 +13179,21 @@
       "label": "铁过载",
       "source": "wikidata",
       "wikidata_id": "Q2025687"
+    },
+    "Orphanet:91088": {
+      "label": "其他代谢性疾病（大类）",
+      "source": "project_glossary"
     }
   },
   "by_name": {
+    "acute pancreatitis": {
+      "label": "急性胰腺炎",
+      "source": "project_glossary"
+    },
+    "alcohol dependence": {
+      "label": "酒精依赖",
+      "source": "project_glossary"
+    },
     "alzheimer disease": {
       "label": "阿尔茨海默病",
       "source": "project_glossary"
@@ -13135,8 +13218,24 @@
       "label": "心房颤动",
       "source": "project_glossary"
     },
+    "binge eating disorder": {
+      "label": "暴食障碍",
+      "source": "project_glossary"
+    },
+    "binge-eating disorder": {
+      "label": "暴食障碍",
+      "source": "project_glossary"
+    },
     "bipolar disorder": {
       "label": "双相障碍",
+      "source": "project_glossary"
+    },
+    "brain infarction": {
+      "label": "脑梗死",
+      "source": "project_glossary"
+    },
+    "brain injury": {
+      "label": "脑损伤",
       "source": "project_glossary"
     },
     "breast cancer": {
@@ -13145,6 +13244,10 @@
     },
     "breast carcinoma": {
       "label": "乳腺癌",
+      "source": "project_glossary"
+    },
+    "bulimia nervosa": {
+      "label": "神经性贪食症",
       "source": "project_glossary"
     },
     "cancer": {
@@ -13187,8 +13290,20 @@
       "label": "克罗恩病",
       "source": "project_glossary"
     },
+    "delirium": {
+      "label": "谵妄",
+      "source": "project_glossary"
+    },
+    "depressive disorder": {
+      "label": "抑郁障碍",
+      "source": "project_glossary"
+    },
     "diabetes mellitus": {
       "label": "糖尿病",
+      "source": "project_glossary"
+    },
+    "drug dependence": {
+      "label": "药物依赖",
       "source": "project_glossary"
     },
     "epilepsy": {
@@ -13199,12 +13314,20 @@
       "label": "原发性高血压",
       "source": "project_glossary"
     },
+    "fibrosis": {
+      "label": "纤维化（病理改变）",
+      "source": "project_glossary"
+    },
     "gastric cancer": {
       "label": "胃癌",
       "source": "project_glossary"
     },
     "gastric carcinoma": {
       "label": "胃癌",
+      "source": "project_glossary"
+    },
+    "glioblastoma": {
+      "label": "胶质母细胞瘤",
       "source": "project_glossary"
     },
     "graves disease": {
@@ -13231,6 +13354,10 @@
       "label": "肝细胞癌",
       "source": "project_glossary"
     },
+    "hydrops fetalis": {
+      "label": "胎儿水肿",
+      "source": "project_glossary"
+    },
     "hypertension": {
       "label": "高血压",
       "source": "project_glossary"
@@ -13251,8 +13378,16 @@
       "label": "缺血性卒中",
       "source": "project_glossary"
     },
+    "kidney injury": {
+      "label": "肾损伤",
+      "source": "project_glossary"
+    },
     "liver cirrhosis": {
       "label": "肝硬化",
+      "source": "project_glossary"
+    },
+    "liver failure": {
+      "label": "肝衰竭",
       "source": "project_glossary"
     },
     "lung cancer": {
@@ -13267,6 +13402,10 @@
       "label": "重性抑郁障碍",
       "source": "project_glossary"
     },
+    "methamphetamine dependence": {
+      "label": "甲基苯丙胺依赖",
+      "source": "project_glossary"
+    },
     "multiple sclerosis": {
       "label": "多发性硬化",
       "source": "project_glossary"
@@ -13279,6 +13418,10 @@
       "label": "肿瘤",
       "source": "project_glossary"
     },
+    "nicotine dependence": {
+      "label": "尼古丁依赖",
+      "source": "project_glossary"
+    },
     "non-alcoholic fatty liver disease": {
       "label": "非酒精性脂肪性肝病",
       "source": "project_glossary"
@@ -13287,12 +13430,24 @@
       "label": "非酒精性脂肪性肝病",
       "source": "project_glossary"
     },
+    "obesity disorder": {
+      "label": "肥胖症",
+      "source": "project_glossary"
+    },
+    "obesity due to melanocortin 4 receptor deficiency": {
+      "label": "黑皮质素4受体缺乏所致肥胖症",
+      "source": "project_glossary"
+    },
     "osteoarthritis": {
       "label": "骨关节炎",
       "source": "project_glossary"
     },
     "osteoporosis": {
       "label": "骨质疏松症",
+      "source": "project_glossary"
+    },
+    "other metabolic disease": {
+      "label": "其他代谢性疾病（大类）",
       "source": "project_glossary"
     },
     "ovarian cancer": {
@@ -13337,6 +13492,10 @@
     },
     "schizophrenia": {
       "label": "精神分裂症",
+      "source": "project_glossary"
+    },
+    "serum lipopolysaccharide activity": {
+      "label": "血清脂多糖活性（指标）",
       "source": "project_glossary"
     },
     "stroke": {

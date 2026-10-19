@@ -203,6 +203,20 @@ function renderComposition(result, content) {
   if ((result.unmatched_herbs || []).length) content.append(element("p", "source-state", "未命中药材：" + result.unmatched_herbs.join("、")));
 }
 
+function forwardRankingOrder(result, message) {
+  const native = result.ranking?.default_order || (result.ranking?.background_status === "succeeded" ? "background" : "support");
+  if (native === "support" && Array.isArray(result.background_candidates)
+      && result.ranking?.available_orders?.includes("background") && message?.rankingView === "background") return "background";
+  return native;
+}
+
+function forwardView(result, message) {
+  if (result.direction === "reverse") return result;
+  const order = forwardRankingOrder(result, message);
+  return { ...result, display_order: order,
+    candidates: order === "background" && Array.isArray(result.background_candidates) ? result.background_candidates : result.candidates || [] };
+}
+
 function renderEvidence(result, index, content) {
   if (result.direction === "reverse") { renderReverseEvidence(result, index, content); return; }
   const candidate = (result.candidates || [])[index];
@@ -227,6 +241,7 @@ function renderEvidence(result, index, content) {
 
 function renderScore(result, content) {
   if (result.direction === "reverse") { renderReverseMetrics(result, content); return; }
+  if (result.display_order) content.append(element("p", "reply-note", "当前查看：" + (result.display_order === "background" ? "背景校正（探索性对照）" : "原支持度") + "。下方分别列出两个指标的组成，数值不能直接当作同一种分数比较。"));
   const version = (result.candidates || []).find((item) => item.confidence)?.confidence?.formula_version || "当前版本";
   content.append(element("p", "", "匹配支持度由匹配靶点数、输入覆盖率、疾病覆盖率和证据质量加权得到。缺失项不参与计算，剩余权重重新归一；数值用于核查关联线索。"));
   content.append(element("p", "reply-note", "本次公式版本：" + version + "。证据质量来自 BATMAN 已知证据占比；Open Targets 和 Monarch 的原始关联分值单独展示。"));
@@ -253,7 +268,7 @@ function renderResult(result, message, content, sessionId) {
   if (result.direction === "reverse") { renderReverseResult(result, message, content, sessionId); return; }
   if (result.data_origin === "synthetic_engineering") content.append(element("p", "source-state", "合成工程测试数据，仅用于验证界面，不代表真实药理结果。"));
   const input = result.input || {};
-  const candidates = result.candidates || [];
+  const candidates = forwardView(result, message).candidates;
   const description = input.formula ? "已识别「" + input.formula + "」，展开为 " + (input.herbs || []).length + " 味药材。" : "本次查询药材：" + (input.herbs || []).join("、") + "。";
   content.append(element("p", "", description));
   const batmanMode = result.batman_source?.mode;
@@ -265,13 +280,28 @@ function renderResult(result, message, content, sessionId) {
   for (const [source, status] of Object.entries(result.source_status || {})) {
     if (status.status !== "succeeded") content.append(element("p", "source-state", sourceLabel(source) + "暂不可用：" + (status.error || "请检查本机数据配置")));
   }
-  const corrected = result.ranking?.background_status === "succeeded";
+  const corrected = forwardRankingOrder(result, message) === "background";
   const title = element("div", "result-heading", result.ranking ? "具体疾病候选" : "候选疾病");
   title.append(element("small", "", corrected ? "按背景校正匹配度排列" : "按原匹配支持度排列"));
   content.append(title);
   if (result.ranking) {
     content.append(element("p", "reply-note", "疾病大类单独列在下方，不占本列表名额；器官疾病与其亚型仍保留独立 ID，不合并证据。"));
-    if (!corrected) content.append(element("p", "source-state", "完整疾病背景不可用，当前沿用原支持度排序：" + (result.ranking.background_error || "原因未记录")));
+    const switchable = result.ranking.default_order === "support" && Array.isArray(result.background_candidates);
+    const controls = element("label", "ranking-controls", "排序 ");
+    const select = element("select");
+    select.setAttribute("aria-label", "候选疾病排序");
+    for (const [value, label] of [["support", "原支持度（默认）"], ["background", "背景校正（探索）"]]) {
+      const option = element("option", "", label);
+      option.value = value;
+      option.disabled = value === "background" && result.ranking.background_status !== "succeeded";
+      select.append(option);
+    }
+    select.value = corrected ? "background" : "support";
+    select.disabled = !switchable;
+    select.addEventListener("change", () => { message.rankingView = select.value; saveSessions(); render(); });
+    controls.append(select);
+    content.append(controls, element("p", "reply-note", switchable ? "默认使用原支持度；背景校正仅作探索性对照，尚未完成文献案例有效性验证。切换不启动新查询。" : "该归档仅保留生成时的排序；重新查询可获得完整双排序对照。"));
+    if (result.ranking.background_status !== "succeeded") content.append(element("p", "source-state", "完整疾病背景不可用，当前沿用原支持度排序：" + (result.ranking.background_error || "原因未记录")));
   } else content.append(element("p", "reply-note", "历史结果保留生成时的排序；重新查询后使用疾病分层与背景校正规则。"));
   const list = element("div", "candidate-list");
   candidates.forEach((candidate, index) => {
@@ -280,7 +310,7 @@ function renderResult(result, message, content, sessionId) {
     name.append(element("span", "candidate-title", diseaseName(candidate)));
     const sources = Object.keys(candidate.source_gene_counts || {}).map(sourceLabel).join(" · ");
     name.append(element("span", "candidate-meta", candidate.matched_count + " 个匹配靶点 · " + sources
-      + (corrected ? " · 原支持度 " + Number(candidate.confidence?.value || 0).toFixed(2)
+      + (result.ranking ? (corrected ? " · 原支持度 " + Number(candidate.confidence?.value || 0).toFixed(2) : " · 背景校正 " + (candidate.specificity ? Number(candidate.specificity.score).toFixed(3) : "背景不足"))
         + (candidate.specificity ? " · 疾病背景 " + candidate.specificity.disease_target_count + " 个靶点" : " · 背景不足，未计算校正值") : "")));
     const confidence = candidate.confidence || {};
     const value = corrected ? candidate.specificity?.score : confidence.value;
@@ -422,9 +452,9 @@ function render() {
         if (!rendering) rememberConversationPosition();
         content.replaceChildren();
         if (message.kind === "query") renderResult(result, message, content, session.id);
-        else if (message.kind === "evidence") renderEvidence(message.candidateScope === "category" ? { ...result, candidates: result.broad_candidates || [] } : result, message.candidateIndex, content);
+        else if (message.kind === "evidence") renderEvidence(message.candidateScope === "category" ? { ...result, candidates: result.broad_candidates || [] } : forwardView(result, message), message.candidateIndex, content);
         else if (message.kind === "composition") renderComposition(result, content);
-        else if (message.kind === "score") renderScore(result, content);
+        else if (message.kind === "score") renderScore(forwardView(result, message), content);
         if (!rendering) restoreConversationPosition();
       };
       if (appState.results.has(message.runId)) populate(appState.results.get(message.runId));
@@ -539,11 +569,12 @@ async function submitMessage(suppliedText, context) {
         if (!previous) throw new Error("请先查询疾病、方剂或药材，再展开对应结果。");
         const result = await resultFor(previous);
         const categoryEvidence = evidenceIntent && queryDirection(previous) === "forward" && /大类/.test(text);
-        if (evidenceIntent && !(categoryEvidence ? result.broad_candidates || [] : result.candidates || [])[inspectIndex]) throw new Error("本次返回结果没有这个序号，请指定已有候选。");
+        if (evidenceIntent && !(categoryEvidence ? result.broad_candidates || [] : forwardView(result, previous).candidates)[inspectIndex]) throw new Error("本次返回结果没有这个序号，请指定已有候选。");
         reply.kind = evidenceIntent ? "evidence" : compositionIntent ? "composition" : "score";
         reply.runId = previous.runId;
         reply.direction = queryDirection(previous);
         reply.candidateIndex = inspectIndex;
+        if (queryDirection(previous) === "forward") reply.rankingView = forwardRankingOrder(result, previous);
         if (categoryEvidence) reply.candidateScope = "category";
       } else {
         const prepared = await prepareChatQuery(context?.retryBody || { text: resolveInput(text), ...settings() }, text, context);
@@ -588,7 +619,11 @@ async function submitMessage(suppliedText, context) {
 async function exportResult(message) {
   try {
     const result = await resultFor(message);
-    const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: "application/json;charset=utf-8" }));
+    const exported = result.ranking?.default_order === "support" ? { ...result, export_view: {
+      order: forwardRankingOrder(result, message),
+      candidates_field: forwardRankingOrder(result, message) === "background" ? "background_candidates" : "candidates",
+    } } : result;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: "application/json;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
     link.download = message.runId + ".json";

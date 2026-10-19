@@ -81,7 +81,7 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
-正向新结果默认将宽泛疾病大类单独返回 `broad_candidates`，非大类 Top-K 为 `candidates`；新增 `specific_candidate_count`、`category_count`、`raw_ranking` 和 `ranking`。独立的 `specificity` 使用完整 Open Targets 疾病背景的 IDF 加权余弦匹配度；原 `heuristic_v2` 分数和证据不改写，反向排序不变。分类依据、字段、公式、背景不足时的回退与科学边界见 [正向疾病排序](FORWARD_RANKING.md)。
+正向新结果将大类单独返回 `broad_candidates`，默认 `candidates` 为按原支持度排序的非大类Top-K；`background_candidates` 独立保存完整候选集合的背景校正Top-K及逐条证据，页面切换不计算。`ranking.default_order=support`，`background_algorithm` 记录独立公式，科学验证状态仍待完成。原 `heuristic_v2` 分数不改写，反向不变；导出 `export_view` 只标记显示选择，不改写研究数组。字段、公式与初步文献对照见 [正向疾病排序](FORWARD_RANKING.md)。
 
 药材映射的 `display_name` / `display_note` 仅用于中文显示及名称说明，不替换 `canonical` / `candidates` 指向的原始药材条目。原药材表中文名缺失但已有登记别名时补中文显示，仍用原记录检索成分；没有可靠标签的精确命中条目标“中文名缺失”，未命中标“待匹配”，两者区别展示。剂量/说明混入拼音字段时不自动清洗成确定药材。
 
@@ -118,9 +118,11 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ## 中文疾病名称展示
 
-首页与工作台通过 `server/static/disease-labels.js` 读取 `disease-labels.json`，按精确 `disease_id`、`mondo_id` 或 `disease` 中的 ID 匹配，统一 `MONDO_`/`MONDO:`；最后可回退项目词表内的精确英文名。不做模糊翻译、不按中文名称合并实体，`breast cancer` 与 `breast carcinoma` 仍是两个原 ID。
+首页与工作台通过 `server/static/disease-labels.js` 读取 `disease-labels.json`，按精确 `disease_id`、`mondo_id` 或 `disease` 中的 ID 匹配，统一 MONDO/EFO/HP/OBA/DOID/Orphanet/OTAR 的下划线及冒号格式；最后可回退项目词表内的精确英文名。不做模糊翻译、不按中文名称合并实体，`breast cancer` 与 `breast carcinoma` 仍是两个原 ID。
 
-当前词表包含 2,620 个 MONDO ID、66 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
+当前词表包含 2,639 个疾病/性状 ID、87 个常用英文名/别名。广泛词条来自 Wikidata P5270→MONDO 与中文标签（CC0，元数据保留查询、生成时间及 Wikidata 实体 ID），优先 `zh-hans`、其次 `zh-cn`/`zh`；没有简体标签的词条保留来源中文。不同 Wikidata 实体映射同一 MONDO 或同优先级标签冲突时不收录。常用译名由 `pharm/diseases/chinese_labels_overrides.json` 明确标为 `project_glossary`，不冒充 Open Targets/Monarch 官方中文名称。
+
+明确区分 `obesity disorder`（肥胖症，MONDO:0011122）、`binge eating disorder`（暴食障碍，MONDO:0005582）及 `bulimia nervosa`（神经性贪食症，MONDO:0005452）。补齐胎儿水肿、抑郁障碍、MC4R受体缺乏所致肥胖症等本次结果中漏译的明确实体；显示翻译不替换ID或科学结果。
 
 人工维护常用词条后，显式运行 `python scripts/update_disease_labels.py --proxy http://127.0.0.1:7890` 更新提交的本地词表；也可用 `--input <保存的 SPARQL JSON>` 离线生成。用户查询时不会联网翻译。未知词条显示“中文名未收录”，加载失败显示“中文名暂不可用”；名称本已中文时不重复追加。
 

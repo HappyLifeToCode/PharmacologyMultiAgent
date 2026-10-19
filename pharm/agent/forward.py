@@ -91,7 +91,7 @@ def _record_extra(row):
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _aggregate(herb_result, iter_associations, top_k, *, background=None, selection=None):
+def _aggregate(herb_result, iter_associations, top_k, *, background=None, selection=None, audit=None):
     """Summarise rows first; load full evidence only for the selected candidates."""
     known = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "known"}
     predicted = {row["gene_symbol"] for row in herb_result["relations"] if row.get("evidence") == "predicted"} - known
@@ -170,17 +170,27 @@ def _aggregate(herb_result, iter_associations, top_k, *, background=None, select
                    for item in result[:top_k]]
     categories = [item for item in result if item["disease_scope"] == "category"]
     specific = [item for item in result if item["disease_scope"] != "category"]
+    selected, broad = specific[:top_k], categories[:top_k]
+    if audit is not None:
+        audit.update({item["disease"]: {"disease_id": item["disease_id"], "support_rank": rank,
+                      "background_rank": None, "support_score": item["confidence"]["value"],
+                      "background_score": (item["specificity"] or {}).get("score")}
+                      for rank, item in enumerate(specific, 1)})
     if background:
         specific.sort(key=lambda item: (
             item["specificity"] is None, -(item["specificity"] or {}).get("score", 0),
             -float(item["confidence"]["value"]), -item["matched_count"], item["disease"],
         ))
-    selected, broad = specific[:top_k], categories[:top_k]
+    alternative = specific[:top_k] if background else []
+    if audit is not None and background:
+        for rank, item in enumerate(specific, 1):
+            audit[item["disease"]]["background_rank"] = rank
     if selection is not None:
         selection.update(broad_candidates=broad, raw_ranking=raw_ranking,
+                         background_candidates=alternative,
                          specific_candidate_count=len(specific), category_count=len(categories))
-    selected_by_disease = {item["disease"]: item for item in selected + broad}
-    report("evidence", "整理返回候选的完整证据", detail=f"已选出 {len(selected)} 个疾病候选，另保留 {len(broad)} 个疾病大类")
+    selected_by_disease = {item["disease"]: item for item in selected + alternative + broad}
+    report("evidence", "整理两种排序的完整证据", detail=f"默认 {len(selected)} 项，背景对照 {len(alternative)} 项，大类 {len(broad)} 项")
     # Release unselected sets before rereading the frozen source files.
     del candidates, result, specific, categories
     if selected_by_disease:
@@ -304,14 +314,18 @@ def query(herbs=None, *, formula=None, text=None, top_k=None, batman_threshold=0
         "confidence_version": CONFIDENCE_VERSION,
         **selection,
         "ranking": {
-            "version": disease_background.VERSION if background else "legacy_grouped_v1",
+            "version": "forward_support_comparison_v1",
+            "default_order": "support",
+            "available_orders": ["support", "background"] if background else ["support"],
+            "background_algorithm": disease_background.VERSION if background else None,
+            "scientific_validation": "pending_literature_benchmark",
             "background_status": "succeeded" if background else "unavailable",
             "background_error": background_error,
             "source_fingerprint": background.get("fingerprint") if background else None,
             "release": background.get("release") if background else None,
             "background_disease_count": background.get("disease_count") if background else None,
             "background_gene_count": background.get("gene_count") if background else None,
-            "note": "默认展示非大类疾病候选；完整 Open Targets 疾病背景的 IDF 加权余弦匹配度优先，缺少背景的候选列后；原 heuristic_v2 分数和原排序摘要另行保留。不是疗效概率。" if background else "完整背景不可用，默认候选已分出登记大类，排序沿用原匹配支持度。",
+            "note": "非大类候选默认按原支持度排列；背景校正为探索性对照，可切换查看完整 Top-K，尚未完成文献案例有效性验证。两种指标均不是疗效概率。" if background else "默认候选已分出登记大类，按原支持度排列；完整背景不可用，背景排序暂不可选。",
             "category_policy": "仅 Open Targets therapeutic area 本身及明确登记的肿瘤/癌症大类；不因是其后代而排除，不合并疾病 ID、来源分数或父子证据",
             "coverage_scope": "specificity.disease_coverage 只用 Open Targets 唯一批准基因计数；不以输入靶点交集冒充完整疾病分母，不混入 Monarch 分值",
         },

@@ -88,6 +88,8 @@ h1 { font-family: "Noto Serif SC", "SimSun", serif; font-size: clamp(25px, 2.5vw
 .candidate-meta { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
 .candidate-score { text-align: center; font-size: 13px; }
 .candidate-score small { display: block; font-size: 9px; color: var(--muted); }
+.ranking-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; color: var(--muted); font-size: 12px; }
+.ranking-controls select { max-width: 100%; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
 .text-button { color: var(--accent); font-size: 12px; padding: 5px 0; text-align: left; }
 .candidate-row .text-button { text-align: right; }
 .reply-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
