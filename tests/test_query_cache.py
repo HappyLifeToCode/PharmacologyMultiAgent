@@ -124,3 +124,14 @@ def test_cache_budget_eviction_preserves_research_archives(tmp_path, monkeypatch
     root = tmp_path / "local/agent/query-cache"
     assert len(list(root.iterdir())) == 1
     assert all((directory(tmp_path, str(number)) / "associations.csv").is_file() for number in range(3))
+
+
+def test_unavailable_ranking_background_is_not_frozen_into_success_cache(tmp_path, environment):
+    target = directory(tmp_path, "background_missing")
+    def compute():
+        response = calculate(target)
+        response["result"]["ranking"] = {"background_status": "unavailable"}
+        return response
+    response = cache.execute({"text": "白芍"}, target, "forward", compute)
+    assert response["result"]["status"] == "succeeded"
+    assert not (tmp_path / "local/agent/query-cache").exists()

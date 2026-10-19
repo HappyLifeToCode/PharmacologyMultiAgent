@@ -21,6 +21,10 @@ MAX_ENTRIES = 16
 MAX_BYTES = 1024 ** 3
 
 
+def _cacheable(result):
+    return result.get("status") == "succeeded" and result.get("ranking", {}).get("background_status") != "unavailable"
+
+
 def digest(path):
     # Source snapshots and original CSVs can be several GiB.
     checksum = hashlib.sha256()
@@ -112,7 +116,7 @@ def restore(root, key, directory, direction):
         with gzip.open(payload_path, "rt", encoding="utf-8") as stream:
             payload = json.load(stream)
         result = payload["result"]
-        if not isinstance(result, dict) or result.get("status") != "succeeded":
+        if not isinstance(result, dict) or not _cacheable(result):
             return None
         report("cache_hit", "已找到相同数据版本的完成结果", detail="复用原计算，不重复采集关联")
         result["created_at"] = now()
@@ -143,7 +147,7 @@ def _remove_entry(root, entry):
 
 
 def store(root, key, directory, result, direction):
-    if result.get("status") != "succeeded":
+    if not _cacheable(result):
         return
     root.mkdir(parents=True, exist_ok=True)
     temporary = root / (key + "." + uuid4().hex + ".tmp")
@@ -199,7 +203,7 @@ def execute(body, directory, direction, compute):
     result = response["result"]
     result["execution"] = {"cache_hit": False, "source_fingerprint": key}
     write_json(directory / "result.json", result)
-    if key and result.get("status") == "succeeded":
+    if key and _cacheable(result):
         try:
             # Do not cache a calculation across a live source/config change.
             if fingerprint(body, direction) == key:

@@ -162,6 +162,30 @@ function renderForwardResult(result) {
     + " 个 BATMAN 靶点，返回前 " + candidates.length + " 个候选疾病（全部候选 "
     + (result.candidate_count == null ? candidates.length : result.candidate_count) + " 个）。";
   if (QueryProgress.cacheNote(result)) $("forward-summary").textContent += " " + QueryProgress.cacheNote(result);
+  $("forward-ranking-note").textContent = result.ranking ? result.ranking.note
+    + (result.ranking.background_error ? " 背景说明：" + result.ranking.background_error : "") : "旧归档保留原排序，未回写或重新计算。";
+  const categories = $("forward-categories");
+  categories.hidden = !result.broad_candidates?.length;
+  const categoryRows = categories.querySelector("tbody");
+  categoryRows.replaceChildren();
+  for (const candidate of result.broad_candidates || []) {
+    const row = document.createElement("tr");
+    for (const value of [DiseaseLabels.format(candidate, true), candidate.matched_count, candidate.confidence?.value]) {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    }
+    row.addEventListener("click", () => renderForwardEvidence(candidate));
+    categoryRows.append(row);
+  }
+  const raw = $("forward-raw-ranking");
+  raw.hidden = !result.raw_ranking?.length;
+  const rawRows = raw.querySelector("tbody"); rawRows.replaceChildren();
+  for (const candidate of result.raw_ranking || []) {
+    const row = document.createElement("tr");
+    for (const value of [candidate.raw_rank, DiseaseLabels.format(candidate, true), candidate.disease_scope === "category" ? "疾病大类" : "疾病候选", candidate.confidence?.value]) {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    }
+    rawRows.append(row);
+  }
   $("forward-limitation").textContent = result.limitation || "候选关联不等于疗效或治疗推荐。";
   const unmatched = [];
   if ((result.unmatched_herbs || []).length) unmatched.push("未命中药材：" + result.unmatched_herbs.join("、"));
@@ -176,6 +200,7 @@ function renderForwardResult(result) {
     const sourceCounts = candidate.source_gene_counts || {};
     const sources = Object.keys(sourceCounts).map((source) => forwardSourceLabel(source) + "（" + sourceCounts[source] + "）");
     const values = [String(index + 1), DiseaseLabels.format(candidate, true), confidence.value == null ? "—" : Number(confidence.value).toFixed(2),
+      candidate.specificity ? Number(candidate.specificity.score).toFixed(4) : result.ranking ? "背景不足" : "旧版未计算",
       String(candidate.matched_count == null ? 0 : candidate.matched_count), forwardPercent(candidate.input_coverage),
       sources.join("、") || "—", String(candidate.evidence_row_count == null ? (candidate.evidence || []).length : candidate.evidence_row_count)];
     values.forEach((value) => {
@@ -193,7 +218,7 @@ function renderForwardResult(result) {
   if (!candidates.length) {
     const tr = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 7;
+    cell.colSpan = 8;
     cell.className = "empty-cell";
     cell.textContent = "没有可显示的候选疾病。";
     tr.appendChild(cell);

@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+正向新结果默认将宽泛疾病大类单独返回 `broad_candidates`，非大类 Top-K 为 `candidates`；新增 `specific_candidate_count`、`category_count`、`raw_ranking` 和 `ranking`。独立的 `specificity` 使用完整 Open Targets 疾病背景的 IDF 加权余弦匹配度；原 `heuristic_v2` 分数和证据不改写，反向排序不变。分类依据、字段、公式、背景不足时的回退与科学边界见 [正向疾病排序](FORWARD_RANKING.md)。
+
 药材映射的 `display_name` / `display_note` 仅用于中文显示及名称说明，不替换 `canonical` / `candidates` 指向的原始药材条目。原药材表中文名缺失但已有登记别名时补中文显示，仍用原记录检索成分；没有可靠标签的精确命中条目标“中文名缺失”，未命中标“待匹配”，两者区别展示。剂量/说明混入拼音字段时不自动清洗成确定药材。
 
 - Open Targets 的 `associationScore`、Monarch 的 ClinGen/OMIM 证据和 BATMAN 的 known/predicted 关系分别保留，不跨来源相加。

@@ -1,5 +1,13 @@
 # 项目交接说明
 
+## 2026-10-19 正向具体疾病候选与背景校正
+
+用户确认调整正向大类占据Top-K的问题。新增 `pharm/agent/disease_background.py`：从完整OT direct association按当前实体规则、唯一批准符号建立疾病背景和IDF权重；不限制BATMAN known基因，不用输入交集冒充完整分母。首次构建额外耗时，之后按实际源哈希/代码指纹和内容校验复用本机派生JSON；临时SQLite只用于去重。校正值独立于保留不变的heuristic_v2，背景整体不可用显式回退，回退成功结果不缓存。
+
+正向 `candidates` 为非登记大类Top-K，`broad_candidates` 为独立大类Top-K，新增两组完整数量、原排序前K摘要、原名次及排名来源。前端首页/工作台显示校正值、大类证据、原排序与旧版提示，导出保留新字段；反向及旧discovery流水线不变。分类不是所有本体非叶节点过滤，不合并父子疾病，不宣称关联排序等于临床适应症。公式、范围与字段见 [FORWARD_RANKING.md](FORWARD_RANKING.md)。
+
+本机验证 `local/checks/disease-ranking-20261019/`：最终温经汤、半夏白术天麻汤冻结真实来源重算，原得分/候选总数/原Top-K顺序及来源SHA-256不变；新返回疾病和大类各10条，独立全量Parquet核对这20项完整背景分母。全量330 passed、3 skipped，2个既有弃用警告。本次包含后端改动，加载需要用户自己的终端重启；未操作生产8766。浏览器与最终Git状态见本地AGENTS，科学验收未完成。
+
 ## 2026-10-15 查询加速与进度
 
 新增 `pharm/agent/progress.py`、`query_cache.py` 与前端 `query-progress.js`。实际阶段/计数通过原 request 状态接口读取，首次 POST 等待期间及刷新恢复均显示；进度文件独立于归档，不因轮询失败取消任务。Open Targets 采集先用 Arrow 过滤 ID，保留原完整证据和计算语义。缓存严格核对输入、源文件真实哈希、代码、配置及原归档，成功才保存；命中仍创建新运行，明确引用原计算，不复用半成品。来源 CSV 留在原运行，缓存清理不删研究归档。完整行为与关闭方式见 [查询执行说明](QUERY_EXECUTION.md)。

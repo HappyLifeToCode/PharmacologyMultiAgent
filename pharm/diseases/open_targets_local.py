@@ -34,11 +34,16 @@ def _parquet():
     return parquet
 
 
+def _trim_ids(values):
+    import pyarrow.compute as pc
+    return pc.utf8_trim(values, characters=" \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000")
+
+
 def _matching_rows(batch, column, wanted):
     """Filter in Arrow before converting rows to Python; retain source order."""
     import pyarrow as pa
     import pyarrow.compute as pc
-    values = pc.utf8_trim(batch.column(column), characters=" \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000")
+    values = _trim_ids(batch.column(column))
     mask = pc.is_in(values, value_set=pa.array(sorted(wanted), type=values.type))
     return batch.filter(mask).to_pylist()
 

@@ -235,6 +235,16 @@ function renderScore(result, content) {
     const format = (value) => value == null ? "无数据" : Number(value).toFixed(4);
     return [diseaseName(candidate), format(parts.match_score), format(parts.input_coverage), format(parts.disease_coverage), format(parts.evidence_quality)];
   }), content);
+  if (result.ranking) {
+    content.append(element("p", "reply-note", result.ranking.note));
+    content.append(element("p", "reply-note", "新增背景校正独立于上表原始支持度。完整 Open Targets 疾病背景使用 IDF 权重，常见靶点权重更低；匹配度为交集权重除以输入与疾病总权重乘积的平方根。Monarch 原始证据保留，不与 Open Targets 分数相加。"));
+    table(["候选疾病", "校正匹配度", "批准基因匹配数", "输入背景靶点", "疾病完整靶点", "疾病背景覆盖率"], (result.candidates || []).map((candidate) => {
+      const score = candidate.specificity;
+      return [diseaseName(candidate), score ? score.score.toFixed(6) : "背景不足", score?.matched_count,
+        score?.input_background_target_count, score?.disease_target_count,
+        score ? (100 * score.disease_coverage).toFixed(2) + "%" : "—"];
+    }), content);
+  }
 }
 
 function renderResult(result, message, content, sessionId) {
@@ -255,25 +265,51 @@ function renderResult(result, message, content, sessionId) {
   for (const [source, status] of Object.entries(result.source_status || {})) {
     if (status.status !== "succeeded") content.append(element("p", "source-state", sourceLabel(source) + "暂不可用：" + (status.error || "请检查本机数据配置")));
   }
-  const title = element("div", "result-heading", "候选疾病");
-  title.append(element("small", "", "按匹配支持度排列"));
+  const corrected = result.ranking?.background_status === "succeeded";
+  const title = element("div", "result-heading", result.ranking ? "具体疾病候选" : "候选疾病");
+  title.append(element("small", "", corrected ? "按背景校正匹配度排列" : "按原匹配支持度排列"));
   content.append(title);
+  if (result.ranking) {
+    content.append(element("p", "reply-note", "疾病大类单独列在下方，不占本列表名额；器官疾病与其亚型仍保留独立 ID，不合并证据。"));
+    if (!corrected) content.append(element("p", "source-state", "完整疾病背景不可用，当前沿用原支持度排序：" + (result.ranking.background_error || "原因未记录")));
+  } else content.append(element("p", "reply-note", "历史结果保留生成时的排序；重新查询后使用疾病分层与背景校正规则。"));
   const list = element("div", "candidate-list");
   candidates.forEach((candidate, index) => {
     const row = element("div", "candidate-row");
     const name = element("div");
     name.append(element("span", "candidate-title", diseaseName(candidate)));
     const sources = Object.keys(candidate.source_gene_counts || {}).map(sourceLabel).join(" · ");
-    name.append(element("span", "candidate-meta", candidate.matched_count + " 个匹配靶点 · " + sources));
+    name.append(element("span", "candidate-meta", candidate.matched_count + " 个匹配靶点 · " + sources
+      + (corrected ? " · 原支持度 " + Number(candidate.confidence?.value || 0).toFixed(2)
+        + (candidate.specificity ? " · 疾病背景 " + candidate.specificity.disease_target_count + " 个靶点" : " · 背景不足，未计算校正值") : "")));
     const confidence = candidate.confidence || {};
-    const score = element("div", "candidate-score", confidence.value == null ? "—" : Number(confidence.value).toFixed(2));
-    score.append(element("small", "", "匹配支持度"));
+    const value = corrected ? candidate.specificity?.score : confidence.value;
+    const score = element("div", "candidate-score", value == null ? "—" : Number(value).toFixed(corrected ? 3 : 2));
+    score.append(element("small", "", corrected ? "背景校正匹配度" : "原匹配支持度"));
     const inspect = action("查看证据", () => submitMessage("展开第" + (index + 1) + "个疾病的证据", { message, index, sessionId }));
     row.append(element("span", "candidate-number", String(index + 1).padStart(2, "0")), name, score, inspect);
     list.append(row);
   });
-  if (!candidates.length) list.append(element("p", "reply-note", "本次没有返回候选疾病。请核对药材命中及数据源状态；未命中不代表没有关联。"));
+  if (!candidates.length) list.append(element("p", "reply-note", result.category_count ? "本次仅匹配到疾病大类，尚无可返回的具体疾病候选；可在下方查看大类证据。" : "本次没有返回候选疾病。请核对药材命中及数据源状态；未命中不代表没有关联。"));
   content.append(list, element("p", "reply-note", result.limitation || "候选关联用于研究线索筛选，不能直接作为治疗建议。"));
+  if (result.broad_candidates?.length) {
+    const broad = details("疾病大类参考（共 " + result.category_count + " 类，展示 " + result.broad_candidates.length + " 类）", content);
+    broad.append(element("p", "reply-note", "这些宽泛实体仍保留原分数和证据，单独展示，不作为具体疾病 Top-K。"));
+    for (const [index, candidate] of result.broad_candidates.entries()) {
+      const evidence = details(diseaseName(candidate) + " · " + candidate.matched_count + " 个匹配靶点 · 查看证据", broad);
+      let loaded = false;
+      evidence.addEventListener("toggle", () => {
+        if (evidence.open && !loaded) { loaded = true; renderEvidence({ ...result, candidates: result.broad_candidates }, index, evidence); }
+      });
+    }
+  }
+  if (result.raw_ranking?.length) {
+    const raw = details("查看原支持度排序前 " + result.raw_ranking.length + " 项", content);
+    table(["原序号", "疾病实体", "类型", "匹配靶点", "原支持度"], result.raw_ranking.map((item) => [
+      item.raw_rank, diseaseName(item), item.disease_scope === "category" ? "疾病大类" : "疾病候选", item.matched_count, item.confidence?.value,
+    ]), raw);
+    raw.append(element("p", "reply-note", "仅保存原排序摘要；完整原始关联继续保留于本次来源归档。默认候选和所列大类的逐条证据随 JSON 导出。"));
+  }
   if ((result.unmatched_genes || []).length) {
     const unmatched = details("未命中疾病关联的靶点（" + result.unmatched_genes.length + " 个）", content);
     unmatched.append(element("p", "reply-note", result.unmatched_genes.slice(0, 60).join("、") + (result.unmatched_genes.length > 60 ? "；其余详见导出结果。" : "")));
@@ -386,7 +422,7 @@ function render() {
         if (!rendering) rememberConversationPosition();
         content.replaceChildren();
         if (message.kind === "query") renderResult(result, message, content, session.id);
-        else if (message.kind === "evidence") renderEvidence(result, message.candidateIndex, content);
+        else if (message.kind === "evidence") renderEvidence(message.candidateScope === "category" ? { ...result, candidates: result.broad_candidates || [] } : result, message.candidateIndex, content);
         else if (message.kind === "composition") renderComposition(result, content);
         else if (message.kind === "score") renderScore(result, content);
         if (!rendering) restoreConversationPosition();
@@ -498,15 +534,17 @@ async function submitMessage(suppliedText, context) {
       const inspectIndex = context?.index ?? candidateIndex(text);
       const evidenceIntent = inspectIndex !== null && /证据|展开|查看/.test(text);
       const compositionIntent = /^(查看|展开)?(药材组成|方剂组成|药材命中|疾病靶点|关联靶点)[。？?]?$/.test(text);
-      const scoreIntent = /^(解释|查看|展开)?(匹配支持度|评分组成|置信度|这个分数怎么来的|匹配指标|覆盖率)[。？?]?$/.test(text);
+      const scoreIntent = /^(解释|查看|展开)?(匹配支持度|背景校正匹配度|校正匹配度|评分组成|置信度|这个分数怎么来的|匹配指标|覆盖率)[。？?]?$/.test(text);
       if (evidenceIntent || compositionIntent || scoreIntent) {
         if (!previous) throw new Error("请先查询疾病、方剂或药材，再展开对应结果。");
         const result = await resultFor(previous);
-        if (evidenceIntent && !(result.candidates || [])[inspectIndex]) throw new Error("本次返回结果没有这个序号，请指定已有候选。");
+        const categoryEvidence = evidenceIntent && queryDirection(previous) === "forward" && /大类/.test(text);
+        if (evidenceIntent && !(categoryEvidence ? result.broad_candidates || [] : result.candidates || [])[inspectIndex]) throw new Error("本次返回结果没有这个序号，请指定已有候选。");
         reply.kind = evidenceIntent ? "evidence" : compositionIntent ? "composition" : "score";
         reply.runId = previous.runId;
         reply.direction = queryDirection(previous);
         reply.candidateIndex = inspectIndex;
+        if (categoryEvidence) reply.candidateScope = "category";
       } else {
         const prepared = await prepareChatQuery(context?.retryBody || { text: resolveInput(text), ...settings() }, text, context);
         if (!prepared) { reply.kind = "text"; reply.text = "已取消选择，本次未启动查询。"; return; }
