@@ -93,10 +93,13 @@ function forwardPercent(value) {
   return value == null || !Number.isFinite(Number(value)) ? "—" : (Number(value) * 100).toFixed(1) + "%";
 }
 
-function renderForwardEvidence(candidate) {
+function renderForwardEvidence(candidate, result) {
   const panel = $("forward-evidence-panel");
   panel.hidden = false;
   $("forward-evidence-title").textContent = DiseaseLabels.format(candidate, true) + " · 逐条证据";
+  const graph = $("forward-evidence-graph");
+  graph.replaceChildren();
+  EvidenceGraph.mount(graph, result, candidate);
   const tbody = $("forward-evidence-table").querySelector("tbody");
   tbody.innerHTML = "";
   const rows = Array.isArray(candidate.evidence) ? candidate.evidence.slice(0, 100) : [];
@@ -186,7 +189,7 @@ function renderForwardResult(result, order) {
     for (const value of [DiseaseLabels.format(candidate, true), candidate.matched_count, candidate.confidence?.value]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     }
-    row.addEventListener("click", () => renderForwardEvidence(candidate));
+    row.addEventListener("click", () => renderForwardEvidence(candidate, result));
     categoryRows.append(row);
   }
   const raw = $("forward-raw-ranking");
@@ -209,7 +212,7 @@ function renderForwardResult(result, order) {
       candidate.support_target_count, candidate.max_association_score]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     }
-    row.addEventListener("click", () => renderForwardEvidence(candidate)); layeredRows.append(row);
+    row.addEventListener("click", () => renderForwardEvidence(candidate, result)); layeredRows.append(row);
   }
   $("forward-limitation").textContent = result.limitation || "候选关联不等于疗效或治疗推荐。";
   const unmatched = [];
@@ -236,7 +239,7 @@ function renderForwardResult(result, order) {
     tr.addEventListener("click", () => {
       tbody.querySelectorAll("tr").forEach((row) => row.classList.remove("selected"));
       tr.classList.add("selected");
-      renderForwardEvidence(candidate);
+      renderForwardEvidence(candidate, result);
     });
     tbody.appendChild(tr);
   }

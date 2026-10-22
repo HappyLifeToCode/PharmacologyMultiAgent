@@ -224,6 +224,7 @@ function renderEvidence(result, index, content) {
   content.append(element("p", "", diseaseName(candidate) + "匹配了 " + candidate.matched_count + " 个唯一靶点，保留 " + (candidate.evidence_row_count == null ? (candidate.evidence || []).length : candidate.evidence_row_count) + " 行关联证据。"));
   const sourceCounts = Object.entries(candidate.source_gene_counts || {}).map(([name, count]) => sourceLabel(name) + "：" + count + " 个靶点");
   content.append(element("p", "reply-note", sourceCounts.join("；")));
+  EvidenceGraph.mount(content, result, candidate);
   const records = candidate.evidence || [];
   if (!records.length) { content.append(element("p", "reply-note", "返回结果没有逐条证据，请检查本次数据源状态。")); return; }
   const section = details("查看逐条证据（当前展示最多 100 行）", content);

@@ -109,6 +109,16 @@ def formula_picker_style():
     return FileResponse(ROOT / "server/static/formula-picker.css", media_type="text/css")
 
 
+@app.get("/assets/evidence-graph.js")
+def evidence_graph_script():
+    return FileResponse(ROOT / "server/static/evidence-graph.js", media_type="text/javascript")
+
+
+@app.get("/assets/evidence-graph.css")
+def evidence_graph_style():
+    return FileResponse(ROOT / "server/static/evidence-graph.css", media_type="text/css")
+
+
 @app.get("/assets/icons/{filename}")
 def chat_icon(filename: str):
     allowed = {"leaf.svg", "plus.svg", "search.svg", "arrow-up.svg", "settings.svg",

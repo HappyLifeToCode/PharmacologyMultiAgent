@@ -49,6 +49,8 @@ def test_index_static_assets_and_formulas_catalog():
         assert client.get("/assets/style.css").status_code == 200
         assert client.get("/assets/chat.js").status_code == 200
         assert client.get("/assets/chat.css").status_code == 200
+        assert client.get("/assets/evidence-graph.js").status_code == 200
+        assert client.get("/assets/evidence-graph.css").status_code == 200
         assert client.get("/assets/disease-labels.js").status_code == 200
         assert client.get("/assets/query-presence.js").status_code == 200
         glossary = client.get("/assets/disease-labels.json").json()

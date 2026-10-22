@@ -1,0 +1,40 @@
+.evidence-graph { --eg-line: #e1d8cc; margin: 18px 0; padding: 18px; border: 1px solid var(--eg-line); border-radius: 12px; background: #fffcf7; color: #342f2a; font: 12px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif; min-width: 0; max-width: 100%; }
+.eg-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.evidence-graph h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.eg-tag { color: #82796d; border: 1px solid var(--eg-line); border-radius: 4px; padding: 1px 6px; font-size: 10px; white-space: nowrap; }
+.eg-intro { margin: 7px 0 13px; color: #82796d; }
+.eg-metrics { display: flex; flex-wrap: wrap; gap: 7px 20px; padding: 10px 0; border-top: 1px solid var(--eg-line); border-bottom: 1px solid var(--eg-line); color: #82796d; }
+.eg-metrics strong { color: #342f2a; font-size: 17px; font-weight: 500; }
+.eg-controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0 8px; }
+.eg-controls label { display: flex; flex-direction: column; flex: 1 1 135px; gap: 4px; margin: 0; font-size: 11px; color: #746b60; min-width: 0; }
+.eg-controls input, .eg-controls select { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 4px 7px; color: #342f2a; background: #fffdf9; border: 1px solid var(--eg-line); border-radius: 5px; font: inherit; font-size: 12px; }
+.eg-scope-text { margin: 9px 0; font-size: 11px; color: #746b60; overflow-wrap: anywhere; }
+.eg-canvas { width: 100%; max-width: 100%; overflow: auto; max-height: 640px; border: 1px solid #eee6da; border-radius: 6px; background: #fcfaf5; overscroll-behavior: contain; }
+.eg-canvas svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.eg-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+.eg-navigation button { border: 1px solid var(--eg-line); background: #fffcf7; border-radius: 5px; color: #746b60; padding: 4px 9px; font: inherit; cursor: pointer; }
+.eg-navigation button:hover:not(:disabled) { border-color: #ac4a36; color: #ac4a36; }
+.eg-navigation button:disabled { opacity: .4; cursor: default; }
+.eg-navigation .eg-download { margin-left: auto; color: #ac4a36; }
+.eg-legend, .eg-note { font-size: 10px; color: #82796d; margin: 6px 0; overflow-wrap: anywhere; }
+.eg-notice { padding: 8px 10px; background: #f8efd9; color: #855b26; font-size: 11px; border-radius: 5px; overflow-wrap: anywhere; }
+.eg-inspector { margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--eg-line); min-width: 0; }
+.eg-inspector h5 { margin: 0 0 8px; font-size: 13px; color: #ac4a36; overflow-wrap: anywhere; }
+.eg-inspector p { overflow-wrap: anywhere; }
+.eg-table-scroll { max-width: 100%; overflow: auto; max-height: 230px; margin-top: 8px; }
+.eg-table-scroll table { min-width: 800px; width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 10px; line-height: 1.6; }
+.eg-table-scroll th, .eg-table-scroll td { text-align: left; border: 0; border-bottom: 1px solid var(--eg-line); padding: 6px 8px; vertical-align: top; overflow-wrap: anywhere; }
+.eg-table-scroll th { background: #f4efe7; color: #82796d; position: sticky; top: 0; white-space: nowrap; }
+.eg-batman-table th:nth-child(1) { width: 120px; }
+.eg-batman-table th:nth-child(2) { width: 310px; }
+.eg-batman-table th:nth-child(3) { width: 65px; }
+.eg-batman-table th:nth-child(4) { width: 130px; }
+.eg-batman-table th:nth-child(5) { width: 175px; }
+.eg-batman-table td:nth-child(3), .eg-batman-table td:nth-child(5) { white-space: nowrap; }
+.eg-disease-table th:nth-child(1) { width: 140px; }
+.eg-disease-table th:nth-child(2) { width: 155px; }
+.eg-disease-table th:nth-child(3) { width: 330px; }
+.eg-disease-table th:nth-child(4) { width: 175px; }
+.eg-raw summary { padding: 7px 0; cursor: pointer; color: #746b60; font-size: 11px; }
+.eg-raw pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4efe7; padding: 10px; font: 10px/1.6 Consolas, monospace; }
+@media (max-width: 600px) { .evidence-graph { padding: 12px; } .eg-controls { gap: 8px; } .eg-controls label { flex-basis: 110px; } .eg-metrics { gap: 5px 12px; } .eg-metrics strong { font-size: 15px; } }

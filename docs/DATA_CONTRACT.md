@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-22：首页和工作台的正向证据增加药材→成分→靶点→疾病交互图，仅连接当前归档的`herb_relations`与被选候选的`evidence`，不增加研究API或改写数据。精确基因符号连接，成分CID决定身份，缺ID不按名称合并；重复原始行在详情中保留。按单靶点、每组最多8条路径显示，并标总数/范围，支持来源筛选及当前图SVG导出。缺失证据保留缺口，known/predicted按归档原值区分。原JSON导出、疾病排序和科学状态不变，详见[证据可视化](EVIDENCE_VISUALIZATION.md)。
+
 合并远端后保留Open Targets基础/严格分层计数及layered_candidates完整参考（>0.2/≥0.6），仅OT分值参与此参考排序；默认仍遵循用户最新确认的support，背景仍为可选对照。分层参考不替换两种主视图。来源改为流式Parquet，旧CSV归档保留，新查询不生成GB级CSV。
 
 正向新结果将大类单独返回 `broad_candidates`，默认 `candidates` 为按原支持度排序的非大类Top-K；`background_candidates` 独立保存完整候选集合的背景校正Top-K及逐条证据，页面切换不计算。`ranking.default_order=support`，`background_algorithm` 记录独立公式，科学验证状态仍待完成。原 `heuristic_v2` 分数不改写，反向不变；导出 `export_view` 只标记显示选择，不改写研究数组。字段、公式与初步文献对照见 [正向疾病排序](FORWARD_RANKING.md)。
