@@ -9,6 +9,7 @@
 .cnki-panel details details { padding-left: 10px; }
 .cnki-panel summary { cursor: pointer; color: #746b60; overflow-wrap: anywhere; font-size: 12px; }
 .cnki-panel details[open] > summary { color: #ac4a36; }
+.cnki-counts { display: block; margin: 3px 0 0 14px; color: #82796d; font-size: 10px; }
 .cnki-panel blockquote { margin: 10px 0; padding: 6px 10px; border-left: 3px solid #a4b49e; background: #f1f4eb; overflow-wrap: anywhere; }
 .cnki-panel button { font: inherit; color: #ac4a36; padding: 5px 9px; border: 1px solid #dfd2c3; border-radius: 5px; background: transparent; cursor: pointer; }
 .cnki-panel a { color: #ac4a36; text-decoration: underline; }

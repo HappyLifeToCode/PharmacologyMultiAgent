@@ -129,6 +129,7 @@ def test_invalid_corpus_is_not_silently_accepted(tmp_path, case):
 def test_missing_corpus_and_multiherb_input_do_not_trigger_collection(tmp_path, monkeypatch):
     import subprocess
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("must not launch a collector"))
+    (tmp_path / "data").mkdir()
     assert analyze(tmp_path)["status"] == "not_found"
     assert analyze(tmp_path / "absent")["status"] == "not_configured"
     assert analyze(tmp_path, research={"input": {"herbs": ["白芍", "甘草"]}})["status"] == "unsupported_input"
@@ -138,9 +139,8 @@ def test_missing_corpus_and_multiherb_input_do_not_trigger_collection(tmp_path, 
 def test_snapshot_is_immutable_reusable_after_source_change_and_detects_tampering(tmp_path, monkeypatch):
     p = paper()
     project, directory = corpus(tmp_path, [p], [triple(p)])
-    monkeypatch.setattr(cnki, "project_directory", lambda root: project)
     original = cnki.analyze
-    monkeypatch.setattr(cnki, "analyze", lambda result, **kwargs: original(result, catalog=CATALOG, **kwargs))
+    monkeypatch.setattr(cnki, "analyze", lambda result, **kwargs: original(result, project_dir=project, catalog=CATALOG))
     archive = tmp_path / "local/agent/forward/forward_test/result.json"
     archive.parent.mkdir(parents=True)
     archive.write_text(json.dumps({"input": {"formula": SUBJECT}}), encoding="utf-8")

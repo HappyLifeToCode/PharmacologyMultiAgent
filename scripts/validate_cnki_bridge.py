@@ -14,7 +14,9 @@ from pharm.literature import cnki
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subject", action="append", help="方剂名，可重复；默认四个内置方剂")
-    parser.add_argument("--project-dir", type=Path, default=cnki.project_directory())
+    location = parser.add_mutually_exclusive_group()
+    location.add_argument("--project-dir", type=Path, help="仅用于一次性核对旧项目来源；日常运行不需要")
+    location.add_argument("--data-dir", type=Path, help="本项目文献数据包目录，默认data/cnki")
     parser.add_argument("--output", type=Path, default=ROOT / "local/checks/cnki-local-bridge")
     args = parser.parse_args()
     subjects = args.subject or ["温经汤", "半夏白术天麻汤", "济川煎", "桃核承气汤"]
@@ -25,7 +27,8 @@ def main():
     summary = []
     for subject in subjects:
         # Same safety checks as the adapter; never use user text as an output path.
-        report = cnki.analyze({"input": {"formula": subject}}, project_dir=args.project_dir, catalog=(entities, names))
+        location_args = {"project_dir": args.project_dir} if args.project_dir else {"data_dir": args.data_dir or cnki.data_directory()}
+        report = cnki.analyze({"input": {"formula": subject}}, **location_args, catalog=(entities, names))
         report["validation_context"] = "named_subject_only; no new pharmacology calculation"
         filename = hashlib.sha256(subject.encode()).hexdigest()[:16] + ".json"
         (args.output / filename).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

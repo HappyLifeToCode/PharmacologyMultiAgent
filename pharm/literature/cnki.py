@@ -10,6 +10,7 @@ import re
 import unicodedata
 
 from ..core.common import ROOT, now
+from . import dataset
 
 VERSION = "cnki_local_title_abstract_v1"
 TERM_FILE = Path(__file__).with_name("chinese_terms.json")
@@ -19,8 +20,8 @@ def normalise(value):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or ""))).casefold()
 
 
-def project_directory(root=ROOT):
-    return Path(os.environ.get("PHARM_CNKI_PROJECT_DIR") or Path(root).parent / "UI-Agent")
+def data_directory(root=ROOT):
+    return Path(os.environ.get("PHARM_CNKI_DATA_DIR") or Path(root) / "data/cnki")
 
 
 def subject_of(result):
@@ -66,10 +67,11 @@ def intervention_type(paper, head, subject):
     return "same_name"  # Same name does not verify ingredients/doses.
 
 
-def _load(directory, subject):
+def _load(directory, subject, *, managed=False):
     if not subject or len(subject) > 150 or re.search(r"[\\/:\x00]", subject) or subject in {".", ".."}:
         raise ValueError("检索名不能作为安全的文献目录名称")
-    data_root = (Path(directory) / "data").resolve()
+    data_root = Path(directory).resolve()
+    listing = dataset.manifest(data_root) if managed else None
     corpus = (data_root / ("cnki_" + subject)).resolve()
     if not corpus.is_relative_to(data_root):
         raise ValueError("文献目录超出已配置的数据根目录")
@@ -88,6 +90,12 @@ def _load(directory, subject):
     if any((path.read_bytes() if path.is_file() else None) != content for path, content in zip(paths, raw)):
         raise ValueError("文献文件正在变化，请采集完成后重新读取")
     hashes = {path.name: hashlib.sha256(content).hexdigest() if content is not None else None for path, content in zip(paths, raw)}
+    if listing is not None:
+        entry = next((e for e in listing["corpora"] if e["keyword"] == subject), None)
+        if not entry or set(entry["files"]) != {name for name, raw_value in zip(dataset.FILES, raw) if raw_value is not None}:
+            raise ValueError("文献数据未登记在本项目数据清单中")
+        if any(entry["files"][name]["sha256"] != checksum for name, checksum in hashes.items() if checksum is not None):
+            raise ValueError("文献数据正在更新，请稍后重新读取")
     return value, triples, {"directory": str(corpus), "files": hashes}
 
 
@@ -106,17 +114,19 @@ def _map_disease(term, catalog):
     return {"status": "exact" if len(choices) == 1 else "ambiguous" if choices else "unmapped", "method": method, "choices": choices}
 
 
-def analyze(result, *, project_dir=None, catalog=None):
+def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
     subject, kind = subject_of(result)
     base = {"version": VERSION, "mode": "existing_local_only", "generated_at": now(), "subject": subject,
             "scientific_complete": False, "content_scope": "title_and_abstract_only",
             "query_context": result.get("input") or {}}
     if not subject:
         return {**base, "status": "unsupported_input", "message": "本地验证暂支持方剂或单味药材；多药材组合不借用单味文献作为组合证据。"}
-    directory = Path(project_dir or project_directory())
+    if project_dir is not None and data_dir is not None:
+        raise ValueError("只指定文献目录或导入来源项目之一")
+    directory = Path(project_dir) / "data" if project_dir is not None else Path(data_dir or data_directory())
     if not directory.is_dir():
-        return {**base, "status": "not_configured", "message": "未找到UI-Agent本地项目。可配置PHARM_CNKI_PROJECT_DIR；本轮不会启动在线采集。"}
-    data, triples, provenance = _load(directory, subject)
+        return {**base, "status": "not_configured", "message": "本项目尚未安装本地文献数据包，请先导入到data/cnki。"}
+    data, triples, provenance = _load(directory, subject, managed=project_dir is None)
     if data is None:
         return {**base, "status": "not_found", "message": "此检索名尚无本地知网题录；本轮只验证已有文献接入，未启动在线采集。"}
     if any(not isinstance(p, dict) or not isinstance(p.get("rank"), int) or isinstance(p.get("rank"), bool) for p in data["papers"]):

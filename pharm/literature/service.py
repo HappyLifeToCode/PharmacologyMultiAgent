@@ -39,7 +39,7 @@ def query(run_id, *, root=ROOT, snapshot=None):
         return value
     raw = archive.read_bytes()
     research = json.loads(raw.decode("utf-8-sig"))
-    value = cnki.analyze(research, project_dir=cnki.project_directory(root))
+    value = cnki.analyze(research, data_dir=cnki.data_directory(root))
     payload = {"run_id": run_id, "snapshot_id": None, "result": value}
     if value["status"] == "ready":
         value["database_archive_sha256"] = hashlib.sha256(raw).hexdigest()
