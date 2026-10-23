@@ -108,6 +108,11 @@ function createSession() {
   return session;
 }
 
+function cnkiSetting() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").cnki_enabled === true; }
+  catch { return false; }
+}
+
 function renderHistory() {
   const list = byId("history-list");
   list.replaceChildren();
@@ -375,6 +380,11 @@ function renderResult(result, message, content, sessionId) {
   if (candidates.length) followups.append(action("展开第一个疾病的证据", () => submitMessage("展开第一个疾病的证据", { message, index: 0, sessionId }), ""));
   followups.append(action("查看药材组成", () => submitMessage("查看药材组成", { message, sessionId }), ""));
   content.append(followups);
+  CnkiLiterature.mount(content, message.runId, {
+    enabled: message.cnkiEnabled === true, snapshot: message.cnkiSnapshot,
+    onChange: ({ enabled, snapshot }) => { message.cnkiEnabled = enabled; message.cnkiSnapshot = snapshot; saveSessions(); },
+    beforeUpdate: rememberConversationPosition, afterUpdate: restoreConversationPosition,
+  });
 }
 
 async function resultFor(message) {
@@ -603,6 +613,7 @@ async function submitMessage(suppliedText, context) {
         if (!prepared) { reply.kind = "text"; reply.text = "已取消选择，本次未启动查询。"; return; }
         const body = prepared.body;
         reply.direction = prepared.direction;
+        reply.cnkiEnabled = prepared.direction === "forward" && cnkiSetting();
         reply.kind = "pending";
         reply.queryBody = body;
         reply.queryText = text;
@@ -663,6 +674,7 @@ function openSettings() {
   const values = settings();
   byId("setting-top-k").value = values.top_k;
   byId("setting-threshold").value = values.batman_threshold;
+  byId("setting-cnki").checked = cnkiSetting();
   byId("settings-dialog").showModal();
 }
 
@@ -693,7 +705,7 @@ async function bootChat() {
   byId("close-settings").addEventListener("click", () => byId("settings-dialog").close());
   byId("settings-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    const values = { top_k: Number(byId("setting-top-k").value), batman_threshold: Number(byId("setting-threshold").value) };
+    const values = { top_k: Number(byId("setting-top-k").value), batman_threshold: Number(byId("setting-threshold").value), cnki_enabled: byId("setting-cnki").checked };
     if (!Number.isInteger(values.top_k) || values.top_k < 1 || values.top_k > 100 || values.batman_threshold < 0 || values.batman_threshold > 1) return;
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(values)); }
     catch (error) { byId("status-message").textContent = "浏览器无法保存查询设置。"; return; }

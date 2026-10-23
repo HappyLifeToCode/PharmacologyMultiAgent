@@ -19,6 +19,7 @@ from pharm.discovery import query as discovery
 from pharm.agent import jobs as forward_jobs
 from pharm.agent import progress as query_progress
 from pharm.agent import disease_input
+from pharm.literature import service as cnki_literature
 from pharm.agent.forward import _top_k
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from pharm.batman import formula_catalog
@@ -117,6 +118,28 @@ def evidence_graph_script():
 @app.get("/assets/evidence-graph.css")
 def evidence_graph_style():
     return FileResponse(ROOT / "server/static/evidence-graph.css", media_type="text/css")
+
+
+@app.get("/assets/cnki-literature.js")
+def cnki_literature_script():
+    return FileResponse(ROOT / "server/static/cnki-literature.js", media_type="text/javascript")
+
+
+@app.get("/assets/cnki-literature.css")
+def cnki_literature_style():
+    return FileResponse(ROOT / "server/static/cnki-literature.css", media_type="text/css")
+
+
+@app.get("/api/agent/forward/{run_id}/literature")
+def forward_literature(run_id: str, snapshot: str | None = None):
+    try:
+        return cnki_literature.query(run_id, root=ROOT, snapshot=snapshot)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(400, str(exc))
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(503, "本地文献分析不可用：" + str(exc))
 
 
 @app.get("/assets/icons/{filename}")

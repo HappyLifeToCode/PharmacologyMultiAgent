@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/assets/style.css?v=20261015-progress-layout">
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
+<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261023">
 </head>
 <body>
 <header>
@@ -33,6 +34,7 @@
     <button id="forward-choose-composition" type="button">选择/修改组成</button>
   </div>
   <p class="note">支持 BATMAN 本地方剂组成表；同名不同组成需选择，可保存默认清单。温经汤等四方保留当前内置组成。未收录方剂或加减方请填写实际药材组合。按 Ctrl+Enter 可提交查询。</p>
+  <label class="cnki-setting"><input id="forward-cnki" type="checkbox">使用知网文献辅助分析（本地已有标题摘要验证，默认关闭）</label>
   <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。</p>
   <p id="forward-message" class="message"></p>
   <div id="forward-result" hidden>
@@ -61,6 +63,7 @@
     <details id="forward-raw-ranking" hidden><summary>原支持度排序摘要</summary><div class="forward-table-scroll"><table><thead><tr><th>原序号</th><th>疾病实体</th><th>类型</th><th>原支持度</th></tr></thead><tbody></tbody></table></div></details>
     <details id="forward-layered-reference" hidden><summary>Open Targets 证据分层参考（非默认排序，点击查看证据）</summary><div class="forward-table-scroll"><table><thead><tr><th>疾病实体</th><th>严格靶点</th><th>基础靶点</th><th>最高关联分值</th></tr></thead><tbody></tbody></table></div></details>
     <p id="forward-unmatched" class="note"></p>
+    <div id="forward-literature"></div>
     <div id="forward-evidence-panel" hidden>
       <h3 id="forward-evidence-title"></h3>
       <div id="forward-evidence-graph"></div>
@@ -170,6 +173,7 @@
 <script src="/assets/query-progress.js?v=20261015-layout"></script>
 <script src="/assets/formula-picker.js?v=20261014"></script>
 <script src="/assets/evidence-graph.js?v=20261022"></script>
-<script src="/assets/app.js?v=20261022-evidence-graph"></script>
+<script src="/assets/cnki-literature.js?v=20261023"></script>
+<script src="/assets/app.js?v=20261023-cnki-local"></script>
 </body>
 </html>

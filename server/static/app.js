@@ -140,6 +140,18 @@ function renderForwardResult(result, order) {
   orderSelect.value = selectedOrder;
   orderSelect.onchange = () => renderForwardResult(result, orderSelect.value);
   panel.hidden = false;
+  const literature = $("forward-literature"); literature.replaceChildren();
+  const literatureContext = forwardLiterature;
+  CnkiLiterature.mount(literature, literatureContext.runId, {
+    enabled: literatureContext.enabled, snapshot: literatureContext.snapshot,
+    onChange: ({ enabled, snapshot }) => {
+      literatureContext.enabled = enabled; literatureContext.snapshot = snapshot;
+      if (forwardLiterature === literatureContext) {
+        try { sessionStorage.setItem("pharmacology.workbench.cnki.v1", JSON.stringify(literatureContext)); }
+        catch { /* Analysis remains usable when browser metadata cannot be saved. */ }
+      }
+    },
+  });
   const input = result.input || {};
   const displayHerbs = FormulaPicker.compositionNames(input);
   const resolved = Array.isArray(result.resolved_herbs) ? result.resolved_herbs : [];
@@ -255,6 +267,7 @@ function renderForwardResult(result, order) {
 }
 
 let previousForwardQuery = null;
+let forwardLiterature = { enabled: false, snapshot: null, runId: null, queryId: null };
 
 async function submitForwardQuery(forceComposition = false) {
   const message = $("forward-message");
@@ -281,6 +294,8 @@ async function submitForwardQuery(forceComposition = false) {
     const query = await FormulaPicker.prepare({ text, top_k: topK }, { force: forceComposition === true });
     if (!query) { message.textContent = "已取消组成选择，本次未启动查询。"; return; }
     requestId = crypto.randomUUID();
+    forwardLiterature = { enabled: $("forward-cnki").checked, snapshot: null, runId: null, queryId: requestId };
+    try { sessionStorage.setItem("pharmacology.workbench.cnki.v1", JSON.stringify(forwardLiterature)); } catch { /* Optional metadata only. */ }
     sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
     QueryProgress.render(message, { created_at: new Date().toISOString() });
     stopProgress = QueryProgress.watch("forward", requestId, (status) => QueryProgress.render(message, status));
@@ -290,6 +305,7 @@ async function submitForwardQuery(forceComposition = false) {
     });
     previousForwardQuery = null;
     sessionStorage.removeItem("pharmacology.workbench.query.v1");
+    forwardLiterature.runId = response.run_id;
     renderForwardResult(response.result || {});
     message.textContent = "查询完成，运行编号：" + (response.run_id || "未记录");
   } catch (err) {
@@ -321,6 +337,10 @@ function setupForwardChat() {
 async function resumeForwardQuery() {
   const requestId = sessionStorage.getItem("pharmacology.workbench.query.v1");
   if (!requestId) return;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem("pharmacology.workbench.cnki.v1") || "{}");
+    if (stored.queryId === requestId) { forwardLiterature = stored; $("forward-cnki").checked = stored.enabled === true; }
+  } catch { /* Keep the optional analysis off when browser metadata is invalid. */ }
   previousForwardQuery = requestId;
   const button = $("forward-submit");
   button.disabled = true;
@@ -335,6 +355,7 @@ async function resumeForwardQuery() {
         continue;
       }
       if (["succeeded", "partial"].includes(status.status)) {
+        forwardLiterature.runId = status.run_id;
         renderForwardResult(await api("/api/agent/forward/" + encodeURIComponent(status.run_id)));
         $("forward-message").textContent = "原查询已完成，运行编号：" + status.run_id;
         previousForwardQuery = null;

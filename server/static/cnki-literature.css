@@ -1,0 +1,17 @@
+.cnki-panel { margin: 18px 0; padding: 15px; border: 1px solid #e1d8cc; border-radius: 10px; background: #fffdf8; color: #342f2a; min-width: 0; font: 12px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif; }
+.cnki-panel h4 { font-size: 14px; margin: 0 0 8px; }
+.cnki-panel p { margin: 8px 0; overflow-wrap: anywhere; }
+.cnki-panel .cnki-note { font-size: 10px; color: #82796d; }
+.cnki-panel .cnki-meta { color: #746b60; font-size: 11px; }
+.cnki-notice { background: #f6efdf; padding: 8px 10px; border-radius: 5px; color: #795d35; font-size: 11px; }
+.cnki-list { max-height: 520px; overflow-y: auto; margin: 12px 0; }
+.cnki-panel details { margin: 7px 0; padding: 6px 0; border-bottom: 1px solid #eee5d9; min-width: 0; }
+.cnki-panel details details { padding-left: 10px; }
+.cnki-panel summary { cursor: pointer; color: #746b60; overflow-wrap: anywhere; font-size: 12px; }
+.cnki-panel details[open] > summary { color: #ac4a36; }
+.cnki-panel blockquote { margin: 10px 0; padding: 6px 10px; border-left: 3px solid #a4b49e; background: #f1f4eb; overflow-wrap: anywhere; }
+.cnki-panel button { font: inherit; color: #ac4a36; padding: 5px 9px; border: 1px solid #dfd2c3; border-radius: 5px; background: transparent; cursor: pointer; }
+.cnki-panel a { color: #ac4a36; text-decoration: underline; }
+.cnki-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 10px; }
+.cnki-setting { display: flex !important; align-items: center; gap: 7px; margin: 10px 0; font-size: 12px; }
+.cnki-setting input { width: auto !important; flex-shrink: 0; }

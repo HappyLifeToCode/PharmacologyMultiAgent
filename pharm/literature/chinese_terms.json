@@ -1,0 +1,18 @@
+{
+  "source": "project_glossary: explicit Chinese-to-English terms; exact ontology names/aliases only",
+  "terms": {
+    "痛经": ["dysmenorrhea"],
+    "原发性痛经": ["primary dysmenorrhea"],
+    "继发性痛经": ["secondary dysmenorrhea"],
+    "关节病型银屑病": ["psoriatic arthritis"],
+    "梅尼埃病": ["Meniere disease"],
+    "肝性脑病": ["hepatic encephalopathy"],
+    "肠易激综合征": ["irritable bowel syndrome"],
+    "缺血性脑卒中": ["ischemic stroke"],
+    "高血压病": ["hypertensive disorder"],
+    "慢性肾衰竭": ["chronic renal failure"],
+    "功能性便秘": ["functional constipation"],
+    "慢传输型便秘": ["slow transit constipation"],
+    "糖尿病肾病": ["diabetic nephropathy"]
+  }
+}

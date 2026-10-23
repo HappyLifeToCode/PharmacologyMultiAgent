@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-23：新增可选本地文献接入验证，原forward请求体、缓存和研究数组不改。文献只通过独立`GET /api/agent/forward/{run_id}/literature`读取已有UI-Agent题录；成功快照独立保存于`local/agent/literature/<run_id>/`，`snapshot`参数恢复旧分析，包含原研究及语料实际哈希、映射与支撑句。浏览器只保存启用状态/快照ID，原研究JSON不回写。排序是可解释的标题摘要关联频次，不是疗效；未映射/歧义保留，不替换父病。本轮无在线采集或模型调用，详见[CNKI接入](CNKI_INTEGRATION.md)。
+
 2026-10-22：首页和工作台的正向证据增加药材→成分→靶点→疾病交互图，仅连接当前归档的`herb_relations`与被选候选的`evidence`，不增加研究API或改写数据。精确基因符号连接，成分CID决定身份，缺ID不按名称合并；重复原始行在详情中保留。按单靶点、每组最多8条路径显示，并标总数/范围，支持来源筛选及当前图SVG导出。缺失证据保留缺口，known/predicted按归档原值区分。原JSON导出、疾病排序和科学状态不变，详见[证据可视化](EVIDENCE_VISUALIZATION.md)。
 
 合并远端后保留Open Targets基础/严格分层计数及layered_candidates完整参考（>0.2/≥0.6），仅OT分值参与此参考排序；默认仍遵循用户最新确认的support，背景仍为可选对照。分层参考不替换两种主视图。来源改为流式Parquet，旧CSV归档保留，新查询不生成GB级CSV。
