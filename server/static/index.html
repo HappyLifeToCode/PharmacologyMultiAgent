@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/assets/chat.css?v=20261019-ranking-compare">
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
-<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261023-clear">
+<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261024-flow">
 </head>
 <body>
 <div class="chat-shell">
@@ -68,8 +68,8 @@
     <label>返回候选数量<input id="setting-top-k" type="number" min="1" max="100" value="10" required></label>
     <label>BATMAN 预测靶点阈值<input id="setting-threshold" type="number" min="0" max="1" step="0.01" value="0.84" required></label>
     <small>当前正向、反向会话查询均采用 known-only 已知证据，调整阈值不会开启预测靶点，也不改变已知证据结果。</small>
-    <label class="cnki-setting"><input id="setting-cnki" type="checkbox">使用已保存的知网论文辅助检索</label>
-    <small>默认关闭。先显示数据库结果，再读取本地论文标题和摘要；不会自动开始在线采集。仅用于方剂/药材→疾病方向。</small>
+    <label class="cnki-setting"><input id="setting-cnki" type="checkbox">启用知网文献辅助（本地优先）</label>
+    <small>默认关闭。启用后先显示靶点结果；本地有文献则直接排序，缺少时自动采集标题和摘要，完成后补充文献排序。支持正反向，不获取论文全文，采集可能耗时。</small>
     <button type="submit" class="primary-button">保存设置</button>
   </form>
 </dialog>
@@ -77,9 +77,10 @@
 <script src="/assets/query-presence.js?v=20261014-tab"></script>
 <script src="/assets/query-progress.js?v=20261015-layout"></script>
 <script src="/assets/formula-picker.js?v=20261014"></script>
-<script src="/assets/reverse-chat.js?v=20261014-evidence-nowrap"></script>
+<script src="/assets/reverse-chat.js?v=20261024-literature"></script>
 <script src="/assets/evidence-graph.js?v=20261022"></script>
-<script src="/assets/cnki-literature.js?v=20261023-clear"></script>
-<script src="/assets/chat.js?v=20261023-cnki-local"></script>
+<script src="/assets/literature-flow.js?v=20261024"></script>
+<script src="/assets/cnki-literature.js?v=20261024-flow"></script>
+<script src="/assets/chat.js?v=20261024-literature-flow"></script>
 </body>
 </html>

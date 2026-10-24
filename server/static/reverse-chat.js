@@ -118,4 +118,5 @@ function renderReverseResult(result, message, content, sessionId) {
     action("查看匹配指标", () => submitMessage("查看匹配指标", { message, sessionId })),
     action("查看疾病靶点", () => submitMessage("查看疾病靶点", { message, sessionId })));
   content.append(actions);
+  mountChatLiterature(message, content);
 }

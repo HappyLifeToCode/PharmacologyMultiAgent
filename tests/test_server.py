@@ -52,6 +52,7 @@ def test_index_static_assets_and_formulas_catalog():
         assert client.get("/assets/evidence-graph.js").status_code == 200
         assert client.get("/assets/evidence-graph.css").status_code == 200
         assert client.get("/assets/cnki-literature.js").status_code == 200
+        assert client.get("/assets/literature-flow.js").status_code == 200
         assert client.get("/assets/cnki-literature.css").status_code == 200
         assert client.get("/assets/disease-labels.js").status_code == 200
         assert client.get("/assets/query-presence.js").status_code == 200

@@ -12,7 +12,8 @@ const CnkiLiterature = (() => {
   async function fetchAnalysis(runId, snapshot) {
     const key = runId + ":" + (snapshot || "current");
     if (!responses.has(key)) {
-      const pending = fetch("/api/agent/forward/" + encodeURIComponent(runId) + "/literature" + (snapshot ? "?snapshot=" + encodeURIComponent(snapshot) : ""))
+      const direction = runId.startsWith("reverse_") ? "reverse" : "forward";
+      const pending = fetch("/api/agent/" + direction + "/" + encodeURIComponent(runId) + "/literature" + (snapshot ? "?snapshot=" + encodeURIComponent(snapshot) : ""))
         .then(async (response) => { const value = await response.json(); if (!response.ok) throw new Error(typeof value.detail === "string" ? value.detail : "文献分析暂不可用"); return value; });
       responses.set(key, pending);
       pending.then((value) => { if (value.snapshot_id) responses.set(runId + ":" + value.snapshot_id, Promise.resolve(value)); }).catch(() => { if (responses.get(key) === pending) responses.delete(key); });
@@ -22,15 +23,16 @@ const CnkiLiterature = (() => {
   function mount(parent, runId, options = {}) {
     if (!runId) return;
     const root = node("section", null, "cnki-panel"); parent.append(root);
-    let enabled = options.enabled === true, snapshot = options.snapshot || null, current, revision = 0;
+    const reverse = runId.startsWith("reverse_");
+    let enabled = options.enabled === true, snapshot = options.snapshot || null, current, revision = 0, unsubscribe;
     function update(handler) { if (!root.isConnected) return; options.beforeUpdate?.(); handler(); options.afterUpdate?.(); }
-    function heading() { root.replaceChildren(node("h4", "知网文献关联排序（验证版）")); root.append(node("p", "根据已保存的论文标题和摘要整理疾病研究线索。当前不会自动联网采集，也不需要阅读全文。", "cnki-note")); }
+    function heading() { root.replaceChildren(node("h4", "知网文献关联排序（验证版）")); root.append(node("p", "先使用本地文献；缺少时自动采集标题和摘要，完成后补充文献排序。靶点排序保留，不获取论文全文。", "cnki-note")); }
     function paperDetail(parent, evidence) {
       const section = details("#" + evidence.paper_rank + " " + evidence.title, parent);
       const href = safeUrl(evidence.url);
       if (href) { const link = node("a", "知网原记录 ↗"); link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; section.append(link); }
       section.append(node("p", (evidence.authors || "作者未记录") + " · " + (evidence.date || "时间未记录")));
-      section.append(node("p", (interventions[evidence.intervention] || evidence.intervention) + "；" + (studies[evidence.study_type] || evidence.study_type)));
+      section.append(node("p", (reverse && evidence.intervention === "same_name" ? "文献中的药材/方剂未标加减或联合" : interventions[evidence.intervention] || evidence.intervention) + "；" + (studies[evidence.study_type] || evidence.study_type)));
       section.append(node("blockquote", evidence.quote));
       section.append(node("p", "引用来自论文" + (evidence.quote_field === "title" ? "标题" : "摘要") + "，已与保存的原文核对。", "cnki-note"));
       const abstract = details("查看原摘要", section); abstract.append(node("p", evidence.abstract || "本条没有摘要"));
@@ -49,16 +51,20 @@ const CnkiLiterature = (() => {
       root.append(node("p", "已读取 " + source.paper_count + " 条文献记录，去重后 " + source.unique_paper_count + " 篇，其中 " + source.abstract_count + " 篇有摘要。", "cnki-meta"));
       root.append(node("p", "目前只使用已采集的这批论文，不代表知网全部文献，也不是数据库靶点关联排序。", "cnki-note"));
       const frequencyOrder = data.ranking?.kind === "descriptive_retrieval_frequency";
-      root.append(node("p", frequencyOrder ? "当前按篇数暂排：先看方名一致且未标加减/联合的篇数，再看全部关联篇数。两项都相同的条目视为并列，仅按病名顺序显示。" : data.ranking?.note, "cnki-notice"));
+      root.append(node("p", reverse ? data.ranking?.note : frequencyOrder ? "当前按篇数暂排：先看方名一致且未标加减/联合的篇数，再看全部关联篇数。两项都相同的条目视为并列，仅按病名顺序显示。" : data.ranking?.note, "cnki-notice"));
       const explanation = details("篇数和排序是什么意思？", root);
-      explanation.append(node("p", "“方名一致且未标加减/联合”指论文方名与检索名一致、记录明确未标加减，且未识别出联合治疗。信息不全或名称不确定的文献不计入这一项；这不等于组成和剂量已经核实一致。"));
+      explanation.append(node("p", reverse ? "药材与方剂按论文原名分别整理；优先看未标加减或联合的去重篇数，再看全部关联篇数，最后按原名显示。这里的原名尚未自动对齐到BATMAN药材条目。" : "“方名一致且未标加减/联合”指论文方名与检索名一致、记录明确未标加减，且未识别出联合治疗。信息不全或名称不确定的文献不计入这一项；这不等于组成和剂量已经核实一致。"));
       explanation.append(node("p", "“全部关联”包含符合文字出处检查的所有关联论文，也包括加减方、联合干预和名称待确认的记录。同一篇论文多次提及只计一次。"));
       explanation.append(node("p", "临床、动物和综述目前没有分别加权，摘要中的改善、阴性或不明确结论也尚未系统分类。排序反映这批文献的关联篇数，不能当作疗效强弱。"));
       const list = node("div", null, "cnki-list"); root.append(list);
-      for (const item of data.candidates || []) {
-        const section = details(item.rank + ". " + item.raw_names.join(" / "), list);
-        section.querySelector("summary").append(node("span", "方名一致且未标加减/联合：" + item.direct_paper_count + "篇 · 全部关联：" + item.paper_count + "篇", "cnki-counts"));
-        if (item.mapping.status === "exact") {
+      if (reverse) root.insertBefore(node("h5", "文献关联药材（论文原名）"), list);
+      function renderItems(items, parent) {
+        for (const item of items) {
+        const section = details(item.rank + ". " + item.raw_names.join(" / "), parent);
+        section.querySelector("summary").append(node("span", (reverse ? "未标加减/联合：" : "方名一致且未标加减/联合：") + item.direct_paper_count + "篇 · 全部关联：" + item.paper_count + "篇", "cnki-counts"));
+        if (reverse) {
+          section.append(node("p", "论文中的" + (item.candidate_type === "formula" ? "方剂" : "药材") + "原名；尚未自动匹配BATMAN实体，不能据此认定与靶点列表中的条目相同。", "cnki-note"));
+        } else if (item.mapping.status === "exact") {
           const choice = item.mapping.choices[0];
           section.append(node("p", "已匹配数据库疾病：" + choice.name + "；疾病编号：" + choice.disease_id + (item.mapping.method.startsWith("project_translation") ? "（通过已登记的中英文名称对应）" : "")));
           section.append(node("p", item.in_returned_database_lists ? "这个疾病也在本次数据库结果展示的列表中。" : "本次数据库结果展示的列表中未列出它；这不表示数据库中没有相关靶点。", "cnki-note"));
@@ -68,8 +74,16 @@ const CnkiLiterature = (() => {
         }
         section.append(node("p", "按标题摘要初步识别：" + Object.entries(item.study_counts).map(([type, count]) => (studies[type] || type) + " " + count + "篇").join("；")));
         item.evidence.forEach((evidence) => paperDetail(section, evidence));
+        }
       }
-      if (!data.candidates.length) list.append(node("p", "已读取论文，但暂未提取到能用原句核对的疾病关联。这不表示没有相关研究。"));
+      renderItems(data.candidates || [], list);
+      if (!data.candidates.length) list.append(node("p", "已读取论文，但暂未提取到能用原句核对的" + (reverse ? "单味药材" : "疾病") + "关联。这不表示没有相关研究。"));
+      if (reverse && data.formula_candidates?.length) {
+        const formulas = details("文献中的方剂线索（" + data.formula_candidates.length + "项，另列）", root);
+        formulas.className = "cnki-formulas";
+        formulas.append(node("p", "方剂不作为单味药材计入上方列表。", "cnki-note"));
+        renderItems(data.formula_candidates, formulas);
+      }
       const papers = details("查看这批论文的标题和摘要（" + source.paper_count + "篇）", root);
       for (const paper of data.papers) {
         const detail = details("#" + paper.rank + " " + paper.title, papers);
@@ -77,7 +91,7 @@ const CnkiLiterature = (() => {
       }
       const rejected = details("未计入本次关联的提取记录（" + data.rejected.length + "条）", root);
       rejected.append(node("p", "这里列的是未纳入的关系记录，不代表整篇论文无效。"));
-      for (const item of data.rejected) rejected.append(node("p", "#" + item.rank + " " + item.head + " → " + item.term + "：" + (reasons[item.reason] || item.reason)));
+      for (const item of data.rejected) rejected.append(node("p", "#" + item.rank + " " + item.head + " → " + item.term + "：" + (item.reason === "other_disease" ? "研究病名与本次疾病不一致，未换成父病或亚型" : reasons[item.reason] || item.reason)));
       const version = details("查看数据来源和本次分析版本", root);
       version.append(node("p", "采集时间：" + (source.collected_at || "未记录") + "；原检索记录显示命中 " + (source.total_results_reported ?? "未知") + " 条，本页只分析已保存的论文。"));
       version.append(node("p", "分析记录编号：" + payload.snapshot_id + "；数据校验标识：" + data.fingerprint + "。刷新页面会恢复这份分析，重新读取才会生成新记录。", "cnki-note"));
@@ -87,22 +101,74 @@ const CnkiLiterature = (() => {
         const link = node("a"); link.href = url; link.download = runId + "-" + snapshot + ".json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
       })); root.append(actions);
     }
+    function accept(payload) {
+      snapshot = payload.snapshot_id;
+      options.onChange?.({ enabled, snapshot });
+      update(() => render(payload));
+    }
+    function progress(state) {
+      heading();
+      if (state.state === "ready" && state.literature) { accept(state.literature); return; }
+      const job = state.collection;
+      const box = node("div", null, "cnki-progress"); box.setAttribute("role", "status"); root.append(box);
+      const start = Date.parse(job?.started_at || job?.created_at || state.created_at || "");
+      const end = Date.parse(job?.finished_at || "") || Date.now();
+      if (Number.isFinite(start)) {
+        const elapsed = Math.max(0, Math.floor((end - start) / 1000));
+        box.append(node("p", "本次运行用时 " + Math.floor(elapsed / 60) + "分" + elapsed % 60 + "秒", "cnki-progress-time"));
+      }
+      let label = "正在核对本地文献…";
+      if (state.state === "starting") label = "正在准备文献流程…";
+      if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : "本地暂无文献，正在采集标题和摘要…";
+      if (state.state === "failed") label = "文献任务暂未完成，进度已保留";
+      if (state.state === "cancelled") label = "文献任务已停止，进度已保留";
+      if (state.state === "unsupported_input") label = state.error || "本次输入暂不支持单一关键词文献分析";
+      if (state.state === "not_started") label = "文献流程尚未启动";
+      box.append(node("p", label, "cnki-progress-stage"));
+      if (job) box.append(node("p", "关键词：" + job.keyword + " · 题录 " + job.paper_count + "篇 · 摘要 " + job.abstract_count + "篇 · 已记录 " + job.pages_recorded + "页 · 已分析 " + job.extracted_papers + "篇", "cnki-meta"));
+      root.append(node("p", "靶点排序已保留；文献准备完成后会在这里自动显示。刷新和切换排序不会重复采集。", "cnki-note"));
+      if (state.error) root.append(node("p", state.error, "cnki-notice"));
+      if (state.connectionError) root.append(node("p", state.connectionError, "cnki-notice"));
+      const controls = node("div", null, "cnki-actions");
+      const flow = LiteratureFlow.get(runId);
+      if (state.state === "collecting") {
+        const stop = button("停止文献任务", () => flow.cancel()); stop.disabled = state.busy || job?.status === "cancelling"; controls.append(stop);
+        root.append(node("p", "任务会在后台继续。停止会同时影响共享这个关键词任务的其他文献流程，靶点结果保留。", "cnki-note"));
+      }
+      if (["failed", "cancelled"].includes(state.state)) {
+        const resume = button("继续采集或分析", () => flow.resume()); resume.disabled = state.busy; controls.append(resume);
+      }
+      if (state.connectionError || state.state === "not_started") {
+        const retry = button("重试文献流程", () => flow.retry()); retry.disabled = state.busy; controls.append(retry);
+      }
+      root.append(controls);
+    }
+    function connectFlow(requestRevision) {
+      const flow = LiteratureFlow.get(runId);
+      const stop = flow.subscribe((state) => queueMicrotask(() => {
+        if (requestRevision !== revision || !root.isConnected) { stop(); return; }
+        if (state.state === "ready" && state.literature) accept(state.literature);
+        else update(() => progress(state));
+      }));
+      unsubscribe = stop;
+    }
     async function load(refresh = false) {
       const requestRevision = ++revision;
+      unsubscribe?.(); unsubscribe = null;
       enabled = true;
       if (refresh) { snapshot = null; responses.delete(runId + ":current"); }
       options.onChange?.({ enabled, snapshot });
       update(() => { heading(); root.append(node("p", "正在读取已保存的论文，并查找对应的数据库疾病名称…", "cnki-note")); });
       try {
+        if (!snapshot && !refresh) { connectFlow(requestRevision); return; }
         const payload = await fetchAnalysis(runId, snapshot);
         if (requestRevision !== revision) return;
-        snapshot = payload.snapshot_id;
-        options.onChange?.({ enabled, snapshot });
-        update(() => render(payload));
+        if (payload.result.status === "ready") accept(payload);
+        else connectFlow(requestRevision);
       } catch (error) { if (requestRevision === revision) update(() => { heading(); root.append(node("p", error.message, "cnki-notice"), button("重试读取", () => load()), button("重新读取本地文献", () => load(true))); }); }
     }
     if (enabled) load();
-    else { heading(); root.append(node("p", "尚未启用文献辅助检索。点击下方按钮可读取已有论文，不会重算数据库查询。", "cnki-note"), button("读取已有知网文献", () => load())); }
+    else { heading(); root.append(node("p", "文献辅助默认关闭。启用后本地优先；缺少时会联网采集标题和摘要，可能耗时，不会重算靶点查询。", "cnki-note"), button("启用文献辅助", () => load())); }
     return root;
   }
   return { mount };

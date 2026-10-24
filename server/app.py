@@ -188,6 +188,11 @@ def cnki_literature_style():
     return FileResponse(ROOT / "server/static/cnki-literature.css", media_type="text/css")
 
 
+@app.get("/assets/literature-flow.js")
+def literature_flow_script():
+    return FileResponse(ROOT / "server/static/literature-flow.js", media_type="text/javascript")
+
+
 @app.get("/api/agent/{direction}/{run_id}/literature")
 def forward_literature(direction: str, run_id: str, snapshot: str | None = None):
     try:

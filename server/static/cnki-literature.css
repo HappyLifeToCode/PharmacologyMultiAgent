@@ -1,5 +1,10 @@
 .cnki-panel { margin: 18px 0; padding: 15px; border: 1px solid #e1d8cc; border-radius: 10px; background: #fffdf8; color: #342f2a; min-width: 0; font: 12px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif; }
 .cnki-panel h4 { font-size: 14px; margin: 0 0 8px; }
+.cnki-panel h5 { font-size: 12px; margin: 12px 0 6px; }
+.cnki-progress { padding: 8px 10px; background: #f6efdf; border-radius: 5px; }
+.cnki-panel .cnki-progress-time { color: #82796d; font-size: 11px; margin: 0 0 7px; }
+.cnki-panel .cnki-progress-stage { border-top: 1px solid #e7dccc; padding-top: 7px; margin: 0; }
+.cnki-panel button:disabled { opacity: .55; cursor: default; }
 .cnki-panel p { margin: 8px 0; overflow-wrap: anywhere; }
 .cnki-panel .cnki-note { font-size: 10px; color: #82796d; }
 .cnki-panel .cnki-meta { color: #746b60; font-size: 11px; }

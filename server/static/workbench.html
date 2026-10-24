@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/assets/style.css?v=20261015-progress-layout">
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
-<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261023-clear">
+<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261024-flow">
 </head>
 <body>
 <header>
@@ -34,7 +34,7 @@
     <button id="forward-choose-composition" type="button">选择/修改组成</button>
   </div>
   <p class="note">支持 BATMAN 本地方剂组成表；同名不同组成需选择，可保存默认清单。温经汤等四方保留当前内置组成。未收录方剂或加减方请填写实际药材组合。按 Ctrl+Enter 可提交查询。</p>
-  <label class="cnki-setting"><input id="forward-cnki" type="checkbox">使用已保存的知网论文辅助检索（默认关闭，不会自动联网采集）</label>
+  <label class="cnki-setting"><input id="forward-cnki" type="checkbox">启用知网文献辅助（默认关闭；本地优先，缺少时自动采集标题摘要）</label>
   <p class="note">置信度是透明启发式排序分数，不是治疗有效率或疗效概率。</p>
   <p id="forward-message" class="message"></p>
   <div id="forward-result" hidden>
@@ -173,7 +173,8 @@
 <script src="/assets/query-progress.js?v=20261015-layout"></script>
 <script src="/assets/formula-picker.js?v=20261014"></script>
 <script src="/assets/evidence-graph.js?v=20261022"></script>
-<script src="/assets/cnki-literature.js?v=20261023-clear"></script>
-<script src="/assets/app.js?v=20261023-cnki-local"></script>
+<script src="/assets/literature-flow.js?v=20261024"></script>
+<script src="/assets/cnki-literature.js?v=20261024-flow"></script>
+<script src="/assets/app.js?v=20261024-literature-flow"></script>
 </body>
 </html>

@@ -147,8 +147,7 @@ function renderForwardResult(result, order) {
     onChange: ({ enabled, snapshot }) => {
       literatureContext.enabled = enabled; literatureContext.snapshot = snapshot;
       if (forwardLiterature === literatureContext) {
-        try { sessionStorage.setItem("pharmacology.workbench.cnki.v1", JSON.stringify(literatureContext)); }
-        catch { /* Analysis remains usable when browser metadata cannot be saved. */ }
+        persistForwardLiterature();
       }
     },
   });
@@ -269,6 +268,24 @@ function renderForwardResult(result, order) {
 let previousForwardQuery = null;
 let forwardLiterature = { enabled: false, snapshot: null, runId: null, queryId: null };
 
+function persistForwardLiterature() {
+  try {
+    sessionStorage.setItem("pharmacology.workbench.cnki.v1", JSON.stringify(forwardLiterature));
+    if (forwardLiterature.runId) sessionStorage.setItem("pharmacology.workbench.forward-result.v1", JSON.stringify(forwardLiterature));
+  } catch { /* Optional browser metadata only; results remain on the server. */ }
+}
+
+async function restoreForwardResult() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("pharmacology.workbench.forward-result.v1") || sessionStorage.getItem("pharmacology.workbench.cnki.v1") || "{}");
+    if (!saved.runId?.startsWith("forward_") || !/^[A-Za-z0-9_-]{1,100}$/.test(saved.runId)) return;
+    forwardLiterature = saved;
+    $("forward-cnki").checked = saved.enabled === true;
+    renderForwardResult(await api("/api/agent/forward/" + encodeURIComponent(saved.runId)));
+    $("forward-message").textContent = "已恢复上次靶点结果，文献流程会按原状态接续；没有重新发起研究查询。";
+  } catch (error) { $("forward-message").textContent = "上次归档暂时无法读取：" + error.message; }
+}
+
 async function submitForwardQuery(forceComposition = false) {
   const message = $("forward-message");
   const button = $("forward-submit");
@@ -306,6 +323,7 @@ async function submitForwardQuery(forceComposition = false) {
     previousForwardQuery = null;
     sessionStorage.removeItem("pharmacology.workbench.query.v1");
     forwardLiterature.runId = response.run_id;
+    persistForwardLiterature();
     renderForwardResult(response.result || {});
     message.textContent = "查询完成，运行编号：" + (response.run_id || "未记录");
   } catch (err) {
@@ -336,7 +354,7 @@ function setupForwardChat() {
 
 async function resumeForwardQuery() {
   const requestId = sessionStorage.getItem("pharmacology.workbench.query.v1");
-  if (!requestId) return;
+  if (!requestId) { await restoreForwardResult(); return; }
   try {
     const stored = JSON.parse(sessionStorage.getItem("pharmacology.workbench.cnki.v1") || "{}");
     if (stored.queryId === requestId) { forwardLiterature = stored; $("forward-cnki").checked = stored.enabled === true; }
@@ -356,6 +374,7 @@ async function resumeForwardQuery() {
       }
       if (["succeeded", "partial"].includes(status.status)) {
         forwardLiterature.runId = status.run_id;
+        persistForwardLiterature();
         renderForwardResult(await api("/api/agent/forward/" + encodeURIComponent(status.run_id)));
         $("forward-message").textContent = "原查询已完成，运行编号：" + status.run_id;
         previousForwardQuery = null;

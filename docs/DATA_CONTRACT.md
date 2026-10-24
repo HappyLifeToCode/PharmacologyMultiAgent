@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-24网页接入：文献开关默认关闭，首页正反向和工作台正向在靶点结果返回后调用独立flow接口；已有快照优先恢复，不自动重采。只有首次not_started才resolve，后续轮询/刷新只读状态；失败需显式resume，状态连接故障不取消任务。工作台浏览器元数据新增最近完成结果编号及原文献开关/快照，刷新只GET原归档，不新研究POST。文献药材/方剂及全部证据不截断，原数据库数组/排序/请求body和缓存键不变。
+
 2026-10-24后续：新增`POST /api/agent/{direction}/{run_id}/literature/flow/resolve`及对应GET状态、POST cancel/resume。本地文献优先；缺关系文件仅做local_analysis；无文献才后台采集，完成后生成独立快照。重复请求/活动关键词复用，其他关键词排队，失败不自动重试；原靶点结果、请求body、缓存键及归档不改。反向`candidates`为药材原名、`formula_candidates`为方剂原名，两组完整返回，未自动映射BATMAN实体。前端尚未接入，暂不真实采集“四方汤”。详见[LITERATURE_FLOW.md](LITERATURE_FLOW.md)。
 
 2026-10-24：独立采集CLI及标题摘要抽取默认模型为Codex `gpt-5.6-luna`。新任务`limit=null`表示关键词全部结果，正整数表示显式限量新增；任务保存模型和范围，旧限量任务续跑不改范围。`papers.json`新增collector/collection来源记录，全量成功须有可核对的collection_scan翻页清单。成功只表示采集时该关键词结果页已遍历，不表示知网全部相关论文已穷尽；失败或不完整任务不发布。只分析标题摘要，全部文献疾病关联均返回/展示，原篇数排序及数据库Top-K合同不变。未进行真实模型/知网联网验证。

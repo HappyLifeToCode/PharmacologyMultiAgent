@@ -380,6 +380,10 @@ function renderResult(result, message, content, sessionId) {
   if (candidates.length) followups.append(action("展开第一个疾病的证据", () => submitMessage("展开第一个疾病的证据", { message, index: 0, sessionId }), ""));
   followups.append(action("查看药材组成", () => submitMessage("查看药材组成", { message, sessionId }), ""));
   content.append(followups);
+  mountChatLiterature(message, content);
+}
+
+function mountChatLiterature(message, content) {
   CnkiLiterature.mount(content, message.runId, {
     enabled: message.cnkiEnabled === true, snapshot: message.cnkiSnapshot,
     onChange: ({ enabled, snapshot }) => { message.cnkiEnabled = enabled; message.cnkiSnapshot = snapshot; saveSessions(); },
@@ -613,7 +617,7 @@ async function submitMessage(suppliedText, context) {
         if (!prepared) { reply.kind = "text"; reply.text = "已取消选择，本次未启动查询。"; return; }
         const body = prepared.body;
         reply.direction = prepared.direction;
-        reply.cnkiEnabled = prepared.direction === "forward" && cnkiSetting();
+        reply.cnkiEnabled = cnkiSetting();
         reply.kind = "pending";
         reply.queryBody = body;
         reply.queryText = text;
