@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-24后续：新增`POST /api/agent/{direction}/{run_id}/literature/flow/resolve`及对应GET状态、POST cancel/resume。本地文献优先；缺关系文件仅做local_analysis；无文献才后台采集，完成后生成独立快照。重复请求/活动关键词复用，其他关键词排队，失败不自动重试；原靶点结果、请求body、缓存键及归档不改。反向`candidates`为药材原名、`formula_candidates`为方剂原名，两组完整返回，未自动映射BATMAN实体。前端尚未接入，暂不真实采集“四方汤”。详见[LITERATURE_FLOW.md](LITERATURE_FLOW.md)。
+
 2026-10-24：独立采集CLI及标题摘要抽取默认模型为Codex `gpt-5.6-luna`。新任务`limit=null`表示关键词全部结果，正整数表示显式限量新增；任务保存模型和范围，旧限量任务续跑不改范围。`papers.json`新增collector/collection来源记录，全量成功须有可核对的collection_scan翻页清单。成功只表示采集时该关键词结果页已遍历，不表示知网全部相关论文已穷尽；失败或不完整任务不发布。只分析标题摘要，全部文献疾病关联均返回/展示，原篇数排序及数据库Top-K合同不变。未进行真实模型/知网联网验证。
 
 2026-10-23后续：文献运行时改读本项目`data/cnki`（可用`PHARM_CNKI_DATA_DIR`配置），不再自动访问旧UI-Agent。数据包manifest登记相对路径、文件SHA及篇数，导入/打包只包含分析所需JSON。内置采集执行器和提示模板由CLI显式启动，网页不自动采集。原文献排序字段和旧快照不改，仅换直观文案及来源读取路径。交付步骤见[CNKI_DELIVERY.md](CNKI_DELIVERY.md)。

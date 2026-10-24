@@ -13,6 +13,7 @@ import re
 import shutil
 import signal
 import subprocess
+import time
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -21,6 +22,10 @@ from . import dataset, cnki
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "gpt-5.6-luna"
+
+
+class CollectionCancelled(RuntimeError):
+    pass
 
 
 def mcp_configuration(root=ROOT, *, output=None):
@@ -57,7 +62,7 @@ def collector_lock(root):
         path.unlink(missing_ok=True)
 
 
-def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL):
+def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL, local_only=False):
     keyword = dataset.safe_keyword(keyword)
     if not valid_limit(limit):
         raise ValueError("新增篇数应为正整数；不指定时按关键词采集全部结果")
@@ -68,18 +73,23 @@ def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL):
     papers_dir = work / "papers"; papers_dir.mkdir(parents=True)
     target = cnki.data_directory(root)
     existing, base = [], {}
+    original_meta = {}
     if (target / "manifest.json").is_file():
         listing = dataset.manifest(target)
         if any(c["keyword"] == keyword for c in listing["corpora"]):
             entry, contents = dataset.read_corpus(target, keyword)
             base = entry["files"]
-            existing = json.loads(contents["papers.json"].decode("utf-8-sig"))["papers"]
+            original_meta = json.loads(contents["papers.json"].decode("utf-8-sig"))
+            existing = original_meta["papers"]
             if "triples.jsonl" in contents:
                 (work / "triples.jsonl").write_bytes(contents["triples.jsonl"])
     for paper in existing:
         write_json(papers_dir / ("paper_%04d.json" % paper["rank"]), paper)
+    if local_only and not existing: raise ValueError("没有可分析的本地题录")
+    if local_only: write_json(work / "meta.json", original_meta)
     task = {"id": job_id, "keyword": keyword, "limit": limit, "created_at": now(), "base_files": base,
-            "collection_mode": "all" if limit is None else "incremental", "engine": "codex_cli", "model": model,
+            "collection_mode": "local_analysis" if local_only else "all" if limit is None else "incremental", "engine": "codex_cli", "model": model,
+            "base_extracted_ranks": original_meta.get("extracted_ranks", []),
             "base_ranks": [p["rank"] for p in existing],
             "base_papers": {str(p["rank"]): dataset.digest(json.dumps(p, sort_keys=True, ensure_ascii=False).encode()) for p in existing},
             "target": str(target.resolve()), "status": "prepared"}
@@ -105,8 +115,9 @@ def render_prompt(task, work):
     return text
 
 
-def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=DEFAULT_MODEL, browser=True, timeout=2400, command=None):
+def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=DEFAULT_MODEL, browser=True, timeout=2400, command=None, cancel=None):
     validate_model(model)
+    if cancel and cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
     executable = os.environ.get("CODEX_BIN") or shutil.which("codex")
     if command is None and not executable:
         raise RuntimeError("未找到Codex CLI；请安装Codex或配置CODEX_BIN。默认模型为" + DEFAULT_MODEL)
@@ -127,7 +138,16 @@ def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=DEFAULT_MODE
         process = subprocess.Popen(args, cwd=workspace, stdin=subprocess.PIPE, text=True, encoding="utf-8",
                                    stdout=log, stderr=subprocess.STDOUT, **options)
         try:
-            process.communicate(prompt, timeout=timeout)
+            deadline, sent = time.monotonic() + timeout, False
+            while True:
+                if cancel and cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0: raise subprocess.TimeoutExpired(args, timeout)
+                try:
+                    process.communicate(prompt if not sent else None, timeout=min(1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    sent = True
             code = process.returncode
         except BaseException:
             if process.poll() is None:
@@ -229,15 +249,21 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
     if task["id"] != work.name or Path(task["target"]).resolve() != cnki.data_directory(root).resolve() or not valid_limit(task["limit"]):
         raise ValueError("任务定义或目标文献目录已变化，请重新准备任务")
     model = validate_model(task.get("model", DEFAULT_MODEL))
-    all_results = task["limit"] is None
+    local_only = task.get("collection_mode") == "local_analysis"
+    if local_only: extract = True
+    all_results = task["limit"] is None and not local_only
     if task.get("status") == "succeeded": return task
-    runner = runner or (lambda prompt, log: run_model(prompt, log, root=root, workspace=work, model=model, browser=log.name == "collection.log"))
+    cancelled = lambda: (work / "cancel.requested.json").is_file()
+    runner = runner or (lambda prompt, log: run_model(prompt, log, root=root, workspace=work, model=model, browser=log.name == "collection.log", cancel=cancelled))
     with collector_lock(root):
         task.update(status="running", engine="codex_cli", model=model)
         write_json(work / "task.json", task)
         try:
+            if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
             stock = [json.loads(path.read_text(encoding="utf-8")) for path in (work / "papers").glob("paper_*.json")]
-            if all_results:
+            if local_only:
+                collect = False
+            elif all_results:
                 try:
                     validate_scan(task, work, stock)
                     collect = False
@@ -247,6 +273,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
                 collect = len({cnki.paper_identity(p) for p in stock if p["rank"] not in task["base_ranks"]}) < task["limit"]
             if collect:
                 runner(render_prompt(task, work), work / "logs/collection.log")
+            if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
             files = sorted((work / "papers").glob("paper_*.json"))
             papers = [json.loads(path.read_text(encoding="utf-8")) for path in files]
             papers.sort(key=lambda p: p["rank"])
@@ -258,7 +285,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
             for paper in papers: unique.setdefault(cnki.paper_identity(paper), paper)
             papers = list(unique.values())
             new = [p for p in papers if p["rank"] not in task["base_ranks"]]
-            if not all_results and len(new) < task["limit"]:
+            if not all_results and not local_only and len(new) < task["limit"]:
                 raise RuntimeError(f"本次新增{len(new)}篇，目标{task['limit']}篇；保留任务供续跑，未发布")
             scan = validate_scan(task, work, papers) if all_results else None
             meta_path = work / "meta.json"
@@ -267,15 +294,24 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
                 raise ValueError("采集关键词或新论文来源链接无效，未发布")
             if scan and meta.get("total_results") != scan["total_results"]:
                 raise ValueError("检索总数与翻页记录不一致，未发布")
-            if extract: extract_papers(new, work, runner)
+            analyzed = []
+            if extract:
+                triples_path = work / "triples.jsonl"
+                prior_rows = [json.loads(line) for line in triples_path.read_text(encoding="utf-8").splitlines() if line.strip()] if triples_path.exists() else []
+                done_ranks = set(task.get("base_extracted_ranks", [])) | {s.get("rank") for row in prior_rows for s in row.get("sources", [])}
+                analyzed = [p for p in papers if p["rank"] not in done_ranks]
+                extract_papers(analyzed, work, runner)
+                meta["extracted_ranks"] = sorted(done_ranks | {p["rank"] for p in analyzed})
+            if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
             meta.update(keyword=task["keyword"], source="中国知网（CNKI）", papers=papers, last_updated_at=now(),
                         collector={"engine": "codex_cli", "model": model, "task_id": task["id"]},
-                        collection={"mode": "all" if all_results else "incremental", "complete": all_results,
-                                    "scope": "keyword_search_results_at_collection_time", "limit": task["limit"]},
                         extraction_status="completed_for_new_papers" if extract else "not_requested_for_new_papers")
+            if not local_only:
+                meta["collection"] = {"mode": "all" if all_results else "incremental", "complete": all_results,
+                                      "scope": "keyword_search_results_at_collection_time", "limit": task["limit"]}
             if scan is not None:
                 meta["collection_scan"] = scan
-            else:
+            elif not local_only:
                 meta.pop("collection_scan", None)
             target = Path(task["target"])
             current = next((e["files"] for e in dataset.manifest(target)["corpora"] if e["keyword"] == task["keyword"]), {}) if (target / "manifest.json").is_file() else {}
@@ -285,7 +321,10 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
             write_json(publication / "papers.json", meta)
             if (work / "triples.jsonl").exists(): shutil.copyfile(work / "triples.jsonl", publication / "triples.jsonl")
             dataset.import_data(publication.parent, target, keywords=[task["keyword"]], update=True)
-            task.update(status="succeeded", finished_at=now(), added=len(new), extracted=extract)
+            task.update(status="succeeded", finished_at=now(), added=len(new), extracted=extract, analyzed=len(analyzed))
+        except CollectionCancelled as exc:
+            task.update(status="cancelled", error=str(exc), finished_at=now())
+            raise
         except BaseException as exc:
             task.update(status="failed_or_partial", error=str(exc), finished_at=now())
             raise

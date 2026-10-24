@@ -5,6 +5,7 @@ import asyncio
 import json
 import copy
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -20,6 +21,9 @@ from pharm.agent import jobs as forward_jobs
 from pharm.agent import progress as query_progress
 from pharm.agent import disease_input
 from pharm.literature import service as cnki_literature
+from pharm.literature import jobs as cnki_collection
+from pharm.literature import flows as cnki_flows
+from pharm.literature import cnki as cnki_data, dataset as cnki_dataset
 from pharm.agent.forward import _top_k
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from pharm.batman import formula_catalog
@@ -27,7 +31,20 @@ from starlette.concurrency import run_in_threadpool
 from uuid import uuid4
 import sqlite3
 
-app = FastAPI(title="Pharmacology Multi-Agent", docs_url=None, redoc_url=None)
+def stop_literature_workers():
+    cnki_collection.manager.shutdown()
+    cnki_flows.manager.shutdown()
+
+
+@asynccontextmanager
+async def app_lifespan(app):
+    try:
+        yield
+    finally:
+        await run_in_threadpool(stop_literature_workers)
+
+
+app = FastAPI(title="Pharmacology Multi-Agent", docs_url=None, redoc_url=None, lifespan=app_lifespan)
 
 
 class LocalOnlyMiddleware:
@@ -68,6 +85,47 @@ def index():
 @app.get("/workbench")
 def workbench():
     return FileResponse(ROOT / "server/static/workbench.html")
+
+
+@app.get("/api/literature/corpora")
+def literature_corpora():
+    try:
+        directory = cnki_data.data_directory(ROOT)
+        value = cnki_dataset.manifest(directory) if (directory / "manifest.json").is_file() else {"corpora": []}
+        return {"corpora": [{k: c[k] for k in ("keyword", "papers", "abstracts")} for c in value["corpora"]]}
+    except (OSError, ValueError, KeyError) as exc:
+        raise HTTPException(503, "本地文献清单暂不可用：" + str(exc))
+
+
+@app.get("/api/literature/collections")
+def collection_list():
+    return {"jobs": cnki_collection.manager.list(ROOT)}
+
+
+@app.get("/api/literature/collections/{job_id}")
+def collection_status(job_id: str):
+    try:
+        return cnki_collection.manager.status(ROOT, job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/literature/collections/{job_id}/{action}", status_code=202)
+async def collection_action(job_id: str, action: str, request: Request):
+    if action not in {"cancel", "resume"}: raise HTTPException(404, "未知文献任务操作")
+    if len(await request.body()) > 4096: raise HTTPException(413, "文献采集请求过长")
+    try:
+        if await request.json() != {}: raise ValueError("停止或续跑不能更改任务参数")
+        fn = cnki_collection.manager.cancel if action == "cancel" else cnki_collection.manager.resume
+        return await run_in_threadpool(fn, ROOT, job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
 
 
 @app.get("/assets/chat.js")
@@ -130,16 +188,54 @@ def cnki_literature_style():
     return FileResponse(ROOT / "server/static/cnki-literature.css", media_type="text/css")
 
 
-@app.get("/api/agent/forward/{run_id}/literature")
-def forward_literature(run_id: str, snapshot: str | None = None):
+@app.get("/api/agent/{direction}/{run_id}/literature")
+def forward_literature(direction: str, run_id: str, snapshot: str | None = None):
     try:
-        return cnki_literature.query(run_id, root=ROOT, snapshot=snapshot)
+        if direction not in {"forward", "reverse"} or not run_id.startswith(direction + "_"): raise ValueError("研究方向与归档不一致")
+        payload = cnki_literature.query(run_id, root=ROOT, snapshot=snapshot)
+        return {**payload, "collection": cnki_collection.manager.find_request(ROOT, cnki_literature.collection_request_id(run_id))}
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except (ValueError, TypeError, KeyError) as exc:
         raise HTTPException(400, str(exc))
     except (OSError, RuntimeError) as exc:
         raise HTTPException(503, "本地文献分析不可用：" + str(exc))
+
+
+@app.get("/api/agent/{direction}/{run_id}/literature/flow")
+def literature_flow_status(direction: str, run_id: str):
+    try:
+        if direction not in {"forward", "reverse"} or not run_id.startswith(direction + "_"): raise ValueError("研究方向与归档不一致")
+        return cnki_flows.manager.status(ROOT, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, "文献流程暂不可用：" + str(exc))
+
+
+@app.post("/api/agent/{direction}/{run_id}/literature/flow/{action}", status_code=202)
+async def literature_flow_action(direction: str, run_id: str, action: str, request: Request):
+    if action not in {"resolve", "resume", "cancel"}: raise HTTPException(404, "未知文献流程操作")
+    if len(await request.body()) > 4096: raise HTTPException(413, "文献请求过长")
+    try:
+        if direction not in {"forward", "reverse"} or not run_id.startswith(direction + "_"): raise ValueError("研究方向与归档不一致")
+        body = await request.json()
+        if not isinstance(body, dict) or (set(body) - {"enabled"} if action == "resolve" else bool(body)):
+            raise ValueError("文献流程只接受启用状态，不能更改模型、关键词或数据路径")
+        if action == "resolve":
+            return await run_in_threadpool(cnki_flows.manager.resolve, ROOT, run_id, enabled=body.get("enabled", True))
+        fn = cnki_flows.manager.resume if action == "resume" else cnki_flows.manager.cancel
+        return await run_in_threadpool(fn, ROOT, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    except OSError as exc:
+        raise HTTPException(503, "文献流程暂不可用：" + str(exc))
 
 
 @app.get("/assets/icons/{filename}")

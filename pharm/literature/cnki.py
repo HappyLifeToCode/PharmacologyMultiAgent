@@ -26,6 +26,9 @@ def data_directory(root=ROOT):
 
 def subject_of(result):
     value = result.get("input") or {}
+    if result.get("direction") == "reverse":
+        disease = result.get("resolved_disease") or {}
+        return str(disease.get("chinese_name") or disease.get("disease_name") or value.get("disease") or "").strip() or None, "disease"
     if value.get("formula"):
         return str(value["formula"]).strip(), "formula"
     herbs = value.get("herbs") or []
@@ -117,6 +120,7 @@ def _map_disease(term, catalog):
 def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
     subject, kind = subject_of(result)
     base = {"version": VERSION, "mode": "existing_local_only", "generated_at": now(), "subject": subject,
+            "direction": "reverse" if kind == "disease" else "forward",
             "scientific_complete": False, "content_scope": "title_and_abstract_only",
             "query_context": result.get("input") or {}}
     if not subject:
@@ -128,7 +132,7 @@ def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
         return {**base, "status": "not_configured", "message": "本项目尚未安装本地文献数据包，请先导入到data/cnki。"}
     data, triples, provenance = _load(directory, subject, managed=project_dir is None)
     if data is None:
-        return {**base, "status": "not_found", "message": "此检索名尚无本地知网题录；本轮只验证已有文献接入，未启动在线采集。"}
+        return {**base, "status": "not_found", "message": "此检索关键词尚无本地文献。"}
     if any(not isinstance(p, dict) or not isinstance(p.get("rank"), int) or isinstance(p.get("rank"), bool) for p in data["papers"]):
         raise ValueError("文献记录或rank格式无效")
     if any(not isinstance(p.get("title"), str) or not p["title"].strip() or (p.get("abstract") is not None and not isinstance(p["abstract"], str)) for p in data["papers"]):
@@ -137,6 +141,8 @@ def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
     if len(ranks) != len(set(ranks)):
         raise ValueError("papers.json存在重复rank，无法可靠追溯")
     papers = {paper["rank"]: paper for paper in data["papers"]}
+    if papers and provenance["files"].get("triples.jsonl") is None:
+        return {**base, "status": "needs_extraction", "message": "已有标题摘要，尚未生成文献关联排序。", "paper_count": len(papers)}
     if catalog is None:
         from ..agent import disease_input
         entities, names, _, errors = disease_input.catalog()
@@ -145,13 +151,17 @@ def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
         errors = {}
     returned = {str(item.get("disease_id") or "").replace(":", "_") for field in ("candidates", "background_candidates", "broad_candidates", "layered_candidates") for item in result.get(field, [])}
     groups, rejected = {}, []
+    reverse = kind == "disease"
+    requested_disease = str((result.get("resolved_disease") or {}).get("disease_id") or (result.get("input") or {}).get("disease_id") or "").replace(":", "_")
     for triple_index, triple in enumerate(triples):
         if not isinstance(triple, dict):
             raise ValueError("triples.jsonl记录必须是对象")
         if triple.get("tail_type") != "疾病" or triple.get("relation") not in {"主治", "治疗"}:
             continue
-        expected_type = "方剂" if kind == "formula" else "中药"
+        expected_types = {"方剂", "中药"} if kind == "disease" else {"方剂" if kind == "formula" else "中药"}
         head, term = str(triple.get("head") or ""), str(triple.get("tail") or "").strip()
+        disease_mapping = _map_disease(term, catalog) if reverse else None
+        disease_matches = normalise(term) == normalise(subject) or bool(requested_disease and disease_mapping and disease_mapping["status"] == "exact" and disease_mapping["choices"][0]["disease_id"].replace(":", "_") == requested_disease)
         for source_index, source in enumerate(triple.get("sources") or []):
             if not isinstance(source, dict):
                 raise ValueError("三元组sources格式无效")
@@ -160,28 +170,32 @@ def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
             quote = str(source.get("evidence") or "").strip()
             if not paper or normalise(source.get("title")) != normalise(paper.get("title")) or (source.get("url") and paper.get("url") and source["url"] != paper["url"]):
                 reason = "source_mismatch"
-            elif triple.get("head_type") != expected_type or normalise(subject) not in normalise(head):
+            elif triple.get("head_type") not in expected_types or (not reverse and normalise(subject) not in normalise(head)):
                 reason = "other_intervention"
+            elif reverse and not disease_matches:
+                reason = "other_disease"
             elif not term or not quote:
                 reason = "missing_term_or_quote"
             title, abstract = str((paper or {}).get("title") or ""), str((paper or {}).get("abstract") or "")
             quote_field = "title" if quote and normalise(quote) in normalise(title) else "abstract" if quote and normalise(quote) in normalise(abstract) else None
             if not reason and (not quote_field or normalise(term) not in normalise(title + " " + abstract)):
                 reason = "text_not_grounded"
-            if not reason and normalise(subject) not in normalise(title + " " + quote):
+            if not reason and normalise(head if reverse else subject) not in normalise(title + " " + quote):
                 reason = "subject_not_grounded"
             if reason:
                 rejected.append({"reason": reason, "rank": source.get("rank"), "head": head, "term": term, "triple_index": triple_index, "source_index": source_index})
                 continue
-            mapping = _map_disease(term, catalog)
+            mapping = {"status": "literature_name_only", "method": "raw_intervention_name", "choices": []} if reverse else _map_disease(term, catalog)
             identifier = mapping["choices"][0]["disease_id"] if mapping["status"] == "exact" else None
-            group_key = identifier or normalise(term)
+            display_term = head if reverse else term
+            group_key = (triple["head_type"] + ":" + normalise(head)) if reverse else identifier or normalise(term)
             if group_key not in groups:
                 groups[group_key] = {"disease_id": identifier, "raw_names": [], "mapping": mapping, "evidence": [], "paper_ids": set(), "direct_ids": set()}
+                if reverse: groups[group_key]["candidate_type"] = "herb" if triple["head_type"] == "中药" else "formula"
             group = groups[group_key]
-            if term not in group["raw_names"]:
-                group["raw_names"].append(term)
-            identity = intervention_type(paper, head, subject)
+            if display_term not in group["raw_names"]:
+                group["raw_names"].append(display_term)
+            identity = intervention_type(paper, head, head if reverse else subject)
             if source.get("is_modified") is True:
                 identity = "modified"
             pid = paper_identity(paper)
@@ -217,13 +231,20 @@ def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
         "version": VERSION}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     for index, item in enumerate(candidates, 1):
         item["rank"] = index
+    formula_candidates = []
+    if reverse:
+        formula_candidates = [item for item in candidates if item["candidate_type"] == "formula"]
+        candidates = [item for item in candidates if item["candidate_type"] == "herb"]
+        for group in (candidates, formula_candidates):
+            for index, item in enumerate(group, 1): item["rank"] = index
     return {**base, "status": "ready", "fingerprint": fingerprint, "catalog_errors": errors,
         "source": {**provenance, "keyword": data.get("keyword"), "search_sort": data.get("sort"),
+            "collection": data.get("collection"), "extraction_status": data.get("extraction_status"),
             "collected_at": data.get("last_updated_at") or data.get("collected_at"), "total_results_reported": data.get("total_results"),
             "paper_count": len(papers), "unique_paper_count": len({paper_identity(p) for p in papers.values()}),
             "abstract_count": sum(bool(p.get("abstract")) for p in papers.values()),
             "modified_flag_count": sum(p.get("is_modified") is True for p in papers.values())},
         "ranking": {"kind": "descriptive_retrieval_frequency", "keys": ["same_name_nonmodified_noncombined_paper_count_desc", "all_grounded_paper_count_desc", "raw_name"],
-            "note": "同名且未标加减/联合的去重篇数优先，再按全部可追溯关联篇数；同名不保证组成一致，各研究类型分别统计，不是疗效排名。"},
-        "candidates": candidates, "rejected": rejected, "papers": list(papers.values()),
-        "limitations": ["仅分析已有标题和摘要，未采集或阅读全文", "旧模型关系仅核对原文出处，医学判断尚待人工验证", "当前只是相关度前若干篇样本，未出现不代表没有文献", "未映射及歧义病名保留，不自动换父病或亚型"]}
+            "note": "未标加减/联合的去重关联篇数优先，再按全部关联篇数及原名；药材与方剂分列，原名未自动对齐BATMAN实体，不是疗效排名。" if reverse else "同名且未标加减/联合的去重篇数优先，再按全部可追溯关联篇数；同名不保证组成一致，各研究类型分别统计，不是疗效排名。"},
+        "candidates": candidates, "formula_candidates": formula_candidates, "rejected": rejected, "papers": list(papers.values()),
+        "limitations": ["仅分析已有标题和摘要，未获取或阅读全文", "模型提取关系经原文核对，医学判断尚待人工验证", "只针对本地已有文献；未出现不代表没有文献", "未映射及歧义病名保留，不自动换父病或亚型"]}

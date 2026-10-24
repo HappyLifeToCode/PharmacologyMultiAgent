@@ -7,21 +7,41 @@ from uuid import uuid4
 
 from ..core.common import ROOT, safe_name, write_json, read_json
 from . import cnki
+from . import dataset
 
 
 def checksum(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
-def query(run_id, *, root=ROOT, snapshot=None):
+def research_archive(run_id, root):
     safe_name(run_id)
-    if not run_id.startswith("forward_"):
-        raise ValueError("文献验证只接受正向研究归档")
+    direction = "forward" if run_id.startswith("forward_") else "reverse" if run_id.startswith("reverse_") else None
+    if not direction: raise ValueError("文献分析只接受正向或反向研究归档")
     root = Path(root).resolve()
-    archive_root = (root / "local/agent/forward").resolve()
+    archive_root = (root / "local/agent" / direction).resolve()
     archive = (archive_root / run_id / "result.json").resolve()
     if not archive.is_relative_to(archive_root) or not archive.is_file():
-        raise FileNotFoundError("正向查询归档不存在")
+        raise FileNotFoundError("研究归档不存在")
+    return archive, direction
+
+
+def collection_request_id(run_id):
+    return "literature_" + hashlib.sha256(run_id.encode()).hexdigest()[:48]
+
+
+def collection_keyword(run_id, *, root=ROOT):
+    archive, direction = research_archive(run_id, root)
+    research = read_json(archive)
+    research["direction"] = direction
+    keyword, _ = cnki.subject_of(research)
+    if not keyword: raise ValueError("此输入无法确定单一文献关键词，多味药材组合不自动拆开采集")
+    return dataset.safe_keyword(keyword)
+
+
+def query(run_id, *, root=ROOT, snapshot=None):
+    archive, direction = research_archive(run_id, root)
+    root = Path(root).resolve()
     snapshot_root = (root / "local/agent/literature" / run_id).resolve()
     if not snapshot_root.is_relative_to(root / "local/agent/literature"):
         raise ValueError("文献快照路径无效")
@@ -39,6 +59,7 @@ def query(run_id, *, root=ROOT, snapshot=None):
         return value
     raw = archive.read_bytes()
     research = json.loads(raw.decode("utf-8-sig"))
+    research["direction"] = direction
     value = cnki.analyze(research, data_dir=cnki.data_directory(root))
     payload = {"run_id": run_id, "snapshot_id": None, "result": value}
     if value["status"] == "ready":

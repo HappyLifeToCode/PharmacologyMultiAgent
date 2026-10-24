@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import zipfile
 
 import pytest
@@ -316,3 +317,19 @@ def test_codex_zero_exit_without_a_new_final_message_cannot_reuse_stale_output(t
     with pytest.raises(RuntimeError, match="未生成最终响应"):
         collector.run_model("标题和摘要", log, root=tmp_path, browser=False, command=[sys.executable, "-c", "pass"])
     assert not log.with_suffix(".response.txt").exists()
+
+
+def test_model_cancellation_stops_only_its_own_child_process(tmp_path, monkeypatch):
+    processes = []
+    real = subprocess.Popen
+    def tracked(*args, **kwargs):
+        process = real(*args, **kwargs); processes.append(process); return process
+    monkeypatch.setattr(subprocess, "Popen", tracked)
+    cancel = threading.Event()
+    timer = threading.Timer(.15, cancel.set); timer.start()
+    try:
+        with pytest.raises(collector.CollectionCancelled):
+            collector.run_model("test", tmp_path / "cancel.log", root=tmp_path, cancel=cancel.is_set,
+                                command=[sys.executable, "-c", "import time; time.sleep(10)"])
+    finally: timer.cancel()
+    assert processes and processes[0].poll() is not None
