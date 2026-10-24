@@ -1,0 +1,57 @@
+{
+  "enabled": false,
+  "offline_root": "local/literature/cnki",
+  "cnki": {
+    "enabled": false,
+    "base_url": "http://127.0.0.1:8002",
+    "poll_interval_seconds": 15,
+    "job_timeout_seconds": 2700
+  },
+  "screening": {
+    "modified_formula_policy": "exclude",
+    "formula_combination_policy": "exclude",
+    "mention_only_policy": "exclude",
+    "formulas": {
+      "温经汤": {
+        "aliases": ["金匮温经汤"],
+        "excluded_formula_names": ["温经逐瘀汤", "大温经汤"]
+      },
+      "芍药甘草汤": {
+        "aliases": ["芍甘汤"],
+        "excluded_formula_names": []
+      }
+    }
+  },
+  "concept_alignment": {
+    "allowed_relations": ["exact", "broader", "narrower", "related", "phenotype"],
+    "promotion_policy": "reviewed exact disease mappings with promote=true control ontology merge only",
+    "preserve_raw_term": true,
+    "ranking_effect": "none"
+  },
+  "concept_extraction": {
+    "enabled": true,
+    "schema_version": "literature-concept-extraction-v1",
+    "sources": ["source_metadata.western_diseases", "keywords", "title", "abstract"],
+    "roles": ["study_disease", "symptom_or_outcome", "treatment_context"],
+    "require_archived_text_provenance": true,
+    "mandatory_human_confirmation": false,
+    "ranking_effect": "none"
+  },
+  "evidence_extraction": {
+    "enabled": true,
+    "schema_version": "literature-evidence-extraction-v1",
+    "review_status": "auto_verified",
+    "classify": ["study_design", "relation", "direction", "formula_contribution"],
+    "require_archived_abstract_excerpt": true,
+    "mandatory_human_confirmation": false,
+    "conservative_policy": "unsupported or ambiguous evidence does not receive a clinical priority tier"
+  },
+  "evidence_review": {
+    "require_archived_abstract_excerpt": true,
+    "keep_cointervention_separate": true,
+    "candidate_signal_policy": "reviewed or auto_verified positive primary clinical evidence + distinguishable formula contribution",
+    "ontology_merge_policy": "exact reviewed disease mapping required only for Open Targets merge",
+    "clinical_interpretation": "literature evidence candidate; not a confirmed indication",
+    "ranking_effect": "none"
+  }
+}
