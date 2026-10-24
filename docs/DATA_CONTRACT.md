@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-24：独立采集CLI及标题摘要抽取默认模型为Codex `gpt-5.6-luna`。新任务`limit=null`表示关键词全部结果，正整数表示显式限量新增；任务保存模型和范围，旧限量任务续跑不改范围。`papers.json`新增collector/collection来源记录，全量成功须有可核对的collection_scan翻页清单。成功只表示采集时该关键词结果页已遍历，不表示知网全部相关论文已穷尽；失败或不完整任务不发布。只分析标题摘要，全部文献疾病关联均返回/展示，原篇数排序及数据库Top-K合同不变。未进行真实模型/知网联网验证。
+
 2026-10-23后续：文献运行时改读本项目`data/cnki`（可用`PHARM_CNKI_DATA_DIR`配置），不再自动访问旧UI-Agent。数据包manifest登记相对路径、文件SHA及篇数，导入/打包只包含分析所需JSON。内置采集执行器和提示模板由CLI显式启动，网页不自动采集。原文献排序字段和旧快照不改，仅换直观文案及来源读取路径。交付步骤见[CNKI_DELIVERY.md](CNKI_DELIVERY.md)。
 
 2026-10-23：新增可选本地文献接入验证，原forward请求体、缓存和研究数组不改。文献只通过独立`GET /api/agent/forward/{run_id}/literature`读取已有UI-Agent题录；成功快照独立保存于`local/agent/literature/<run_id>/`，`snapshot`参数恢复旧分析，包含原研究及语料实际哈希、映射与支撑句。浏览器只保存启用状态/快照ID，原研究JSON不回写。排序是可解释的标题摘要关联频次，不是疗效；未映射/歧义保留，不替换父病。本轮无在线采集或模型调用，详见[CNKI接入](CNKI_INTEGRATION.md)。

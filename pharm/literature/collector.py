@@ -13,18 +13,32 @@ import re
 import shutil
 import signal
 import subprocess
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from ..core.common import ROOT, now, write_json
 from . import dataset, cnki
 
 PROMPTS = Path(__file__).with_name("prompts")
+DEFAULT_MODEL = "gpt-5.6-luna"
 
 
-def mcp_configuration(root=ROOT):
+def mcp_configuration(root=ROOT, *, output=None):
     root = Path(root).resolve()
-    return {"mcpServers": {"playwright": {"command": "npx", "args": ["@playwright/mcp@0.0.64", "--headless", "--save-trace",
-        "--output-dir", str(root / "local/cnki-browser"), "--config", str(root / "configs/cnki_browser.json")]}}}
+    return {"mcp_servers": {"playwright": {"command": "npx", "args": ["@playwright/mcp@0.0.64", "--headless", "--save-trace",
+        "--output-dir", str(output or root / "local/cnki-browser"), "--config", str(root / "configs/cnki_browser.json")],
+        "required": True, "startup_timeout_sec": 60, "tool_timeout_sec": 120,
+        "enabled_tools": ["browser_run_code", "browser_take_screenshot", "browser_wait_for"]}}}
+
+
+def validate_model(model):
+    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,149}", model):
+        raise ValueError("Codex模型名称无效")
+    return model
+
+
+def valid_limit(limit):
+    return limit is None or (type(limit) is int and limit > 0)
 
 
 @contextmanager
@@ -43,10 +57,11 @@ def collector_lock(root):
         path.unlink(missing_ok=True)
 
 
-def prepare(keyword, limit=20, *, root=ROOT):
+def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL):
     keyword = dataset.safe_keyword(keyword)
-    if not isinstance(limit, int) or not 1 <= limit <= 100:
-        raise ValueError("篇数应为1到100")
+    if not valid_limit(limit):
+        raise ValueError("新增篇数应为正整数；不指定时按关键词采集全部结果")
+    validate_model(model)
     root = Path(root).resolve()
     job_id = "cnki_collect_" + uuid4().hex
     work = root / "local/agent/cnki-collection" / job_id
@@ -64,6 +79,7 @@ def prepare(keyword, limit=20, *, root=ROOT):
     for paper in existing:
         write_json(papers_dir / ("paper_%04d.json" % paper["rank"]), paper)
     task = {"id": job_id, "keyword": keyword, "limit": limit, "created_at": now(), "base_files": base,
+            "collection_mode": "all" if limit is None else "incremental", "engine": "codex_cli", "model": model,
             "base_ranks": [p["rank"] for p in existing],
             "base_papers": {str(p["rank"]): dataset.digest(json.dumps(p, sort_keys=True, ensure_ascii=False).encode()) for p in existing},
             "target": str(target.resolve()), "status": "prepared"}
@@ -78,8 +94,10 @@ def render_prompt(task, work):
     offset = max((p["rank"] for p in papers), default=0)
     new_count = sum(p["rank"] not in task["base_ranks"] for p in papers)
     text = (PROMPTS / "cnki_collection.md").read_text(encoding="utf-8")
+    scope = "关键词全部检索结果，逐页遍历至末页，不设篇数上限" if task["limit"] is None else f"本次再新增{max(0, task['limit'] - new_count)}篇"
     values = {"TASK_ID": "cnki_" + task["keyword"], "KEYWORD": task["keyword"], "KEYWORD_JSON": json.dumps(task["keyword"], ensure_ascii=False),
-              "LIMIT": str(max(0, task["limit"] - new_count)), "OUTPUT_DIR": str(Path(work).resolve()).replace("\\", "/"),
+              "COLLECTION_SCOPE": scope, "COLLECTION_MODE": "all" if task["limit"] is None else "incremental",
+              "OUTPUT_DIR": str(Path(work).resolve()).replace("\\", "/"),
               "RANK_OFFSET": str(offset), "RANK_OFFSET_PADDED": f"{offset+1:02d}",
               "EXISTING_TITLES": "\n".join("- " + p["title"] for p in papers) or "（无，全新采集）"}
     for name, value in values.items():
@@ -87,17 +105,30 @@ def render_prompt(task, work):
     return text
 
 
-def run_model(prompt, log_path, *, root=ROOT, timeout=2400, command=None):
-    executable = os.environ.get("KIMI_BIN") or shutil.which("kimi")
+def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=DEFAULT_MODEL, browser=True, timeout=2400, command=None):
+    validate_model(model)
+    executable = os.environ.get("CODEX_BIN") or shutil.which("codex")
     if command is None and not executable:
-        raise RuntimeError("未找到Kimi CLI；请配置KIMI_BIN。查看本项目CNKI交付说明配置浏览器工具")
-    args = list(command or [executable]) + ["-p", prompt]
+        raise RuntimeError("未找到Codex CLI；请安装Codex或配置CODEX_BIN。默认模型为" + DEFAULT_MODEL)
     options = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     log_path = Path(log_path); log_path.parent.mkdir(parents=True, exist_ok=True)
+    workspace = Path(workspace or root).resolve()
+    response_path = log_path.resolve().with_suffix(".response.txt")
+    response_path.unlink(missing_ok=True)  # Never accept a stale final message after a failed retry.
+    args = list(command or [executable]) + ["exec", "--model", model, "--cd", str(workspace),
+        "--sandbox", "workspace-write" if browser else "read-only", "--skip-git-repo-check", "--ephemeral",
+        "--json", "--output-last-message", str(response_path)]
+    if browser:
+        server = mcp_configuration(root, output=workspace / "browser")["mcp_servers"]["playwright"]
+        for key, value in server.items():
+            args.extend(["-c", "mcp_servers.playwright." + key + "=" + json.dumps(value, ensure_ascii=False)])
+    args.append("-")  # UTF-8 stdin avoids command-line length limits for titles/abstracts.
     with log_path.open("w", encoding="utf-8") as log:
-        process = subprocess.Popen(args, cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **options)
+        process = subprocess.Popen(args, cwd=workspace, stdin=subprocess.PIPE, text=True, encoding="utf-8",
+                                   stdout=log, stderr=subprocess.STDOUT, **options)
         try:
-            code = process.wait(timeout=timeout)
+            process.communicate(prompt, timeout=timeout)
+            code = process.returncode
         except BaseException:
             if process.poll() is None:
                 if os.name == "nt":
@@ -108,7 +139,55 @@ def run_model(prompt, log_path, *, root=ROOT, timeout=2400, command=None):
             raise
     if code:
         raise RuntimeError("采集/抽取进程未成功结束；日志已保存，未发布不完整数据")
-    return log_path.read_text(encoding="utf-8", errors="replace")
+    if not response_path.is_file():
+        raise RuntimeError("Codex未生成最终响应；日志已保存，未发布数据")
+    return response_path.read_text(encoding="utf-8")
+
+
+def cnki_url(value):
+    if not isinstance(value, str): return False
+    try:
+        url = urlparse(value)
+        return url.scheme == "https" and bool(url.hostname) and (url.hostname == "cnki.net" or url.hostname.endswith(".cnki.net"))
+    except ValueError:
+        return False
+
+
+def validate_scan(task, work, papers):
+    """Check the saved browser page inventory; a model saying 'done' is insufficient."""
+    error = "关键词全量遍历记录不完整或与题录不一致；保留任务供续跑，未发布"
+    path = Path(work) / "collection_progress.json"
+    if not path.is_file(): raise ValueError(error)
+    scan = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(scan, dict) or scan.get("keyword") != task["keyword"] or scan.get("complete") is not True or scan.get("stop_reason") != "exhausted":
+        raise ValueError(error)
+    total, pages = scan.get("total_results"), scan.get("pages")
+    if type(total) is not int or total < 0 or not isinstance(pages, list) or not pages:
+        raise ValueError(error)
+    by_rank = {p["rank"]: p for p in papers}
+    if len(by_rank) != len(papers): raise ValueError(error)
+    position, referenced = 0, set()
+    for number, page in enumerate(pages, 1):
+        if not isinstance(page, dict) or type(page.get("number")) is not int or page["number"] != number or type(page.get("total_results")) is not int or page["total_results"] != total or page.get("has_next") is not (number < len(pages)):
+            raise ValueError(error)
+        items = page.get("items")
+        if not isinstance(items, list) or (not items and (total != 0 or len(pages) != 1)):
+            raise ValueError(error)
+        for item in items:
+            position += 1
+            if not isinstance(item, dict) or type(item.get("rank")) is not int or type(item.get("position")) is not int or item["position"] != position or item.get("status") not in {"collected", "existing", "no_abstract"}:
+                raise ValueError(error)
+            paper = by_rank.get(item["rank"])
+            if not paper or not isinstance(item.get("title"), str) or cnki.normalise(item["title"]) != cnki.normalise(paper.get("title")) or not cnki_url(item.get("url")) or not cnki_url(paper.get("url")):
+                raise ValueError(error)
+            if item["status"] == "no_abstract" and (paper.get("abstract") or not isinstance(item.get("note"), str) or not item["note"].strip()):
+                raise ValueError(error)
+            if not paper.get("abstract") and item["status"] != "no_abstract":
+                raise ValueError(error)
+            referenced.add(item["rank"])
+    if position != total or any(p["rank"] not in referenced for p in papers if p["rank"] not in task["base_ranks"]):
+        raise ValueError(error)
+    return scan
 
 
 def extract_papers(papers, work, runner):
@@ -147,15 +226,26 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
     if not work.is_relative_to(root / "local/agent/cnki-collection"):
         raise ValueError("任务目录不属于本项目")
     dataset.safe_keyword(task["keyword"])
-    if task["id"] != work.name or Path(task["target"]).resolve() != cnki.data_directory(root).resolve() or not isinstance(task["limit"], int) or not 1 <= task["limit"] <= 100:
+    if task["id"] != work.name or Path(task["target"]).resolve() != cnki.data_directory(root).resolve() or not valid_limit(task["limit"]):
         raise ValueError("任务定义或目标文献目录已变化，请重新准备任务")
+    model = validate_model(task.get("model", DEFAULT_MODEL))
+    all_results = task["limit"] is None
     if task.get("status") == "succeeded": return task
-    runner = runner or (lambda prompt, log: run_model(prompt, log, root=root))
+    runner = runner or (lambda prompt, log: run_model(prompt, log, root=root, workspace=work, model=model, browser=log.name == "collection.log"))
     with collector_lock(root):
-        task["status"] = "running"; write_json(work / "task.json", task)
+        task.update(status="running", engine="codex_cli", model=model)
+        write_json(work / "task.json", task)
         try:
             stock = [json.loads(path.read_text(encoding="utf-8")) for path in (work / "papers").glob("paper_*.json")]
-            if len({cnki.paper_identity(p) for p in stock if p["rank"] not in task["base_ranks"]}) < task["limit"]:
+            if all_results:
+                try:
+                    validate_scan(task, work, stock)
+                    collect = False
+                except (ValueError, KeyError, TypeError):
+                    collect = True
+            else:
+                collect = len({cnki.paper_identity(p) for p in stock if p["rank"] not in task["base_ranks"]}) < task["limit"]
+            if collect:
                 runner(render_prompt(task, work), work / "logs/collection.log")
             files = sorted((work / "papers").glob("paper_*.json"))
             papers = [json.loads(path.read_text(encoding="utf-8")) for path in files]
@@ -168,15 +258,25 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
             for paper in papers: unique.setdefault(cnki.paper_identity(paper), paper)
             papers = list(unique.values())
             new = [p for p in papers if p["rank"] not in task["base_ranks"]]
-            if len(new) < task["limit"]:
+            if not all_results and len(new) < task["limit"]:
                 raise RuntimeError(f"本次新增{len(new)}篇，目标{task['limit']}篇；保留任务供续跑，未发布")
-            if extract: extract_papers(new, work, runner)
+            scan = validate_scan(task, work, papers) if all_results else None
             meta_path = work / "meta.json"
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if meta.get("keyword") != task["keyword"] or any(not isinstance(p.get("url"), str) or not p["url"].startswith("https://") for p in new):
+            if meta.get("keyword") != task["keyword"] or any(not cnki_url(p.get("url")) for p in new):
                 raise ValueError("采集关键词或新论文来源链接无效，未发布")
+            if scan and meta.get("total_results") != scan["total_results"]:
+                raise ValueError("检索总数与翻页记录不一致，未发布")
+            if extract: extract_papers(new, work, runner)
             meta.update(keyword=task["keyword"], source="中国知网（CNKI）", papers=papers, last_updated_at=now(),
+                        collector={"engine": "codex_cli", "model": model, "task_id": task["id"]},
+                        collection={"mode": "all" if all_results else "incremental", "complete": all_results,
+                                    "scope": "keyword_search_results_at_collection_time", "limit": task["limit"]},
                         extraction_status="completed_for_new_papers" if extract else "not_requested_for_new_papers")
+            if scan is not None:
+                meta["collection_scan"] = scan
+            else:
+                meta.pop("collection_scan", None)
             target = Path(task["target"])
             current = next((e["files"] for e in dataset.manifest(target)["corpora"] if e["keyword"] == task["keyword"]), {}) if (target / "manifest.json").is_file() else {}
             if current != task["base_files"]:

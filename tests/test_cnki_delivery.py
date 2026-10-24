@@ -173,3 +173,146 @@ def test_model_runner_timeout_stops_its_own_process(tmp_path, monkeypatch):
         collector.run_model("test", tmp_path / "model.log", root=tmp_path, timeout=.15,
                             command=[sys.executable, "-c", "import time;time.sleep(10)"])
     assert processes and processes[0].poll() is not None
+
+
+def full_scan(work, count=23):
+    papers = []
+    for rank in range(1, count + 1):
+        paper = {"rank": rank, "title": f"温经汤标题{rank}", "abstract": f"温经汤摘要{rank}",
+                 "url": f"https://kns.cnki.net/paper/{rank}", "is_modified": False}
+        (work / f"papers/paper_{rank:04d}.json").write_text(json.dumps(paper), encoding="utf-8")
+        papers.append(paper)
+    pages = []
+    for offset in range(0, max(1, count), 20):
+        pages.append({"number": len(pages) + 1, "total_results": count, "has_next": offset + 20 < count,
+                      "items": [{"position": p["rank"], "rank": p["rank"], "title": p["title"], "url": p["url"], "status": "collected"}
+                                for p in papers[offset:offset + 20]]})
+    scan = {"keyword": "温经汤", "total_results": count, "complete": True, "stop_reason": "exhausted", "pages": pages}
+    (work / "collection_progress.json").write_text(json.dumps(scan), encoding="utf-8")
+    (work / "meta.json").write_text(json.dumps({"keyword": "温经汤", "total_results": count}), encoding="utf-8")
+    return scan
+
+
+def test_default_is_codex_luna_and_all_keyword_results_without_model_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("prepare is offline"))
+    task, work = collector.prepare("白芍", root=tmp_path)
+    assert task["limit"] is None and task["collection_mode"] == "all"
+    assert task["engine"] == "codex_cli" and task["model"] == "gpt-5.6-luna"
+    text = (work / "prompt.md").read_text(encoding="utf-8")
+    assert "{{" not in text and "不设篇数上限" in text and "不获取论文正文" in text
+    assert "collection_progress.json" in text
+    assert collector.prepare("白芍", 125, root=tmp_path)[0]["limit"] == 125
+    with pytest.raises(ValueError): collector.prepare("白芍", True, root=tmp_path)
+
+
+@pytest.mark.parametrize("count", [0, 23, 125])
+def test_full_keyword_scan_publishes_all_pages_without_a_20_or_100_cap(tmp_path, count):
+    task, work = collector.prepare("温经汤", root=tmp_path)
+    def run(prompt, log):
+        full_scan(work, count)
+        return "已遍历"
+    result = collector.execute(task, work, root=tmp_path, runner=run)
+    assert result["status"] == "succeeded" and result["added"] == count
+    entry, contents = dataset.read_corpus(tmp_path / "data/cnki", "温经汤")
+    meta = json.loads(contents["papers.json"])
+    assert entry["papers"] == count and len(meta["papers"]) == count
+    assert meta["collection"]["mode"] == "all" and meta["collection"]["complete"] is True
+    assert meta["collection_scan"]["total_results"] == count
+    assert meta["collector"]["model"] == "gpt-5.6-luna"
+
+
+@pytest.mark.parametrize("fault", ["missing_page", "still_has_next", "failed_paper", "changing_total", "wrong_position", "wrong_title", "no_progress", "unexplained_missing_abstract"])
+def test_full_scan_does_not_publish_a_claimed_but_incomplete_result(tmp_path, fault):
+    task, work = collector.prepare("温经汤", root=tmp_path)
+    def run(prompt, log):
+        scan = full_scan(work)
+        if fault == "missing_page": scan["pages"].pop()
+        elif fault == "still_has_next": scan["pages"][-1]["has_next"] = True
+        elif fault == "failed_paper": scan["pages"][0]["items"][0]["status"] = "failed"
+        elif fault == "changing_total": scan["pages"][-1]["total_results"] += 1
+        elif fault == "wrong_position": scan["pages"][0]["items"][0]["position"] = 2
+        elif fault == "wrong_title": scan["pages"][0]["items"][0]["title"] = "别的标题"
+        elif fault == "unexplained_missing_abstract":
+            paper_path = work / "papers/paper_0001.json"
+            value = json.loads(paper_path.read_text(encoding="utf-8")); value["abstract"] = None
+            paper_path.write_text(json.dumps(value), encoding="utf-8")
+        if fault == "no_progress": (work / "collection_progress.json").unlink()
+        else: (work / "collection_progress.json").write_text(json.dumps(scan), encoding="utf-8")
+        return "已经全部完成"
+    with pytest.raises(ValueError, match="未发布"):
+        collector.execute(task, work, root=tmp_path, runner=run)
+    assert task["status"] == "failed_or_partial"
+    assert not (tmp_path / "data/cnki/manifest.json").exists()
+    assert len(list((work / "papers").glob("*.json"))) == 23
+    assert collector.execute(task, work, root=tmp_path, runner=lambda *a: full_scan(work))["status"] == "succeeded"
+
+
+def test_all_scan_with_existing_papers_can_complete_with_no_new_papers(tmp_path):
+    source, paper = source_data(tmp_path)
+    dataset.import_data(source, tmp_path / "data/cnki")
+    task, work = collector.prepare("温经汤", root=tmp_path)
+    def run(prompt, log):
+        scan = {"keyword": "温经汤", "total_results": 1, "complete": True, "stop_reason": "exhausted",
+                "pages": [{"number": 1, "total_results": 1, "has_next": False, "items": [
+                    {"position": 1, "rank": 1, "title": paper["title"], "url": paper["url"], "status": "existing"}]}]}
+        (work / "collection_progress.json").write_text(json.dumps(scan), encoding="utf-8")
+        (work / "meta.json").write_text(json.dumps({"keyword": "温经汤", "total_results": 1}), encoding="utf-8")
+    result = collector.execute(task, work, root=tmp_path, runner=run)
+    assert result["status"] == "succeeded" and result["added"] == 0
+    assert dataset.read_corpus(tmp_path / "data/cnki", "温经汤")[0]["papers"] == 1
+
+
+def test_codex_runner_uses_pinned_model_stdin_and_separate_final_output(tmp_path):
+    stub = tmp_path / "fake_codex.py"
+    stub.write_text('''import json, sys
+from pathlib import Path
+args = sys.argv[1:]
+prompt = sys.stdin.buffer.read().decode("utf-8")
+Path("invocation.json").write_text(json.dumps({"args":args,"prompt":prompt}), encoding="utf-8")
+Path(args[args.index("--output-last-message")+1]).write_text('{"triples": []}', encoding="utf-8")
+print('{"event": "log with unrelated braces"}')
+''', encoding="utf-8")
+    for browser in (True, False):
+        prompt = "只读标题与摘要：" + "中文" * 20000
+        output = collector.run_model(prompt, tmp_path / "logs/model.log", root=tmp_path, browser=browser,
+                                     command=[sys.executable, str(stub)])
+        assert json.loads(output) == {"triples": []}
+        invocation = json.loads((tmp_path / "invocation.json").read_text(encoding="utf-8"))
+        args = invocation["args"]
+        assert invocation["prompt"] == prompt and prompt not in args
+        assert args[:3] == ["exec", "--model", "gpt-5.6-luna"]
+        assert args[args.index("--sandbox") + 1] == ("workspace-write" if browser else "read-only")
+        assert ("mcp_servers.playwright.command=" in " ".join(args)) == browser
+        assert "--dangerously-bypass-approvals-and-sandbox" not in args
+        assert not (tmp_path / ".codex/config.toml").exists()
+
+
+def test_extraction_only_sends_title_and_abstract_not_saved_fulltext(tmp_path):
+    p = {"rank": 1, "title": "温经汤标题", "abstract": "原摘要", "full_text": "不得进入模型的论文正文"}
+    def run(prompt, log):
+        assert "温经汤标题" in prompt and "原摘要" in prompt
+        assert p["full_text"] not in prompt
+        return '{"triples": []}'
+    collector.extract_papers([p], tmp_path, run)
+
+
+def test_full_scan_keeps_a_paper_when_cnki_explicitly_provides_no_abstract(tmp_path):
+    task, work = collector.prepare("温经汤", root=tmp_path)
+    def run(prompt, log):
+        scan = full_scan(work, 1)
+        path = work / "papers/paper_0001.json"
+        paper = json.loads(path.read_text(encoding="utf-8")); paper["abstract"] = None
+        path.write_text(json.dumps(paper), encoding="utf-8")
+        scan["pages"][0]["items"][0].update(status="no_abstract", note="知网未提供摘要")
+        (work / "collection_progress.json").write_text(json.dumps(scan), encoding="utf-8")
+    assert collector.execute(task, work, root=tmp_path, runner=run)["status"] == "succeeded"
+    entry, _ = dataset.read_corpus(tmp_path / "data/cnki", "温经汤")
+    assert entry["papers"] == 1 and entry["abstracts"] == 0
+
+
+def test_codex_zero_exit_without_a_new_final_message_cannot_reuse_stale_output(tmp_path):
+    log = tmp_path / "model.log"
+    log.with_suffix(".response.txt").write_text('{"triples": []}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="未生成最终响应"):
+        collector.run_model("标题和摘要", log, root=tmp_path, browser=False, command=[sys.executable, "-c", "pass"])
+    assert not log.with_suffix(".response.txt").exists()

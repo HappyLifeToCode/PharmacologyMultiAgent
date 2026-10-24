@@ -166,3 +166,18 @@ def test_api_is_separate_and_does_not_accept_external_file_paths(tmp_path, monke
         assert client.get("/api/agent/forward/forward_absent/literature").status_code == 404
         assert client.get("/api/agent/forward/other/literature").status_code == 400
         assert client.post("/api/agent/forward", json={"text": SUBJECT, "cnki_enabled": True}).status_code == 400
+
+
+def test_literature_returns_every_disease_and_paper_without_database_top_k_cutoff(tmp_path):
+    papers, triples = [], []
+    for rank in range(1, 38):
+        term = f"示例病{rank:02d}"
+        p = paper(rank, title=SUBJECT + "研究" + term, abstract=SUBJECT + "用于" + term + "患者研究。")
+        papers.append(p)
+        triples.append(triple(p, term=term))
+    project, _ = corpus(tmp_path, papers, triples)
+    result = analyze(project, catalog=({}, {}), research={"input": {"formula": SUBJECT, "top_k": 1}, "candidates": []})
+    assert len(result["candidates"]) == len(result["papers"]) == 37
+    assert [c["rank"] for c in result["candidates"]] == list(range(1, 38))
+    assert result["candidates"][-1]["raw_names"] == ["示例病37"]
+    assert result["ranking"]["keys"] == ["same_name_nonmodified_noncombined_paper_count_desc", "all_grounded_paper_count_desc", "raw_name"]
