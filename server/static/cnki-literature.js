@@ -113,10 +113,11 @@ const CnkiLiterature = (() => {
       const box = node("div", null, "cnki-progress"); box.setAttribute("role", "status"); root.append(box);
       const start = Date.parse(job?.started_at || job?.created_at || state.created_at || "");
       const end = Date.parse(job?.finished_at || "") || Date.now();
-      if (Number.isFinite(start)) {
+      if (Number.isFinite(start) && !["queued", "cancelling", "cancelled"].includes(job?.status)) {
         const elapsed = Math.max(0, Math.floor((end - start) / 1000));
         box.append(node("p", "本次运行用时 " + Math.floor(elapsed / 60) + "分" + elapsed % 60 + "秒", "cnki-progress-time"));
       }
+      if (job?.status === "queued") box.append(node("p", "排队中，尚未开始执行", "cnki-progress-time"));
       let label = "正在核对本地文献…";
       if (state.state === "starting") label = "正在准备文献流程…";
       if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : "本地暂无文献，正在采集标题和摘要…";
