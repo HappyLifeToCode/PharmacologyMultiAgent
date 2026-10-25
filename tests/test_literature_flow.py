@@ -63,7 +63,7 @@ class Harness:
         self.calls = []
         self.fail = False
         self.collections = jobs.CollectionManager(execute=self.execute)
-        self.flows = flows.LiteratureFlowManager(self.collections)
+        self.flows = flows.LiteratureFlowManager(self.collections, collection_limit=1)
 
     def execute(self, task, work, **kwargs):
         self.entered.set()
@@ -117,6 +117,7 @@ def test_missing_literature_returns_targets_first_then_generates_ranking_in_back
     assert state["state"] == "collecting" and state["literature"] is None
     assert path.read_bytes() == before
     collection_id = state["collection_id"]
+    assert state["collection"]["limit"] == 1 and state["requested_limit"] == 1
     assert harness.flows.resolve(tmp_path, "forward_case")["collection_id"] == collection_id
     assert len(harness.collections.list(tmp_path)) == 1
     harness.release.set()

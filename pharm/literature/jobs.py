@@ -101,7 +101,7 @@ class CollectionManager:
         self.active[key] = thread
         thread.start()
 
-    def start(self, root, keyword, request_id, *, local_only=False):
+    def start(self, root, keyword, request_id, *, local_only=False, limit=None):
         root = Path(root).resolve()
         keyword = dataset.safe_keyword(keyword)
         if not isinstance(request_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", request_id):
@@ -120,7 +120,7 @@ class CollectionManager:
                     if current["keyword"] == keyword: return current
             if (base / "collector.lock").exists() and not any(Path(k).parent == base for k in self.running):
                 raise RuntimeError("已有终端采集任务或遗留锁，请先核对，不能并发启动")
-            task, work = collector.prepare(keyword, root=root, local_only=local_only)
+            task, work = collector.prepare(keyword, limit, root=root, local_only=local_only)
             task["web_request_id"] = request_id
             self._start(root, task, work)
             return self.status(root, task["id"])

@@ -9,11 +9,16 @@ from uuid import uuid4
 from ..core.common import now, write_json
 from . import jobs, service
 
+DEFAULT_COLLECTION_LIMIT = 20
+
 
 class LiteratureFlowManager:
-    def __init__(self, collections=None, query=None):
+    def __init__(self, collections=None, query=None, collection_limit=DEFAULT_COLLECTION_LIMIT):
+        if type(collection_limit) is not int or collection_limit < 1:
+            raise ValueError("文献采集数量必须是正整数")
         self.collections = collections or jobs.manager
         self.query = query or service.query
+        self.collection_limit = collection_limit
         self.lock = threading.RLock()
         self.watchers = {}
 
@@ -89,8 +94,10 @@ class LiteratureFlowManager:
                 record.update(state="ready", snapshot_id=payload["snapshot_id"])
             elif result["status"] in {"not_found", "not_configured", "needs_extraction"}:
                 keyword = service.collection_keyword(run_id, root=root)
-                collection = self.collections.start(root, keyword, service.collection_request_id(run_id), local_only=result["status"] == "needs_extraction")
-                record.update(state="collecting", collection_id=collection["id"], keyword=keyword)
+                collection = self.collections.start(root, keyword, service.collection_request_id(run_id),
+                    local_only=result["status"] == "needs_extraction", limit=self.collection_limit)
+                record.update(state="collecting", collection_id=collection["id"], keyword=keyword,
+                              requested_limit=self.collection_limit)
             else:
                 record.update(state="unsupported_input", error=result.get("message"))
             self._save(path, record)

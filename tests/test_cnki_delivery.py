@@ -95,8 +95,31 @@ def test_prepare_only_uses_owned_prompts_and_never_launches_a_model(tmp_path, mo
     assert "{{" not in prompt and str(work).replace("\\", "/") in prompt
     assert "D:/UI-Agent" not in prompt and "D:\\UI-Agent" not in prompt
     assert task["status"] == "prepared"
-    config = json.dumps(collector.mcp_configuration(tmp_path))
+    mcp = collector.mcp_configuration(tmp_path)
+    config = json.dumps(mcp)
     assert str(tmp_path / "configs/cnki_browser.json").replace("\\", "\\\\") in config
+    assert "--headless" in mcp["mcp_servers"]["playwright"]["args"]
+
+
+def test_mcp_configuration_can_temporarily_show_browser(tmp_path, monkeypatch):
+    monkeypatch.setenv("PHARM_CNKI_HEADED", "1")
+    args = collector.mcp_configuration(tmp_path)["mcp_servers"]["playwright"]["args"]
+    assert "--headless" not in args
+
+
+def test_extract_normalises_documented_disease_type_label(tmp_path):
+    work = tmp_path / "work"
+    paper = {"rank": 1, "title": "示例方治疗示例病", "abstract": "示例方用于示例病患者研究。", "url": "https://kns.cnki.net/example"}
+    output = json.dumps({"triples": [
+        {"head": "示例方", "head_type": "方剂", "relation": "主治", "tail": "示例病",
+         "tail_type": "疾病（西医病名）", "evidence": "示例方用于示例病患者研究。"},
+        {"head": "示例方", "head_type": "方剂", "relation": "主治", "tail": "示例病",
+         "tail_type": "疾病", "evidence": "标题：示例方治疗示例病"},
+    ]}, ensure_ascii=False)
+    collector.extract_papers([paper], work, lambda prompt, log: output)
+    rows = [json.loads(line) for line in (work / "triples.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["tail_type"] == "疾病"
+    assert rows[1]["sources"][0]["evidence"] == "示例方治疗示例病"
 
 
 def fake_runner(work, *, corrupt_quote=False):
@@ -282,8 +305,9 @@ print('{"event": "log with unrelated braces"}')
         args = invocation["args"]
         assert invocation["prompt"] == prompt and prompt not in args
         assert args[:3] == ["exec", "--model", "gpt-5.6-luna"]
-        assert args[args.index("--sandbox") + 1] == ("workspace-write" if browser else "read-only")
+        assert ("--sandbox" not in args) if browser else (args[args.index("--sandbox") + 1] == "read-only")
         assert ("mcp_servers.playwright.command=" in " ".join(args)) == browser
+        assert ("--approve-for-me" in args) == browser
         assert "--dangerously-bypass-approvals-and-sandbox" not in args
         assert not (tmp_path / ".codex/config.toml").exists()
 
