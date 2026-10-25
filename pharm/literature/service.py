@@ -8,6 +8,7 @@ from uuid import uuid4
 from ..core.common import ROOT, safe_name, write_json, read_json
 from . import cnki
 from . import dataset
+from .pipeline import run_literature_pipeline
 
 
 def checksum(value):
@@ -61,6 +62,24 @@ def query(run_id, *, root=ROOT, snapshot=None):
     research = json.loads(raw.decode("utf-8-sig"))
     research["direction"] = direction
     value = cnki.analyze(research, data_dir=cnki.data_directory(root))
+    if value.get("status") == "ready" and direction == "forward":
+        source_path = Path(value["source"]["directory"]) / "papers.json"
+        source_raw = source_path.read_bytes()
+        source_payload = json.loads(source_raw.decode("utf-8-sig"))
+        formula = value.get("subject")
+        catalog_path = root / "local/literature/concept_maps" / (dataset.safe_keyword(formula) + ".json")
+        catalog = read_json(catalog_path) if catalog_path.is_file() else None
+        value["evidence_pipeline"] = run_literature_pipeline(
+            source_payload,
+            research,
+            formula=formula,
+            requested_limit=max(1, len(source_payload.get("papers", []))),
+            concept_catalog=catalog,
+            frequency_candidates=value.get("candidates", []),
+            source_path=source_path,
+            source_sha256=hashlib.sha256(source_raw).hexdigest(),
+            concept_catalog_path=catalog_path if catalog is not None else None,
+        )
     payload = {"run_id": run_id, "snapshot_id": None, "result": value}
     if value["status"] == "ready":
         value["database_archive_sha256"] = hashlib.sha256(raw).hexdigest()

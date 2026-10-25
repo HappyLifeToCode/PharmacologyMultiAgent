@@ -63,7 +63,7 @@ class Harness:
         self.calls = []
         self.fail = False
         self.collections = jobs.CollectionManager(execute=self.execute)
-        self.flows = flows.LiteratureFlowManager(self.collections)
+        self.flows = flows.LiteratureFlowManager(self.collections, collection_limit=1)
 
     def execute(self, task, work, **kwargs):
         self.entered.set()
@@ -102,6 +102,10 @@ def test_cached_literature_is_ranked_without_any_model_call(tmp_path, harness):
     result = harness.flows.resolve(tmp_path, "forward_case")
     assert result["state"] == "ready" and result["collection"] is None
     assert result["literature"]["result"]["candidates"][0]["raw_names"] == ["示例病"]
+    pipeline = result["literature"]["result"]["evidence_pipeline"]
+    assert pipeline["schema_version"] == "literature-evidence-pipeline-v1"
+    assert pipeline["frequency_candidates"][0]["raw_names"] == ["示例病"]
+    assert pipeline["comparison"]["original_top_preserved"] is True
     assert harness.flows.resolve(tmp_path, "forward_case")["snapshot_id"] == result["snapshot_id"]
     assert not harness.entered.is_set() and not harness.calls
     assert path.read_bytes() == before
@@ -113,6 +117,7 @@ def test_missing_literature_returns_targets_first_then_generates_ranking_in_back
     assert state["state"] == "collecting" and state["literature"] is None
     assert path.read_bytes() == before
     collection_id = state["collection_id"]
+    assert state["collection"]["limit"] == 1 and state["requested_limit"] == 1
     assert harness.flows.resolve(tmp_path, "forward_case")["collection_id"] == collection_id
     assert len(harness.collections.list(tmp_path)) == 1
     harness.release.set()
@@ -310,3 +315,12 @@ def test_flow_refreshes_the_actual_failure_diagnostic_without_restarting_collect
     updated=harness.flows.status(tmp_path,"forward_case")
     assert updated["error"] == "知网HTTP 403访问被拒绝" and updated["failure_code"] == "cnki_access_denied"
     assert not harness.calls
+
+
+def test_default_web_collection_remains_all_results_after_pipeline_merge(tmp_path, harness):
+    archive(tmp_path)
+    harness.flows = flows.LiteratureFlowManager(harness.collections)
+    state = harness.flows.resolve(tmp_path, "forward_case")
+    assert state["collection"]["limit"] is None and state["requested_limit"] is None
+    assert state["collection"]["collection_mode"] == "all"
+    harness.release.set()

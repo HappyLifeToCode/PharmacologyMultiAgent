@@ -5,6 +5,7 @@ const CnkiLiterature = (() => {
   const studies = { clinical: "患者相关研究", preclinical: "动物或体外研究", review: "综述或研究进展", experience: "经验或医案", mixed_or_unclear: "研究对象有待区分", unknown: "研究类型暂不明确" };
   const interventions = { same_name: "论文方名与检索名一致，记录未标加减或联合干预", modified: "加味或加减方研究", combination: "联合治疗或合方研究", name_variant_unconfirmed: "论文方名与检索名不完全一致，暂待确认", modification_unknown: "未记录是否加减，未计入方名一致的篇数" };
   const reasons = { other_intervention: "研究的是其他方剂或干预", text_not_grounded: "未能在保存的标题摘要中找到病名或引用原句", subject_not_grounded: "标题和引用原句未明确出现本次检索的方剂或药材", source_mismatch: "提取记录与保存的论文信息对不上", missing_term_or_quote: "缺少病名或引用原句" };
+  const tiers = { P1: "原方直接人体证据", P2: "联合或加用人体证据", P3: "较低级人体或综述支持", CTX: "治疗场景", C: "验案或经验", M: "前临床或机制", S1: "表型线索", S2: "上位或部分映射", R: "待补充证据", U: "未映射概念" };
   function node(tag, value, className) { const item = document.createElement(tag); if (value != null) item.textContent = value; if (className) item.className = className; return item; }
   function button(value, handler) { const item = node("button", value); item.type = "button"; item.addEventListener("click", handler); return item; }
   function details(value, parent) { const item = node("details"); item.append(node("summary", value)); parent.append(item); return item; }
@@ -37,6 +38,45 @@ const CnkiLiterature = (() => {
       section.append(node("p", "引用来自论文" + (evidence.quote_field === "title" ? "标题" : "摘要") + "，已与保存的原文核对。", "cnki-note"));
       const abstract = details("查看原摘要", section); abstract.append(node("p", evidence.abstract || "本条没有摘要"));
     }
+    function evidenceLane(data) {
+      const pipeline = data.evidence_pipeline;
+      if (!pipeline || reverse) return;
+      root.append(node("h5", "文献证据优先候选"));
+      root.append(node("p", "按原方一致性、研究设计、疗效方向和方剂贡献自动分为 P1/P2/P3。该通道与 Open Targets 分数分开，不改写原靶点候选顺序。", "cnki-evidence-intro"));
+      const priority = node("div", null, "cnki-evidence-lane"); root.append(priority);
+      const priorities = [...(pipeline.literature_priority || []), ...(pipeline.literature_priority_overflow || [])];
+      if (!priorities.length) {
+        priority.append(node("p", "这批标题摘要中暂未形成可自动提升的临床文献候选。机制、表型和未映射术语仍保留在下方支持线索中。", "cnki-note"));
+      }
+      for (const [index, item] of priorities.entries()) {
+        const section = details((index + 1) + ". " + item.term, priority);
+        const summary = section.querySelector("summary");
+        summary.prepend(node("span", item.tier, "cnki-tier cnki-tier-" + item.tier.toLowerCase()));
+        summary.append(node("span", (tiers[item.tier] || item.tier) + " · " + item.evidence_record_count + "篇", "cnki-counts"));
+        section.append(node("p", item.tier_reason));
+        if (item.open_targets_disease_id) {
+          section.append(node("p", "对应 Open Targets：" + item.open_targets_name + "（" + item.open_targets_disease_id + "），原候选名次 " + (item.open_targets_display_rank || "未进入展示层") + "。", "cnki-meta"));
+        } else {
+          section.append(node("p", "该中文临床概念暂未安全并入 Open Targets 疾病实体，仍按文献原词保留。", "cnki-notice"));
+        }
+        for (const claim of item.claims || []) {
+          const evidence = details("#" + claim.rank + " " + claim.title, section);
+          evidence.append(node("p", (claim.evidence_class || "证据类型未定") + " · " + (claim.direction === "positive" ? "阳性结果" : claim.direction || "方向未定"), "cnki-meta"));
+          evidence.append(node("blockquote", claim.excerpt || "摘要引文未记录"));
+        }
+      }
+      const supporting = details("查看未进入 P 层的支持线索（" + (pipeline.supporting_terms?.length || 0) + "项）", root);
+      supporting.append(node("p", "CTX 为治疗场景，C 为验案/经验，M 为动物或机制研究；这些信息保留出处，但不作为高等级适应症提升。", "cnki-note"));
+      for (const item of pipeline.supporting_terms || []) {
+        const row = details(item.tier + " · " + item.term + " · " + item.evidence_record_count + "篇", supporting);
+        row.append(node("p", item.tier_reason));
+        for (const claim of item.claims || []) row.append(node("blockquote", claim.excerpt || claim.title || "证据摘要未记录"));
+      }
+      const screening = pipeline.screening_summary || {};
+      const audit = details("查看原方筛选记录", root);
+      audit.append(node("p", "输入 " + (screening.source_record_count || 0) + " 篇；纳入原方 " + (screening.eligible_original_formula_count || 0) + " 篇；排除加减方、其他方或仅提及记录 " + (screening.excluded_count || 0) + " 篇。"));
+      for (const item of screening.excluded_records || []) audit.append(node("p", "#" + item.rank + " " + item.title + "：" + item.screening_reason, "cnki-note"));
+    }
     function render(payload) {
       heading(); current = payload;
       const data = payload.result;
@@ -50,12 +90,14 @@ const CnkiLiterature = (() => {
       if (catalogErrors.length) root.append(node("p", "部分疾病数据库暂时无法读取，病名匹配可能不完整；已找到的论文仍然保留。", "cnki-notice"));
       root.append(node("p", "已读取 " + source.paper_count + " 条文献记录，去重后 " + source.unique_paper_count + " 篇，其中 " + source.abstract_count + " 篇有摘要。", "cnki-meta"));
       root.append(node("p", "目前只使用已采集的这批论文，不代表知网全部文献，也不是数据库靶点关联排序。", "cnki-note"));
+      evidenceLane(data);
       const frequencyOrder = data.ranking?.kind === "descriptive_retrieval_frequency";
+      if (!reverse) root.append(node("h5", "检索频次参考（保留原结果）"));
       root.append(node("p", reverse ? data.ranking?.note : frequencyOrder ? "当前按篇数暂排：先看方名一致且未标加减/联合的篇数，再看全部关联篇数。两项都相同的条目视为并列，仅按病名顺序显示。" : data.ranking?.note, "cnki-notice"));
       const explanation = details("篇数和排序是什么意思？", root);
       explanation.append(node("p", reverse ? "药材与方剂按论文原名分别整理；优先看未标加减或联合的去重篇数，再看全部关联篇数，最后按原名显示。这里的原名尚未自动对齐到BATMAN药材条目。" : "“方名一致且未标加减/联合”指论文方名与检索名一致、记录明确未标加减，且未识别出联合治疗。信息不全或名称不确定的文献不计入这一项；这不等于组成和剂量已经核实一致。"));
       explanation.append(node("p", "“全部关联”包含符合文字出处检查的所有关联论文，也包括加减方、联合干预和名称待确认的记录。同一篇论文多次提及只计一次。"));
-      explanation.append(node("p", "临床、动物和综述目前没有分别加权，摘要中的改善、阴性或不明确结论也尚未系统分类。排序反映这批文献的关联篇数，不能当作疗效强弱。"));
+      explanation.append(node("p", data.evidence_pipeline && !reverse ? "本表仍只反映检索关联篇数；临床、动物和综述的区别以及疗效方向已在上方独立的 P1/P2/P3 证据通道处理。" : "临床、动物和综述目前没有分别加权，摘要中的改善、阴性或不明确结论也尚未系统分类。排序反映这批文献的关联篇数，不能当作疗效强弱。"));
       const list = node("div", null, "cnki-list"); root.append(list);
       if (reverse) root.insertBefore(node("h5", "文献关联药材（论文原名）"), list);
       function renderItems(items, parent) {

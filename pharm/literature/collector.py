@@ -44,7 +44,8 @@ class CollectionValidationError(ValueError):
 def mcp_configuration(root=ROOT, *, output=None, connect_session=True):
     root = Path(root).resolve()
     address = browser_session.endpoint(root) if connect_session else None
-    browser_args = ["--cdp-endpoint", address] if address else ["--headless", "--config", str(root / "configs/cnki_browser.json")]
+    headed = os.environ.get("PHARM_CNKI_HEADED", "").strip().lower() in {"1", "true", "yes", "on"}
+    browser_args = ["--cdp-endpoint", address] if address else ([] if headed else ["--headless"]) + ["--config", str(root / "configs/cnki_browser.json")]
     return {"mcp_servers": {"playwright": {"command": "npx", "args": ["@playwright/mcp@0.0.64", *browser_args, "--save-trace",
         "--output-dir", str(output or root / "local/cnki-browser")],
         "required": True, "startup_timeout_sec": 60, "tool_timeout_sec": 120,
@@ -161,9 +162,16 @@ def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=DEFAULT_MODE
     workspace = Path(workspace or root).resolve()
     response_path = log_path.resolve().with_suffix(".response.txt")
     response_path.unlink(missing_ok=True)  # Never accept a stale final message after a failed retry.
-    args = list(command or [executable]) + ["exec", "--model", model, "--cd", str(workspace),
-        "--sandbox", "workspace-write" if browser else "read-only", "--skip-git-repo-check", "--ephemeral",
-        "--json", "--output-last-message", str(response_path), "-c", 'model_reasoning_effort="low"']
+    args = list(command or [executable]) + ["exec", "--model", model, "--cd", str(workspace)]
+    if browser:
+        # Browser MCP calls can require approval. Collection runs without an
+        # interactive terminal, so route those requests through Codex's
+        # workspace-scoped automatic reviewer. This option supplies its own
+        # workspace-write sandbox and is mutually exclusive with --sandbox.
+        args.append("--approve-for-me")
+    else:
+        args.extend(["--sandbox", "read-only"])
+    args.extend(["--skip-git-repo-check", "--ephemeral", "--json", "--output-last-message", str(response_path), "-c", 'model_reasoning_effort="low"'])
     if browser:
         server = mcp_configuration(root, output=workspace / "browser")["mcp_servers"]["playwright"]
         for key, value in server.items():
@@ -265,8 +273,15 @@ def validate_extraction(raw, paper):
     for triple in raw["triples"]:
         if not isinstance(triple, dict) or any(not isinstance(triple.get(k), str) or not triple[k].strip() for k in ("head", "head_type", "relation", "tail", "tail_type", "evidence")):
             raise ValueError("关系抽取缺少必要字段，未发布")
+        for key in ("head_type", "tail_type"):
+            if triple[key] == "疾病（西医病名）": triple[key] = "疾病"
         if triple["head_type"] not in {"方剂", "中药", "症状", "证候", "功效", "疾病"} or triple["tail_type"] not in {"方剂", "中药", "症状", "证候", "功效", "疾病"} or triple["relation"] not in {"组成", "主治", "治疗", "具有功效", "加减"}:
             raise ValueError("关系抽取类型不正确，未发布")
+        for prefix, source in (("标题：", paper["title"]), ("摘要：", paper.get("abstract") or "")):
+            if triple["evidence"].startswith(prefix):
+                candidate = triple["evidence"][len(prefix):].strip()
+                if cnki.normalise(candidate) and cnki.normalise(candidate) in cnki.normalise(source): triple["evidence"] = candidate
+                break
         quote = cnki.normalise(triple["evidence"])
         if quote not in cnki.normalise(paper["title"]) and quote not in cnki.normalise(paper.get("abstract")):
             raise ValueError("抽取的引用原句不在标题摘要中，未发布")
