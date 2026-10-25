@@ -102,6 +102,10 @@ def test_cached_literature_is_ranked_without_any_model_call(tmp_path, harness):
     result = harness.flows.resolve(tmp_path, "forward_case")
     assert result["state"] == "ready" and result["collection"] is None
     assert result["literature"]["result"]["candidates"][0]["raw_names"] == ["示例病"]
+    pipeline = result["literature"]["result"]["evidence_pipeline"]
+    assert pipeline["schema_version"] == "literature-evidence-pipeline-v1"
+    assert pipeline["frequency_candidates"][0]["raw_names"] == ["示例病"]
+    assert pipeline["comparison"]["original_top_preserved"] is True
     assert harness.flows.resolve(tmp_path, "forward_case")["snapshot_id"] == result["snapshot_id"]
     assert not harness.entered.is_set() and not harness.calls
     assert path.read_bytes() == before
