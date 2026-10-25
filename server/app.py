@@ -104,6 +104,8 @@ async def open_collection_browser(request: Request):
     try:
         if await request.json() != {}: raise ValueError("不接受浏览器路径或任意远程连接地址")
         return await run_in_threadpool(cnki_browser_session.open_session, ROOT)
+    except cnki_browser_session.BrowserSessionBusy as exc:
+        raise HTTPException(409, str(exc))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except (OSError, RuntimeError) as exc:

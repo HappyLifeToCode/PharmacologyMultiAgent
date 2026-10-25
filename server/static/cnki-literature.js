@@ -125,7 +125,7 @@ const CnkiLiterature = (() => {
       if (job?.status === "queued") box.append(node("p", "排队中，尚未开始执行", "cnki-progress-time"));
       let label = "正在核对本地文献…";
       if (state.state === "starting") label = "正在准备文献流程…";
-      if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : "本地暂无文献，正在采集标题和摘要…";
+      if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : "正在后台采集标题和摘要…";
       if (state.state === "failed") label = "文献任务暂未完成，进度已保留";
       if (state.state === "cancelled") label = "文献任务已停止，进度已保留";
       if (state.state === "unsupported_input") label = state.error || "本次输入暂不支持单一关键词文献分析";
@@ -143,8 +143,8 @@ const CnkiLiterature = (() => {
       }
       if (["failed", "cancelled"].includes(state.state)) {
         const resume = button("继续采集或分析", () => flow.resume()); resume.disabled = state.busy; controls.append(resume);
-        if ([state.failure_code, job?.failure_code].some(code => ["cnki_access_denied", "cnki_verification_required", "cnki_verification_unconfirmed", "browser_session_unavailable"].includes(code))) {
-          const open = button("打开采集浏览器", async () => {
+        if ([state.failure_code, job?.failure_code].some(code => ["cnki_access_denied", "cnki_login_required", "cnki_verification_required", "cnki_verification_unconfirmed", "browser_session_unavailable"].includes(code))) {
+          const open = button("打开登录/验证窗口", async () => {
             open.disabled = true;
             try {
               const response = await fetch("/api/literature/browser/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
@@ -153,7 +153,7 @@ const CnkiLiterature = (() => {
             } catch { root.append(node("p", "未能打开采集浏览器，请确认本机服务已加载更新。", "cnki-notice")); }
             finally { open.disabled = false; }
           }); controls.append(open);
-          root.append(node("p", "可先在项目专用窗口正常搜索，必要时手动登录或验证，再点继续采集。", "cnki-note"));
+          root.append(node("p", "采集默认在后台运行。仅在需要时打开专用窗口手动登录或验证，再点继续采集；任务会自动切回后台。", "cnki-note"));
         }
       }
       if (state.connectionError || state.state === "not_started") {

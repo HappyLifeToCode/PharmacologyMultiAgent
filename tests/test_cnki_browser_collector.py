@@ -157,3 +157,43 @@ def test_site_excerpt_is_distinct_from_full_abstract_and_only_title_is_analyzed(
     assert len(calls) == 3
     papers[0]["abstract_excerpt"] = ""
     with pytest.raises(ValueError): collector.validate_scan(task, work, papers)
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_production_browser_uses_background_and_cleans_only_owned_pages(tmp_path, monkeypatch, blocked):
+    from types import SimpleNamespace
+    import playwright.sync_api
+    pages=[SimpleNamespace(closed=False), SimpleNamespace(closed=False)]
+    for page in pages:
+        page.is_closed=lambda p=page:p.closed
+        page.close=lambda p=page:setattr(p,'closed',True)
+    context=SimpleNamespace(new_page=lambda:pages[0])
+    browser=SimpleNamespace(contexts=[context])
+    calls=[]
+    class Runtime:
+        def __enter__(self):
+            return SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=lambda address:calls.append(address) or browser))
+        def __exit__(self,*args): pass
+    monkeypatch.setattr(playwright.sync_api,'sync_playwright',Runtime)
+    monkeypatch.setattr(browse.browser_session,'background_endpoint',lambda root:'http://127.0.0.1:9222')
+    monkeypatch.setattr(browse.browser_session,'endpoint',lambda *a:pytest.fail('must ensure background mode'))
+    monkeypatch.setattr(browse,'CnkiSite',lambda *a,**k:SimpleNamespace(article=pages[1]))
+    def collect(*a,**k):
+        if blocked: raise browse.PageBlocked('captcha',{'blocking_verification':True})
+        return {'complete':True}
+    monkeypatch.setattr(browse,'collect_pages',collect)
+    if blocked:
+        with pytest.raises(browse.PageBlocked): browse.collect({},tmp_path,root=tmp_path)
+    else: assert browse.collect({},tmp_path,root=tmp_path)['complete']
+    assert calls==['http://127.0.0.1:9222'] and all(p.closed for p in pages)
+
+
+def test_visible_login_pause_is_explicit_and_does_not_claim_no_results(tmp_path):
+    task, work=collector.prepare('测试方',root=tmp_path)
+    site=Site()
+    def login(row): raise browse.PageBlocked('login_required',{'login_required':True})
+    site.detail=login
+    with pytest.raises(browse.PageBlocked): browse.collect_pages(task,work,site)
+    with pytest.raises(collector.CollectionValidationError) as raised: collector.validate_scan(task,work,[])
+    assert raised.value.failure_code=='cnki_login_required'
+    assert not list((work/'papers').glob('*.json'))

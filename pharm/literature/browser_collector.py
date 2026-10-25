@@ -128,9 +128,10 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
 
 
 class CnkiSite:
-    def __init__(self, context, list_page, work, *, cancel=lambda: False, timeout=2400):
+    def __init__(self, context, list_page, work, *, root=None, cancel=lambda: False, timeout=2400):
         self.context, self.page, self.work = context, list_page, Path(work)
         self.article = None
+        self.root = root
         self.cancel, self.deadline = cancel, time.monotonic() + timeout
         self.guard = Path(__file__).with_name("browser_guards.js").read_text(encoding="utf-8")
 
@@ -139,12 +140,18 @@ class CnkiSite:
         if self.cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
         if time.monotonic() > self.deadline: raise PageBlocked("collection_timeout")
         status = response.status if response else None
-        if status in {403, 429}: raise PageBlocked("http_403" if status == 403 else "rate_limited")
+        if status in {403, 429}:
+            if self.root and status == 403: browser_session.remember_manual_page(self.root, page.url)
+            raise PageBlocked("http_403" if status == 403 else "rate_limited")
         if status == 404: raise PageBlocked("http_404")
         state = page.evaluate("() => {" + self.guard + "; return cnkiPageState();}")
         if state["blocking_verification"]:
             page.screenshot(path=str(self.work / "blocking-verification.png"))
+            if self.root: browser_session.remember_manual_page(self.root, page.url)
             raise PageBlocked("captcha", state)
+        if state.get("login_required"):
+            if self.root: browser_session.remember_manual_page(self.root, page.url)
+            raise PageBlocked("login_required", state)
         return state
 
     def search(self, keyword):
@@ -223,16 +230,15 @@ class CnkiSite:
 
 def collect(task, work, *, root, cancel=lambda: False):
     from playwright.sync_api import sync_playwright
-    address = browser_session.endpoint(root)
+    address = browser_session.background_endpoint(root)
     with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(address) if address else p.chromium.launch(headless=True)
-        context = browser.contexts[0] if address else browser.new_context(viewport={"width":1280,"height":800},locale="zh-CN",timezone_id="Asia/Shanghai")
+        browser = p.chromium.connect_over_cdp(address)
+        context = browser.contexts[0]
         page = context.new_page()
-        site = CnkiSite(context, page, work, cancel=cancel)
+        site = CnkiSite(context, page, work, root=root, cancel=cancel)
         try: return collect_pages(task, work, site, cancel=cancel)
         finally:
-            if not address: browser.close()
-            else:
-                # Keep the dedicated browser open for manual verification and future resumes.
-                # Do not close a challenge that the user may need to inspect.
-                pass
+            # Only close pages created for this collection. The hidden browser
+            # persists with its own profile; interactive recovery is explicit.
+            for owned_page in (page, site.article):
+                if owned_page and not owned_page.is_closed(): owned_page.close()

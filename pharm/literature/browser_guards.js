@@ -13,10 +13,13 @@ function cnkiPageState() {
     && /拖动.{0,12}拼图|安全验证|完成.{0,6}滑块/.test(element.textContent || "") && inViewport(element));
   const abstracts = [...document.querySelectorAll("#ChDivSummary,.abstract-text")].filter(displayed);
   const rows = [...document.querySelectorAll("table.result-table-list tr")].filter((row) => row.querySelector(".name a") && displayed(row));
+  const abstractAvailable = abstracts.some((element) => (element.innerText || element.textContent || "").trim().length > 0);
+  const loginRequired = !abstractAvailable && rows.length === 0 && [...document.querySelectorAll('input[type="password"]')].some(inViewport);
   return {
     blocking_verification: hints.length > 0,
+    login_required: loginRequired,
     verification_elements: hints.map((element) => ({ text: element.innerText, top: element.getBoundingClientRect().top, left: element.getBoundingClientRect().left })),
-    abstract_available: abstracts.some((element) => (element.innerText || element.textContent || "").trim().length > 0),
+    abstract_available: abstractAvailable,
     result_rows: rows.length,
   };
 }
