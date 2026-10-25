@@ -42,7 +42,10 @@ def main():
         if not args.keyword: parser.error("请指定--keyword或--resume")
         task, work = collector.prepare(args.keyword, args.limit, model=args.model or collector.DEFAULT_MODEL)
     if args.execute:
-        if task.get("status") == "cancelled": (work / "cancel.requested.json").unlink(missing_ok=True)
+        if args.resume and task.get("status") in {"cancelled", "failed_or_partial", "interrupted", "prepared"}:
+            if (work.parent / "collector.lock").exists():
+                parser.error("已有采集任务或遗留锁，请先核对，不能清除活动任务的停止请求")
+            (work / "cancel.requested.json").unlink(missing_ok=True)
         task = collector.execute(task, work, extract=args.extract)
     print(json.dumps({"task": task, "work_directory": str(work), "executed": args.execute,
                       "note": "默认只生成本项目任务和提示词；--execute才联网采集"}, ensure_ascii=False, indent=2))

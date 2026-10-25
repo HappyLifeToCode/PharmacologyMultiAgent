@@ -24,6 +24,7 @@ from pharm.literature import service as cnki_literature
 from pharm.literature import jobs as cnki_collection
 from pharm.literature import flows as cnki_flows
 from pharm.literature import cnki as cnki_data, dataset as cnki_dataset
+from pharm.literature import browser_session as cnki_browser_session
 from pharm.agent.forward import _top_k
 from pharm.batman.formulas import SOURCE, formula_candidates, list_formulas
 from pharm.batman import formula_catalog
@@ -95,6 +96,18 @@ def literature_corpora():
         return {"corpora": [{k: c[k] for k in ("keyword", "papers", "abstracts")} for c in value["corpora"]]}
     except (OSError, ValueError, KeyError) as exc:
         raise HTTPException(503, "本地文献清单暂不可用：" + str(exc))
+
+
+@app.post("/api/literature/browser/open")
+async def open_collection_browser(request: Request):
+    if len(await request.body()) > 1024: raise HTTPException(413, "请求过长")
+    try:
+        if await request.json() != {}: raise ValueError("不接受浏览器路径或任意远程连接地址")
+        return await run_in_threadpool(cnki_browser_session.open_session, ROOT)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(503, str(exc))
 
 
 @app.get("/api/literature/collections")

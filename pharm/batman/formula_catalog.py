@@ -21,6 +21,7 @@ from .formulas import FORMULAS, SOURCE, formula_candidates
 from ..core.common import ROOT, digest, now, read_json, write_json
 
 ALIAS_FILE = Path(__file__).with_name("herb_name_aliases.json")
+DISPLAY_FILE = Path(__file__).with_name("herb_display_names.json")
 _PREFERENCE_LOCK = threading.Lock()
 INPUT_KEYS = {"text", "formula", "herbs", "formula_variant_id", "formula_herbs", "formula_fingerprint"}
 
@@ -53,7 +54,7 @@ def _stamp(path):
 
 
 @lru_cache(maxsize=2)
-def _load(formula_stamp, herb_stamp, alias_stamp):
+def _load(formula_stamp, herb_stamp, alias_stamp, display_stamp=None):
     herbs = defaultdict(list)
     if herb_stamp:
         with Path(herb_stamp[0]).open(encoding="utf-8-sig", newline="") as stream:
@@ -69,6 +70,7 @@ def _load(formula_stamp, herb_stamp, alias_stamp):
                     if item not in herbs[normalise(name)]:
                         herbs[normalise(name)].append(item)
     aliases = read_json(Path(alias_stamp[0]))["aliases"] if alias_stamp else {}
+    labels = read_json(Path(display_stamp[0]))["labels"] if display_stamp else {}
     versions, by_name = {}, defaultdict(list)
     formula_hash = digest(Path(formula_stamp[0])) if formula_stamp else None
     herb_hash = digest(Path(herb_stamp[0])) if herb_stamp else None
@@ -76,6 +78,7 @@ def _load(formula_stamp, herb_stamp, alias_stamp):
 
     def map_herb(raw):
         key = normalise(raw)
+        display_rule = labels.get(key)
         matches = herbs.get(key, [])
         rule = None
         if not matches and key in aliases:
@@ -100,13 +103,20 @@ def _load(formula_stamp, herb_stamp, alias_stamp):
                 if len(label_identities) == 1:
                     display_name = next(iter(label_identities))[0]
                     display_note = f"原记录缺中文名，按已登记别名显示“{display_name}”；检索仍保留 {item['pinyin']} 原记录"
+                if display_rule:
+                    display_name = display_rule["name"]
+                    display_note = "原记录缺少中文名；" + display_rule["note"]
             return {"original": raw, "canonical": item["name"], "candidates": [item["pinyin"]],
                     "status": "alias" if rule else "exact", "note": rule["note"] if rule else "BATMAN 药材表精确匹配",
                     "display_name": display_name, "display_note": display_note, "chinese_name_missing": chinese_missing}
-        return {"original": raw, "canonical": raw, "candidates": [raw],
+        result = {"original": raw, "canonical": raw, "candidates": [raw],
                 "status": "ambiguous" if matches else "unmatched",
                 "note": "药材名称存在不同记录，请明确药材" if matches else "未找到精确名称或已登记别名",
                 "possible_names": sorted({item["name"] for item in matches})}
+        if display_rule:
+            result.update(display_name=display_rule["name"], display_note=display_rule["note"])
+            if display_rule.get("unresolved_label"): result["unresolved_label"] = display_rule["unresolved_label"]
+        return result
 
     for name in FORMULAS:
         entries = formula_candidates(name)
@@ -167,7 +177,7 @@ def _load(formula_stamp, herb_stamp, alias_stamp):
 
 def catalog():
     directory = local._data_root({})
-    return _load(_stamp(directory / "formula_browse.txt"), _stamp(directory / "herb_browse.txt"), _stamp(ALIAS_FILE))
+    return _load(_stamp(directory / "formula_browse.txt"), _stamp(directory / "herb_browse.txt"), _stamp(ALIAS_FILE), _stamp(DISPLAY_FILE))
 
 
 def _clean_herbs(values, limit=30):

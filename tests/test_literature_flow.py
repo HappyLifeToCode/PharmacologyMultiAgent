@@ -298,3 +298,15 @@ def test_external_collector_lock_is_not_removed_or_adopted(tmp_path, harness):
     path.write_text("external-owner", encoding="utf-8")
     with pytest.raises(RuntimeError, match="遗留锁"): harness.flows.resolve(tmp_path, "forward_case")
     assert path.read_text(encoding="utf-8") == "external-owner" and not harness.entered.is_set()
+
+
+def test_flow_refreshes_the_actual_failure_diagnostic_without_restarting_collection(tmp_path, harness):
+    archive(tmp_path)
+    harness.fail=True; harness.release.set()
+    state=harness.flows.resolve(tmp_path,"forward_case")
+    wait_for(lambda: harness.flows.status(tmp_path,"forward_case")["state"] == "failed")
+    path=jobs.task_directory(tmp_path,state["collection_id"])/"task.json"
+    task=jobs.read(path); task.update(error="知网HTTP 403访问被拒绝",failure_code="cnki_access_denied"); write_json(path,task)
+    updated=harness.flows.status(tmp_path,"forward_case")
+    assert updated["error"] == "知网HTTP 403访问被拒绝" and updated["failure_code"] == "cnki_access_denied"
+    assert not harness.calls

@@ -109,7 +109,12 @@ class LiteratureFlowManager:
                 if collection["status"] == "succeeded":
                     self._finish(root, run_id, record["attempt"]); record = jobs.read(path)
                 elif collection["status"] in {"failed_or_partial", "cancelled", "interrupted"}:
-                    record.update(state="cancelled" if collection["status"] == "cancelled" else "failed", error=collection.get("error") or "文献任务中断，进度保留，可显式续跑")
+                    record.update(state="cancelled" if collection["status"] == "cancelled" else "failed", error=collection.get("error") or "文献任务中断，进度保留，可显式续跑", failure_code=collection.get("failure_code"))
+                    self._save(path, record)
+            elif record["state"] in {"failed", "cancelled"} and collection and collection["status"] in {"failed_or_partial", "cancelled", "interrupted"}:
+                latest = collection.get("error") or "文献任务中断，进度保留，可显式续跑"
+                if record.get("error") != latest or record.get("failure_code") != collection.get("failure_code"):
+                    record.update(error=latest, failure_code=collection.get("failure_code"))
                     self._save(path, record)
             literature = self.query(run_id, root=root, snapshot=record["snapshot_id"]) if record.get("snapshot_id") else None
             return {**record, "collection": collection, "literature": literature}
@@ -122,7 +127,7 @@ class LiteratureFlowManager:
             record = jobs.read(path)
             if not record or not record.get("collection_id"): return self.resolve(root, run_id)
             self.collections.resume(root, record["collection_id"])
-            record.update(state="collecting", attempt=uuid4().hex, error=None)
+            record.update(state="collecting", attempt=uuid4().hex, error=None, failure_code=None)
             self._save(path, record)
             key = str(Path(root).resolve()) + ":" + run_id
             old = self.watchers.pop(key, None)

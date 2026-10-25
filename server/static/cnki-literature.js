@@ -88,6 +88,11 @@ const CnkiLiterature = (() => {
       for (const paper of data.papers) {
         const detail = details("#" + paper.rank + " " + paper.title, papers);
         detail.append(node("p", paper.abstract || "这篇只保存了论文信息，没有摘要。是否计入关联还需有可核对的标题原句。"));
+        if (paper.note) detail.append(node("p", paper.note, "cnki-note"));
+        if (paper.abstract_status === "excerpt_only" && paper.abstract_excerpt) {
+          const excerpt = details("网站提供的摘要节选（关系分析只使用标题）", detail);
+          excerpt.append(node("p", paper.abstract_excerpt));
+        }
       }
       const rejected = details("未计入本次关联的提取记录（" + data.rejected.length + "条）", root);
       rejected.append(node("p", "这里列的是未纳入的关系记录，不代表整篇论文无效。"));
@@ -138,6 +143,18 @@ const CnkiLiterature = (() => {
       }
       if (["failed", "cancelled"].includes(state.state)) {
         const resume = button("继续采集或分析", () => flow.resume()); resume.disabled = state.busy; controls.append(resume);
+        if ([state.failure_code, job?.failure_code].some(code => ["cnki_access_denied", "cnki_verification_required", "cnki_verification_unconfirmed", "browser_session_unavailable"].includes(code))) {
+          const open = button("打开采集浏览器", async () => {
+            open.disabled = true;
+            try {
+              const response = await fetch("/api/literature/browser/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+              const result = await response.json();
+              root.append(node("p", response.ok ? result.message : result.detail || "采集浏览器暂不可用", "cnki-notice"));
+            } catch { root.append(node("p", "未能打开采集浏览器，请确认本机服务已加载更新。", "cnki-notice")); }
+            finally { open.disabled = false; }
+          }); controls.append(open);
+          root.append(node("p", "可先在项目专用窗口正常搜索，必要时手动登录或验证，再点继续采集。", "cnki-note"));
+        }
       }
       if (state.connectionError || state.state === "not_started") {
         const retry = button("重试文献流程", () => flow.retry()); retry.disabled = state.busy; controls.append(retry);

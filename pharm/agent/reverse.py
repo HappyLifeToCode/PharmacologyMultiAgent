@@ -100,7 +100,7 @@ def query(text=None, *, disease=None, disease_id=None, top_k=None, output_dir=No
     # Reuse the existing display-only alias rules without loading formula rows
     # or replacing any indexed herb/compound identity.
     herb_path = Path(batman_data_dir) / "herb_browse.txt" if batman_data_dir else formula_catalog.local._data_root({}) / "herb_browse.txt"
-    labels = formula_catalog._load(None, formula_catalog._stamp(herb_path), formula_catalog._stamp(formula_catalog.ALIAS_FILE))
+    labels = formula_catalog._load(None, formula_catalog._stamp(herb_path), formula_catalog._stamp(formula_catalog.ALIAS_FILE), formula_catalog._stamp(formula_catalog.DISPLAY_FILE))
     for candidate in herbs["candidates"]:
         display = labels["map_herb"](candidate["herb_record"]["pinyin"])
         if display.get("display_name"):

@@ -57,6 +57,7 @@ class CollectionManager:
                 "paper_count": len(papers), "new_papers": sum(p.get("rank") not in task.get("base_ranks", []) for p in papers),
                 "abstract_count": sum(bool(p.get("abstract")) for p in papers), "pages_recorded": len(pages),
                 "total_results": scan.get("total_results", meta.get("total_results")), "extracted_papers": extracted,
+                "failure_code": task.get("failure_code"),
                 "error": task.get("error") if state in {"failed_or_partial", "cancelled", "interrupted"} else None}
 
     def list(self, root):

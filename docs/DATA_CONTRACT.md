@@ -81,6 +81,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-25：正常网页采集由Python Playwright顺序执行，模型仅按标题摘要抽取。collection_scan新增title_only状态：网站仅有节选时abstract=null、abstract_status=excerpt_only，节选保留abstract_excerpt、说明保留note，关系分析只用标题；no_abstract另表无文字摘要。所有位置均有可核对记录才可标全量完成，不意味着每条都有完整摘要。原句T/A编号只在模型输入使用，发布时复制同篇原句到原evidence字段，旧triples合同不变。新语料的is_modified同时核对标题/摘要文字，模糊加减信息记unknown。新增POST /api/literature/browser/open只接受{}、只连接项目专用本机会话，沿用本机及同源限制。原研究请求、ID、缓存、归档及排序公式不变。
+
 2026-10-24网页接入：文献开关默认关闭，首页正反向和工作台正向在靶点结果返回后调用独立flow接口；已有快照优先恢复，不自动重采。只有首次not_started才resolve，后续轮询/刷新只读状态；失败需显式resume，状态连接故障不取消任务。工作台浏览器元数据新增最近完成结果编号及原文献开关/快照，刷新只GET原归档，不新研究POST。文献药材/方剂及全部证据不截断，原数据库数组/排序/请求body和缓存键不变。
 
 2026-10-24后续：新增`POST /api/agent/{direction}/{run_id}/literature/flow/resolve`及对应GET状态、POST cancel/resume。本地文献优先；缺关系文件仅做local_analysis；无文献才后台采集，完成后生成独立快照。重复请求/活动关键词复用，其他关键词排队，失败不自动重试；原靶点结果、请求body、缓存键及归档不改。反向`candidates`为药材原名、`formula_candidates`为方剂原名，两组完整返回，未自动映射BATMAN实体。前端尚未接入，暂不真实采集“四方汤”。详见[LITERATURE_FLOW.md](LITERATURE_FLOW.md)。

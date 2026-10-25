@@ -181,6 +181,38 @@ def test_missing_chinese_name_without_registered_alias_is_not_invented(formula_d
     assert mapping["candidates"] == ["CHI SHAO YAO"]
 
 
+def test_shao_yao_chinese_is_recognized_without_substituting_a_specific_material(formula_data):
+    for raw in ("SHAO YAO", "芍药"):
+        mapping = catalog.catalog()["map_herb"](raw)
+        assert mapping["display_name"] == "芍药"
+        assert mapping["unresolved_label"] == "需明确白芍/赤芍"
+        assert mapping["status"] == "unmatched" and mapping["canonical"] == raw
+        assert mapping["candidates"] == [raw]
+
+
+def test_gan_di_huang_display_preserves_exact_original_compound_record(formula_data):
+    with (formula_data / "herb_browse.txt").open("a", encoding="utf-8") as stream:
+        stream.write("GAN DI HUANG\tNA\t\tNA\tother-compound(999)\n")
+    mapping = catalog.catalog()["map_herb"]("GAN DI HUANG")
+    assert mapping["display_name"] == "干地黄" and mapping["chinese_name_missing"]
+    assert mapping["status"] == "exact" and mapping["candidates"] == ["GAN DI HUANG"]
+    assert mapping["canonical"] == "GAN DI HUANG"
+
+
+def test_display_only_labels_leave_formula_ids_and_saved_preferences_valid(formula_data, tmp_path, monkeypatch):
+    labels = tmp_path / "display.json"
+    labels.write_text('{"labels":{}}', encoding="utf-8")
+    monkeypatch.setattr(catalog, "DISPLAY_FILE", labels)
+    before = catalog.catalog()
+    preview = catalog.resolve(text="单一方")
+    catalog.save_preference({"text": "单一方", "formula_variant_id": preview["selected_variant_id"]})
+    labels.write_text(json.dumps({"labels":{"SHAO YAO":{"name":"芍药","note":"仅中文显示","unresolved_label":"需明确白芍/赤芍"}}}), encoding="utf-8")
+    after = catalog.catalog()
+    assert before["fingerprint"] == after["fingerprint"]
+    assert set(before["versions"]) == set(after["versions"])
+    assert catalog.resolve(text="单一方")["resolution"]["saved_default"]
+
+
 def test_api_preflight_does_not_start_jobs_and_direct_ambiguous_post_is_blocked(formula_data, monkeypatch):
     calls = []
 

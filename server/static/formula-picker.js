@@ -12,7 +12,8 @@ window.FormulaPicker = (() => {
   const input = (body) => Object.fromEntries(inputKeys.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]));
   function herbLabel(item) {
     const label = item.display_name || item.canonical;
-    if (item.status === "unmatched") return label + "〔待匹配〕";
+    if (["unmatched", "ambiguous"].includes(item.status) && item.unresolved_label) return label + "〔" + item.unresolved_label + "〕";
+    if (item.status === "unmatched") return label + "〔未匹配数据库〕";
     if (item.status === "ambiguous") return label + "〔需明确药材〕";
     if (item.chinese_name_missing && !/[\u3400-\u9fff]/.test(label)) return label + "〔中文名缺失〕";
     return label;

@@ -333,3 +333,142 @@ def test_model_cancellation_stops_only_its_own_child_process(tmp_path, monkeypat
                                 command=[sys.executable, "-c", "import time; time.sleep(10)"])
     finally: timer.cancel()
     assert processes and processes[0].poll() is not None
+
+
+def test_collection_browser_authorization_is_scoped_to_the_three_enabled_tools(tmp_path):
+    server = collector.mcp_configuration(tmp_path)["mcp_servers"]["playwright"]
+    assert server["default_tools_approval_mode"] == "approve"
+    assert server["enabled_tools"] == ["browser_run_code", "browser_take_screenshot", "browser_wait_for"]
+    assert "approval_policy" not in collector.mcp_configuration(tmp_path)
+
+
+def test_structured_browser_approval_error_is_not_reported_as_incomplete_papers(tmp_path):
+    stub = tmp_path / "blocked_codex.py"
+    stub.write_text('''import json, sys
+from pathlib import Path
+args=sys.argv[1:]
+sys.stdin.buffer.read()
+Path(args[args.index("--output-last-message")+1]).write_text("Browser tool denied",encoding="utf-8")
+print(json.dumps({"type":"item.completed","item":{"type":"mcp_tool_call","tool":"browser_run_code","status":"failed","error":{"message":"MCP tool call requires approval, but approval policy is never"}}}))
+''', encoding="utf-8")
+    with pytest.raises(collector.CollectionRuntimeError, match="尚未进入知网") as raised:
+        collector.run_model("test", tmp_path / "denied.log", root=tmp_path, command=[sys.executable, str(stub)])
+    assert raised.value.failure_code == "browser_approval_required"
+
+
+def test_recovered_browser_error_does_not_discard_later_success(tmp_path):
+    log = tmp_path / "events.jsonl"
+    events = [{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"browser_run_code","status":"failed","error":{"message":"requires approval; policy never"}}},
+              {"type":"item.completed","item":{"type":"mcp_tool_call","tool":"browser_run_code","status":"completed","error":None}}]
+    log.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+    assert collector.browser_failure(log) is None
+
+
+def test_explicit_cnki_access_denial_is_not_disguised_as_a_pagination_error(tmp_path):
+    (tmp_path / "collection_progress.json").write_text(json.dumps({"keyword":"测试方","total_results":None,"complete":False,
+        "stop_reason":"homepage_search_result_http_403_after_retry","pages":[]}),encoding="utf-8")
+    with pytest.raises(collector.CollectionValidationError, match="HTTP 403") as raised:
+        collector.validate_scan({"keyword":"测试方","base_ranks":[]},tmp_path,[])
+    assert raised.value.failure_code == "cnki_access_denied"
+
+
+def test_batched_extraction_keeps_paper_identity_and_omits_fulltext(tmp_path):
+    papers=[{"rank":i,"title":f"测试方研究病{i}","abstract":f"测试方用于病{i}研究。","full_text":"不允许进入模型的正文"} for i in range(1,5)]
+    calls=[]
+    def run(prompt,log):
+        calls.append(log.name)
+        assert '不允许进入模型的正文' not in prompt
+        inputs=json.loads(prompt.split('输入：')[-1])
+        return json.dumps({'papers':[{'rank':p['rank'],'triples':[{'head':'测试方','head_type':'方剂','relation':'主治',
+            'tail':f"病{p['rank']}",'tail_type':'疾病','evidence':p['abstract']}]} for p in inputs]})
+    collector.extract_papers(papers,tmp_path,run,batch_size=2)
+    assert len(calls)==2 and len(list((tmp_path/'extracted').glob('*.json')))==4
+    assert len((tmp_path/'triples.jsonl').read_text(encoding='utf-8').splitlines())==4
+    collector.extract_papers(papers,tmp_path,lambda *a:pytest.fail('completed extraction must be reused'),batch_size=2)
+
+
+def test_batched_extraction_rejects_quotes_borrowed_from_another_paper(tmp_path):
+    papers=[{'rank':1,'title':'第一篇','abstract':'甲摘要'},{'rank':2,'title':'第二篇','abstract':'乙摘要'}]
+    def run(prompt,log):
+        return json.dumps({'papers':[{'rank':1,'triples':[{'head':'测试方','head_type':'方剂','relation':'主治','tail':'病','tail_type':'疾病','evidence':'乙摘要'}]},
+                                    {'rank':2,'triples':[]}]})
+    with pytest.raises(ValueError,match='原句'): collector.extract_papers(papers,tmp_path,run,batch_size=2)
+    assert not list((tmp_path/'extracted').glob('*.json'))
+
+
+def test_batched_extraction_corrects_once_and_never_weakens_quote_validation(tmp_path):
+    paper = {"rank": 1, "title": "测试方与疾病研究", "abstract": "测试方用于疾病（英文名）的研究。"}
+    calls = []
+    def run(prompt, log):
+        calls.append(log.name)
+        quote = "测试方用于疾病的研究。" if len(calls) == 1 else paper["abstract"]
+        return json.dumps({"papers":[{"rank":1,"triples":[{"head":"测试方","head_type":"方剂","relation":"主治", "tail":"疾病","tail_type":"疾病","evidence":quote}]}]})
+    collector.extract_papers([paper], tmp_path, run, batch_size=8)
+    assert calls == ["extract_batch_0001_0001.log", "extract_retry_batch_0001_0001.log"]
+    saved = json.loads((tmp_path / "extracted/paper_0001.json").read_text(encoding="utf-8"))
+    assert saved["triples"][0]["evidence"] == paper["abstract"]
+
+
+def test_indexed_source_quotes_are_materialized_from_each_original_paper(tmp_path):
+    papers = [{"rank": i, "title": f"测试方与病{i}", "abstract": f"测试方用于病{i}（英文原名）研究。", "full_text": "禁止正文"} for i in (1, 2)]
+    def run(prompt, log):
+        assert "禁止正文" not in prompt
+        inputs = json.loads(prompt.split('输入：')[-1])
+        assert inputs[0]["quote_choices"]["A1"] == papers[0]["abstract"]
+        return json.dumps({"papers": [{"rank": p["rank"], "triples": [{"head": "测试方", "head_type": "方剂", "relation": "主治",
+            "tail": f"病{p['rank']}", "tail_type": "疾病", "evidence_ref": "A1"}]} for p in papers]})
+    collector.extract_papers(papers, tmp_path, run, batch_size=8, indexed_quotes=True)
+    for paper in papers:
+        raw = json.loads((tmp_path / ('extracted/paper_%04d.json' % paper['rank'])).read_text(encoding='utf-8'))
+        assert raw['triples'][0]['evidence'] == paper['abstract'] and 'evidence_ref' not in raw['triples'][0]
+
+
+def test_unknown_quote_reference_cannot_be_published_or_retried_forever(tmp_path):
+    calls=[]
+    def run(prompt, log):
+        calls.append(log)
+        return json.dumps({"papers":[{"rank":1,"triples":[{"head":"测试方","head_type":"方剂","relation":"主治","tail":"病","tail_type":"疾病","evidence_ref":"OTHER_PAPER_A1"}]}]})
+    with pytest.raises(ValueError, match="原句编号"):
+        collector.extract_papers([{"rank":1,"title":"测试方与病","abstract":None}],tmp_path,run,batch_size=8,indexed_quotes=True)
+    assert len(calls)==2 and not list((tmp_path/'extracted').glob('*.json'))
+
+
+def test_abstract_modification_is_marked_and_unclear_mentions_do_not_count_as_direct():
+    assert collector.modification_flag({"title":"大建中汤临床研究","abstract":"以大建中汤为基础方，随症加减治疗。"}, "大建中汤") is True
+    assert collector.modification_flag({"title":"大建中汤研究","abstract":"加味大建中汤用于本次研究。"}, "大建中汤") is True
+    assert collector.modification_flag({"title":"经方综述","abstract":"谈及其他方剂的加减运用，未明确本次方剂。"}, "大建中汤") is None
+    assert collector.modification_flag({"title":"大建中汤临床研究","abstract":"本研究使用大建中汤。"}, "大建中汤") is False
+
+
+@pytest.mark.parametrize("state", ["cancelled", "failed_or_partial"])
+def test_explicit_cli_resume_clears_a_pause_after_terminal_failure(tmp_path, monkeypatch, state):
+    from scripts import collect_cnki as cli
+    task, work = collector.prepare("测试方", root=tmp_path)
+    task["status"] = state
+    (work / "task.json").write_text(json.dumps(task), encoding="utf-8")
+    marker = work / "cancel.requested.json"
+    marker.write_text('{}', encoding="utf-8")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["collect_cnki.py", "--resume", task["id"]])
+    cli.main()
+    assert marker.is_file()  # Inspecting a task never resumes it.
+    def execute(saved, directory, **kwargs):
+        assert directory == work and not marker.exists()
+        return saved
+    monkeypatch.setattr(collector, "execute", execute)
+    monkeypatch.setattr(sys, "argv", ["collect_cnki.py", "--resume", task["id"], "--execute"])
+    cli.main()
+
+
+def test_cli_resume_keeps_pause_when_another_collector_holds_the_lock(tmp_path, monkeypatch):
+    from scripts import collect_cnki as cli
+    task, work = collector.prepare("测试方", root=tmp_path)
+    task["status"] = "failed_or_partial"
+    (work / "task.json").write_text(json.dumps(task), encoding="utf-8")
+    marker = work / "cancel.requested.json"
+    marker.write_text('{}', encoding="utf-8")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["collect_cnki.py", "--resume", task["id"], "--execute"])
+    with collector.collector_lock(tmp_path):
+        with pytest.raises(SystemExit): cli.main()
+        assert marker.is_file()
