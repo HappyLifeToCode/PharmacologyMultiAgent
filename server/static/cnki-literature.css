@@ -8,6 +8,12 @@
 .cnki-panel p { margin: 8px 0; overflow-wrap: anywhere; }
 .cnki-panel .cnki-note { font-size: 10px; color: #82796d; }
 .cnki-panel .cnki-meta { color: #746b60; font-size: 11px; }
+.cnki-evidence-intro { margin: 8px 0 10px !important; padding: 9px 11px; border-left: 3px solid #728c6b; background: #f1f5ed; color: #4b5e46; }
+.cnki-evidence-lane { margin: 8px 0 14px; padding: 4px 10px; border: 1px solid #d8e2d3; border-radius: 7px; background: #fbfdf9; }
+.cnki-tier { display: inline-block; min-width: 25px; margin-right: 7px; padding: 0 5px; border-radius: 4px; color: #fff; font-size: 10px; font-weight: 700; text-align: center; }
+.cnki-tier-p1 { background: #386641; }
+.cnki-tier-p2 { background: #6a8e3a; }
+.cnki-tier-p3 { background: #a67c2d; }
 .cnki-notice { background: #f6efdf; padding: 8px 10px; border-radius: 5px; color: #795d35; font-size: 11px; }
 .cnki-list { max-height: 520px; overflow-y: auto; margin: 12px 0; }
 .cnki-panel details { margin: 7px 0; padding: 6px 0; border-bottom: 1px solid #eee5d9; min-width: 0; }
