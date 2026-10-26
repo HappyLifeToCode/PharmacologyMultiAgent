@@ -108,3 +108,13 @@ test('malformed status is visible and cannot trigger collection', async () => {
     assert.equal(calls, 1);
   } finally { stop(); global.fetch = original; }
 });
+
+test('new queries default to automatic literature while archived results require explicit opt-in', () => {
+  const { newQueryEnabled, archivedQueryEnabled } = require('../server/static/literature-flow.js');
+  assert.equal(newQueryEnabled(), true);
+  assert.equal(newQueryEnabled(true), true);
+  assert.equal(newQueryEnabled(false), false);
+  assert.equal(archivedQueryEnabled(), false);
+  assert.equal(archivedQueryEnabled(false), false);
+  assert.equal(archivedQueryEnabled(true), true);
+});

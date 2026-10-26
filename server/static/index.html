@@ -68,8 +68,8 @@
     <label>返回候选数量<input id="setting-top-k" type="number" min="1" max="100" value="10" required></label>
     <label>BATMAN 预测靶点阈值<input id="setting-threshold" type="number" min="0" max="1" step="0.01" value="0.84" required></label>
     <small>当前正向、反向会话查询均采用 known-only 已知证据，调整阈值不会开启预测靶点，也不改变已知证据结果。</small>
-    <label class="cnki-setting"><input id="setting-cnki" type="checkbox">启用知网文献辅助（本地优先）</label>
-    <small>默认关闭。启用后先显示靶点结果；本地有文献则直接排序，缺少时自动采集标题和摘要，完成后补充文献排序。支持正反向，不获取论文全文，采集可能耗时。</small>
+    <label class="cnki-setting"><input id="setting-cnki" type="checkbox" checked>自动获取知网文献证据（本地优先）</label>
+    <small>新查询默认启用。先显示靶点结果；本地有文献则直接展示，缺少时自动采集标题和摘要，完成后显示证据来源和文献排序。支持正反向；可关闭，不获取论文全文，采集可能耗时。</small>
     <button type="submit" class="primary-button">保存设置</button>
   </form>
 </dialog>
@@ -79,8 +79,8 @@
 <script src="/assets/formula-picker.js?v=20261025-herb-label"></script>
 <script src="/assets/reverse-chat.js?v=20261024-literature"></script>
 <script src="/assets/evidence-graph.js?v=20261022"></script>
-<script src="/assets/literature-flow.js?v=20261024"></script>
-<script src="/assets/cnki-literature.js?v=20261026-visible-fallback"></script>
-<script src="/assets/chat.js?v=20261024-literature-flow"></script>
+<script src="/assets/literature-flow.js?v=20261026-auto-literature"></script>
+<script src="/assets/cnki-literature.js?v=20261026-auto-evidence"></script>
+<script src="/assets/chat.js?v=20261026-auto-literature"></script>
 </body>
 </html>

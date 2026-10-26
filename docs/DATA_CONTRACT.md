@@ -83,6 +83,10 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-26采集校验修复：详情record_labels/note保留题录/全文替换/现行等已知控件标记，题名去除附标后仍需document.title精确对应。总数仅从可见countPageDiv读取，分页等待页码与整页书目稳定；result_total_changed与result_total_unreadable分别诊断，失败清单记录expected/observed总数、failed_page，未完成不发布。原扫描存于任务私有scan_history，状态runtime_version标记后端实际版本；原研究请求、范围、模型、排序和冻结快照合同不变。
+
+2026-10-26自动文献证据：新查询未保存偏好时默认启用知网文献流程，显式保存`false`可关闭；首页正反向共用该新查询默认值，工作台正向一致。旧消息及旧工作台归档只有明确保存`enabled=true`才自动接续，缺少启用标记的历史结果不自动追采，仍可手动启用。靶点结果仍先返回，完成后展示知网原记录链接、标题/摘要引文和独立排序；原研究body、缓存键、归档及排名不变。
+
 2026-10-25后台模式：正常采集自动使用无界面专用Edge，session.json新增mode（background/interactive）及可选私有manual_url，仅保存在项目本机资料区。POST /api/literature/browser/open仍只接受{}，只在明确请求时切换到可见窗口；活动采集返回409，续跑恢复后台。新增cnki_login_required诊断，隐藏登录模板不触发人工提示，真实可见登录且无可读结果时停止。文献数据及原研究请求、缓存键、排序合同不变。
 
 2026-10-25：正常网页采集由Python Playwright顺序执行，模型仅按标题摘要抽取。collection_scan新增title_only状态：网站仅有节选时abstract=null、abstract_status=excerpt_only，节选保留abstract_excerpt、说明保留note，关系分析只用标题；no_abstract另表无文字摘要。所有位置均有可核对记录才可标全量完成，不意味着每条都有完整摘要。原句T/A编号只在模型输入使用，发布时复制同篇原句到原evidence字段，旧triples合同不变。新语料的is_modified同时核对标题/摘要文字，模糊加减信息记unknown。新增POST /api/literature/browser/open只接受{}、只连接项目专用本机会话，沿用本机及同源限制。原研究请求、ID、缓存、归档及排序公式不变。

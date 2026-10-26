@@ -84,11 +84,13 @@ const LiteratureFlow = (() => {
       value,
     };
   }
+  function newQueryEnabled(value) { return value !== false; }
+  function archivedQueryEnabled(value) { return value === true; }
   function get(runId) {
     if (!controllers.has(runId)) controllers.set(runId, create(runId));
     return controllers.get(runId);
   }
-  return { get, create };
+  return { get, create, newQueryEnabled, archivedQueryEnabled };
 })();
 
 if (typeof module !== "undefined") module.exports = LiteratureFlow;

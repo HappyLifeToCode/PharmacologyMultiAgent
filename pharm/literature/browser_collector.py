@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import time
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from ..core.common import now, write_json
 from . import browser_session, cnki
@@ -17,13 +18,13 @@ class PageBlocked(RuntimeError):
         self.reason, self.state = reason, state
 
 
-def title_matches(expected, headings, page_title):
+def title_matches(expected, headings, page_title, *, heading_titles=()):
     target = cnki.normalise(expected)
     actual = [cnki.normalise(h) for h in headings]
     if target in actual: return True
     # Some CNKI headings append a UI badge. Require the document title too.
     return (cnki.normalise(re.sub(r"\s*-\s*中国知网\s*$", "", page_title)) == target
-            and target + "题录" in actual)
+            and (target + "题录" in actual or target in {cnki.normalise(value) for value in heading_titles}))
 
 
 def paper_status(paper, existing=False):
@@ -42,6 +43,10 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
     scan = {"keyword": task["keyword"], "total_results": None, "complete": False, "stop_reason": "running", "pages": [], "browser_engine": "playwright"}
     old_path = work / "collection_progress.json"
     old = json.loads(old_path.read_text(encoding="utf-8")) if old_path.is_file() else {}
+    if old:
+        history = work / "scan_history"
+        history.mkdir(exist_ok=True)
+        (history / ("scan_" + uuid4().hex + ".json")).write_bytes(old_path.read_bytes())
     meta_path = work / "meta.json"
     prior_meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     previous_total = old.get("total_results") if old.get("total_results") is not None else prior_meta.get("total_results")
@@ -59,8 +64,10 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
             listing = site.listing()
             number = len(scan["pages"]) + 1
             total = listing["total_results"]
-            if type(total) is not int or total < 0 or (previous_total is not None and total != previous_total) or (scan["total_results"] is not None and total != scan["total_results"]):
-                raise PageBlocked("result_total_changed_or_unreadable")
+            expected_total = scan["total_results"] if scan["total_results"] is not None else previous_total
+            if type(total) is not int or total < 0 or (expected_total is not None and total != expected_total):
+                scan.update(expected_total_results=expected_total, observed_total_results=total, failed_page=number)
+                raise PageBlocked("result_total_unreadable" if type(total) is not int or total < 0 else "result_total_changed")
             if listing["number"] != number or (not listing["items"] and total): raise PageBlocked("page_number_or_rows_unreadable")
             scan["total_results"] = total
             write_json(work / "meta.json", {"keyword": task["keyword"], "total_results": total, "sort": "中国知网默认相关度排序", "collected_at": now()})
@@ -103,7 +110,7 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
                             if consecutive_failures >= 3: raise PageBlocked("consecutive_details_unavailable")
                             continue
                     if not detail.get("abstract") and not (detail.get("no_abstract_confirmed") or detail.get("title_only_confirmed")): raise PageBlocked("abstract_not_confirmed")
-                    saved = {**item, **{k: detail.get(k) for k in ("abstract", "abstract_excerpt", "abstract_status", "keywords", "journal_level", "note") if k in detail},
+                    saved = {**item, **{k: detail.get(k) for k in ("abstract", "abstract_excerpt", "abstract_status", "keywords", "journal_level", "note", "record_labels") if k in detail},
                              "rank": next_rank, "cif": None, "is_modified": bool(re.search(r"加味|加减|化裁|合方", item["title"])), "western_diseases": []}
                     if not saved["abstract"]: saved["note"] = detail.get("note") or "正常详情页未提供摘要，仅保留标题和题录"
                     write_json(work / "papers" / ("paper_%04d.json" % next_rank), saved)
@@ -137,6 +144,9 @@ class CnkiSite:
         self.blocked_page = None
         self.cancel, self.deadline = cancel, time.monotonic() + timeout
         self.guard = Path(__file__).with_name("browser_guards.js").read_text(encoding="utf-8")
+        self.title_reader = Path(__file__).with_name("browser_titles.js").read_text(encoding="utf-8")
+        self.listing_reader = Path(__file__).with_name("browser_listing.js").read_text(encoding="utf-8")
+        self.expected_page = 1
         self.navigation_responses = {}
         self.observe_page(list_page)
 
@@ -173,6 +183,7 @@ class CnkiSite:
         return state
 
     def search(self, keyword):
+        self.expected_page = 1
         response = self.page.goto("https://www.cnki.net/", wait_until="domcontentloaded", timeout=45000)
         self.check(self.page, response)
         field = self.page.locator("#txt_SearchText:visible,#txt_sug:not([type=hidden]):visible").first
@@ -210,25 +221,39 @@ class CnkiSite:
                    "http_status": response.status if response else None, "reason": reason})
 
     def listing(self):
-        self.check(self.page)
-        self.page.wait_for_function(r"() => /共找到[：:]?\s*[\d,]+\s*条/.test(document.body.innerText)", timeout=15000)
-        data = self.page.evaluate(r"""() => {
-          const text=document.body.innerText;
-          const count=(text.match(/共找到[：:]?\s*([\d,]+)\s*条/)||[])[1];
-          const current=document.querySelector('#PageBar_top .cur,#PageBar_bottom .cur,.pages .cur,.pages .current');
-          const next=[...document.querySelectorAll('#PageBar_top a,#PageBar_bottom a,.pages a')].find(e=>/下一页/.test(e.innerText)&&e.checkVisibility());
-          return {total_results:count?Number(count.replace(/,/g,'')):null,number:current?Number(current.innerText.trim()):1,
-            has_next:!!next,items:[...document.querySelectorAll('table.result-table-list tr')].filter(tr=>tr.querySelector('.name a')).map(tr=>({
-              title:tr.querySelector('.name a').innerText.trim(),url:tr.querySelector('.name a').href,
-              authors:tr.querySelector('.author')?.innerText.trim()||'',source:tr.querySelector('.source')?.innerText.trim()||'',date:(tr.querySelector('.date')?.innerText.trim()||'').split(/\s/)[0]}))};
-        }""")
-        return data
+        deadline = min(self.deadline, time.monotonic() + 15)
+        previous = None
+        data = {}
+        from playwright.sync_api import Error
+        while time.monotonic() < deadline:
+            try:
+                self.check(self.page)
+                data = self.page.evaluate("() => {" + self.listing_reader + "; return cnkiListingSnapshot();}")
+                ready = (type(data.get("total_results")) is int and data["total_results"] >= 0
+                         and data.get("number") == self.expected_page
+                         and (bool(data.get("items")) or data["total_results"] == 0))
+                if ready and data == previous:
+                    return {key: data[key] for key in ("total_results", "number", "has_next", "items")}
+                previous = data if ready else None
+            except Error:
+                if self.page.is_closed(): raise PageBlocked("search_page_closed")
+                previous = None
+            self.page.wait_for_timeout(200)
+        write_json(self.work / "listing-diagnostic.json", {"expected_page": self.expected_page,
+                   "observed_page": data.get("number"), "observed_total_results": data.get("total_results"),
+                   "count_text": str(data.get("count_text") or "")[:80], "rows": len(data.get("items") or [])})
+        raise PageBlocked("result_total_unreadable")
 
     def next_page(self, number):
-        first = self.page.locator("table.result-table-list tr .name a").first.inner_text()
+        before = self.page.evaluate("() => {" + self.listing_reader + "; return cnkiListingSnapshot();}")
+        identity = [{key: item.get(key, "") for key in ("title", "authors", "source", "date")} for item in before["items"]]
+        self.expected_page = number
         self.page.locator("a:visible").filter(has_text=re.compile(r"^下一页$")).first.click()
-        self.page.wait_for_function("old => document.querySelector('table.result-table-list tr .name a')?.innerText.trim() !== old", arg=first, timeout=30000)
-        self.page.wait_for_timeout(1000)
+        self.page.wait_for_function("args => {" + self.listing_reader + """
+          const listing=cnkiListingSnapshot();
+          const identity=listing.items.map(row=>({title:row.title,authors:row.authors,source:row.source,date:row.date}));
+          return listing.number===args.number && listing.items.length>0 && JSON.stringify(identity)!==JSON.stringify(args.before);
+        }""", arg={"before": identity, "number": number}, timeout=30000)
         self.check(self.page)
 
     def refresh(self, keyword, number):
@@ -256,18 +281,19 @@ class CnkiSite:
         self.article.evaluate("""() => {const more=[...document.querySelectorAll('a,span')].find(e=>e.children.length===0 && e.innerText.trim()==='更多' && e.checkVisibility());if(more)more.click();}""")
         self.article.wait_for_timeout(250)
         state = self.check(self.article)
-        data = self.article.evaluate("""() => ({abstract:document.querySelector('#ChDivSummary')?.innerText.trim()||document.querySelector('.abstract-text')?.innerText.trim()||null,
-          headings:[...document.querySelectorAll('.brief h1,.wx-tit h1,h1')].filter(e=>e.checkVisibility()).map(e=>e.innerText.trim()),
+        data = self.article.evaluate("() => {" + self.title_reader + """; return {...cnkiTitleInfo(),abstract:document.querySelector('#ChDivSummary')?.innerText.trim()||document.querySelector('.abstract-text')?.innerText.trim()||null,
           keywords:[...document.querySelectorAll('.keywords a')].map(a=>a.innerText.trim().replace(/;$/,'')),journal_level:null,
-          more_visible:[...document.querySelectorAll('a,span')].some(e=>e.children.length===0&&e.innerText.trim()==='更多'&&e.checkVisibility())})""")
-        if not title_matches(item["title"], data["headings"], self.article.title()): raise PageBlocked("detail_title_mismatch")
+          more_visible:[...document.querySelectorAll('a,span')].some(e=>e.children.length===0&&e.innerText.trim()==='更多'&&e.checkVisibility())};}""")
+        if not title_matches(item["title"], data["headings"], self.article.title(), heading_titles=data["heading_titles"]): raise PageBlocked("detail_title_mismatch")
+        if data["record_labels"]: data["note"] = "知网详情题名附标：" + "、".join(data["record_labels"]) + "。"
         if data["more_visible"]: raise PageBlocked("abstract_may_be_truncated")
         if (data["abstract"] or "").endswith(("...", "…")):
             data.update(abstract_excerpt=data["abstract"], abstract=None, abstract_status="excerpt_only", title_only_confirmed=True,
-                        note="正常详情页摘要区仅提供节选，且没有可展开的更多内容；节选单独保留，不当完整摘要，仅依据标题分析")
+                        note=(data.get("note") or "") + "正常详情页摘要区仅提供节选，且没有可展开的更多内容；节选单独保留，不当完整摘要，仅依据标题分析")
             return data
         if not data["abstract"] and self.article.locator("#ChDivSummary,.abstract-text").count(): raise PageBlocked("abstract_empty_or_still_loading")
         data["no_abstract_confirmed"] = not data["abstract"] and not state["blocking_verification"]
+        if data["no_abstract_confirmed"]: data["note"] = (data.get("note") or "") + "正常详情页未提供论文摘要；仅保留题名和题录，不补写摘要。"
         return data
 
 

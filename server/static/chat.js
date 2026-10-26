@@ -109,8 +109,8 @@ function createSession() {
 }
 
 function cnkiSetting() {
-  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").cnki_enabled === true; }
-  catch { return false; }
+  try { return LiteratureFlow.newQueryEnabled(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").cnki_enabled); }
+  catch { return LiteratureFlow.newQueryEnabled(); }
 }
 
 function renderHistory() {
@@ -385,7 +385,7 @@ function renderResult(result, message, content, sessionId) {
 
 function mountChatLiterature(message, content) {
   CnkiLiterature.mount(content, message.runId, {
-    enabled: message.cnkiEnabled === true, snapshot: message.cnkiSnapshot,
+    enabled: LiteratureFlow.archivedQueryEnabled(message.cnkiEnabled), snapshot: message.cnkiSnapshot,
     onChange: ({ enabled, snapshot }) => { message.cnkiEnabled = enabled; message.cnkiSnapshot = snapshot; saveSessions(); },
     beforeUpdate: rememberConversationPosition, afterUpdate: restoreConversationPosition,
   });

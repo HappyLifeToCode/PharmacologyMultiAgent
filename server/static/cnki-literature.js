@@ -25,9 +25,9 @@ const CnkiLiterature = (() => {
     if (!runId) return;
     const root = node("section", null, "cnki-panel"); parent.append(root);
     const reverse = runId.startsWith("reverse_");
-    let enabled = options.enabled === true, snapshot = options.snapshot || null, current, revision = 0, unsubscribe;
+    let enabled = LiteratureFlow.archivedQueryEnabled(options.enabled), snapshot = options.snapshot || null, current, revision = 0, unsubscribe;
     function update(handler) { if (!root.isConnected) return; options.beforeUpdate?.(); handler(); options.afterUpdate?.(); }
-    function heading() { root.replaceChildren(node("h4", "知网文献关联排序（验证版）")); root.append(node("p", "先使用本地文献；缺少时自动采集标题和摘要，完成后补充文献排序。靶点排序保留，不获取论文全文。", "cnki-note")); }
+    function heading() { root.replaceChildren(node("h4", "知网文献证据与关联排序（验证版）")); root.append(node("p", "先使用本地文献；缺少时自动采集标题和摘要，完成后显示证据来源和文献排序。靶点排序保留，不获取论文全文。", "cnki-note")); }
     function paperDetail(parent, evidence) {
       const section = details("#" + evidence.paper_rank + " " + evidence.title, parent);
       const href = safeUrl(evidence.url);
@@ -228,7 +228,7 @@ const CnkiLiterature = (() => {
       } catch (error) { if (requestRevision === revision) update(() => { heading(); root.append(node("p", error.message, "cnki-notice"), button("重试读取", () => load()), button("重新读取本地文献", () => load(true))); }); }
     }
     if (enabled) load();
-    else { heading(); root.append(node("p", "文献辅助默认关闭。启用后本地优先；缺少时会联网采集标题和摘要，可能耗时，不会重算靶点查询。", "cnki-note"), button("启用文献辅助", () => load())); }
+    else { heading(); root.append(node("p", "本次结果未启用文献辅助，可手动启用。本地优先；缺少时会联网采集标题和摘要，可能耗时，不会重算靶点查询。", "cnki-note"), button("启用文献辅助", () => load())); }
     return root;
   }
   return { mount };

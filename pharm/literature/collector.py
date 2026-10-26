@@ -23,6 +23,7 @@ from . import browser_session
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "gpt-5.6-luna"
+RUNTIME_VERSION = "20261026-stable-listing"
 
 
 class CollectionCancelled(RuntimeError):
@@ -238,6 +239,22 @@ def validate_scan(task, work, papers):
             raise CollectionValidationError("知网要求登录；已保留进度，请打开登录/验证窗口手动完成后续跑，任务会自动切回后台。", "cnki_login_required")
         if reason == "search_results_unavailable":
             raise CollectionValidationError("等待知网检索结果超时，未读到可核对的结果列表。进度已保留，可打开登录/验证窗口检查页面后续跑。", "cnki_search_unavailable")
+        if reason == "result_total_changed":
+            raise CollectionValidationError(f"检索总数发生变化：第{scan.get('failed_page', '?')}页应为{scan.get('expected_total_results', '?')}条，实际读到{scan.get('observed_total_results', '?')}条。已存题录保留，本轮未作为全量结果发布，需重新核对检索清单。", "cnki_result_total_changed")
+        if reason == "result_total_unreadable":
+            try: diagnostic = json.loads((Path(work) / "listing-diagnostic.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError): diagnostic = {}
+            page = scan.get("failed_page") or diagnostic.get("expected_page") or "待核对"
+            raise CollectionValidationError(f"第{page}页的总数或页码未能稳定读取，采集已暂停。已存题录保留，续跑会复用；本次不将未读到总数误称为总数变化。", "cnki_result_total_unreadable")
+        if reason == "failed_positions":
+            pages = scan.get("pages")
+            if isinstance(pages, list):
+                failed = [item for page in pages if isinstance(page, dict) and isinstance(page.get("items"), list)
+                          for item in page["items"] if isinstance(item, dict) and item.get("status") == "failed"]
+                if failed:
+                    sample = "、".join(str(item.get("position", "?")) for item in failed[:5])
+                    suffix = "等" if len(failed) > 5 else ""
+                    raise CollectionValidationError(f"采集尚不完整：已记录{len(pages)}页、保存{len(papers)}条题录，另有{len(failed)}条详情未通过核对（检索位置{sample}{suffix}）。已存记录保留，续跑会复用并补查失败项；完成前不发布全量结果。", "cnki_incomplete_records")
     if not isinstance(scan, dict) or scan.get("keyword") != task["keyword"] or scan.get("complete") is not True or scan.get("stop_reason") != "exhausted":
         raise ValueError(error)
     total, pages = scan.get("total_results"), scan.get("pages")

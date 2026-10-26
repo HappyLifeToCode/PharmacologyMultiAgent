@@ -266,7 +266,7 @@ function renderForwardResult(result, order) {
 }
 
 let previousForwardQuery = null;
-let forwardLiterature = { enabled: false, snapshot: null, runId: null, queryId: null };
+let forwardLiterature = { enabled: LiteratureFlow.newQueryEnabled(), snapshot: null, runId: null, queryId: null };
 
 function persistForwardLiterature() {
   try {
@@ -280,7 +280,7 @@ async function restoreForwardResult() {
     const saved = JSON.parse(sessionStorage.getItem("pharmacology.workbench.forward-result.v1") || sessionStorage.getItem("pharmacology.workbench.cnki.v1") || "{}");
     if (!saved.runId?.startsWith("forward_") || !/^[A-Za-z0-9_-]{1,100}$/.test(saved.runId)) return;
     forwardLiterature = saved;
-    $("forward-cnki").checked = saved.enabled === true;
+    $("forward-cnki").checked = LiteratureFlow.archivedQueryEnabled(saved.enabled);
     renderForwardResult(await api("/api/agent/forward/" + encodeURIComponent(saved.runId)));
     $("forward-message").textContent = "已恢复上次靶点结果，文献流程会按原状态接续；没有重新发起研究查询。";
   } catch (error) { $("forward-message").textContent = "上次归档暂时无法读取：" + error.message; }
@@ -357,7 +357,7 @@ async function resumeForwardQuery() {
   if (!requestId) { await restoreForwardResult(); return; }
   try {
     const stored = JSON.parse(sessionStorage.getItem("pharmacology.workbench.cnki.v1") || "{}");
-    if (stored.queryId === requestId) { forwardLiterature = stored; $("forward-cnki").checked = stored.enabled === true; }
+    if (stored.queryId === requestId) { forwardLiterature = stored; $("forward-cnki").checked = LiteratureFlow.archivedQueryEnabled(stored.enabled); }
   } catch { /* Keep the optional analysis off when browser metadata is invalid. */ }
   previousForwardQuery = requestId;
   const button = $("forward-submit");

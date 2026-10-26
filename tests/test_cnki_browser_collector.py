@@ -139,6 +139,35 @@ def test_cnki_bibliographic_badge_is_removed_only_with_matching_document_title()
     assert not browse.title_matches("花椒研究", ["另一篇 题录"], "花椒研究 - 中国知网")
 
 
+@pytest.mark.parametrize('badge',['全文替换','现行'])
+def test_verified_dom_heading_without_ui_label_still_requires_matching_document_title(badge):
+    assert browse.title_matches('研究题名',['研究题名'+badge],'研究题名 - 中国知网',heading_titles=['研究题名'])
+    assert not browse.title_matches('研究题名',['研究题名'+badge],'另一篇 - 中国知网',heading_titles=['研究题名'])
+    assert not browse.title_matches('研究题名',['研究题名'+badge],'研究题名 - 中国知网')
+    assert not browse.title_matches('研究题名',['另一篇'+badge],'研究题名 - 中国知网',heading_titles=['另一篇'])
+
+
+def test_saved_record_preserves_status_label_and_no_abstract_explanation(tmp_path):
+    task,work=collector.prepare('测试方',root=tmp_path)
+    site=Site()
+    site.detail=lambda row:{'abstract':None,'no_abstract_confirmed':True,'record_labels':['现行'],
+                           'note':'知网详情题名附标：现行。正常详情页未提供论文摘要。'}
+    scan=browse.collect_pages(task,work,site)
+    papers=[json.loads(p.read_text(encoding='utf-8')) for p in (work/'papers').glob('*.json')]
+    collector.validate_scan(task,work,papers)
+    assert all(p['record_labels']==['现行'] and '未提供论文摘要' in p['note'] for p in papers)
+
+
+def test_failed_positions_report_actual_gap_and_never_publish_partial_scan(tmp_path):
+    task,work=collector.prepare('测试方',root=tmp_path)
+    browse.collect_pages(task,work,Site(fail={2}))
+    papers=[json.loads(p.read_text(encoding='utf-8')) for p in (work/'papers').glob('*.json')]
+    with pytest.raises(collector.CollectionValidationError) as raised:collector.validate_scan(task,work,papers)
+    assert raised.value.failure_code=='cnki_incomplete_records'
+    assert '保存2条题录' in str(raised.value) and '1条详情' in str(raised.value) and '位置2' in str(raised.value)
+    assert not (tmp_path/'data/cnki').exists()
+
+
 def test_site_excerpt_is_distinct_from_full_abstract_and_only_title_is_analyzed(tmp_path):
     task, work = collector.prepare("测试方", root=tmp_path)
     site = Site()
@@ -306,3 +335,53 @@ def test_real_headed_challenge_page_remains_open_for_manual_handling(tmp_path,mo
     monkeypatch.setattr(browse,'collect_pages',blocked)
     with pytest.raises(browse.PageBlocked):browse.collect_in_mode({},tmp_path,root=tmp_path,mode='interactive',cancel=lambda:False,timeout=60)
     assert pages[0].closed and not pages[1].closed
+
+
+def test_listing_waits_for_current_page_and_readable_stable_count(tmp_path):
+    import copy
+    class Page(NavigationPage):
+        def __init__(self):
+            super().__init__(200)
+            good={'total_results':1377,'number':61,'has_next':True,'items':[item(1)],'count_text':'1,377'}
+            self.snapshots=[{**good,'total_results':None},{**good,'number':60},good,good]
+        def evaluate(self,code):
+            if 'return cnkiListingSnapshot()' in code:return copy.deepcopy(self.snapshots.pop(0))
+            return super().evaluate(code)
+    page=Page();site=browse.CnkiSite(None,page,tmp_path);site.expected_page=61
+    value=site.listing()
+    assert value['total_results']==1377 and value['number']==61
+    assert page.waits==[200,200,200]
+
+
+def test_unreadable_count_is_not_reported_as_a_real_total_change(tmp_path,monkeypatch):
+    task,work=collector.prepare('测试方',root=tmp_path)
+    clock=[0.0];monkeypatch.setattr(browse.time,'monotonic',lambda:clock[0])
+    class Page(NavigationPage):
+        def evaluate(self,code):
+            if 'return cnkiListingSnapshot()' in code:return {'total_results':None,'number':61,'has_next':True,'items':[item(1)],'count_text':None}
+            return super().evaluate(code)
+        def wait_for_timeout(self,ms):clock[0]+=ms/1000
+    site=browse.CnkiSite(None,Page(200),work);site.expected_page=61
+    with pytest.raises(browse.PageBlocked,match='result_total_unreadable'):site.listing()
+    write_json(work/'collection_progress.json',{'keyword':'测试方','total_results':1377,'complete':False,'stop_reason':'result_total_unreadable','pages':[]})
+    with pytest.raises(collector.CollectionValidationError) as raised:collector.validate_scan(task,work,[])
+    assert raised.value.failure_code=='cnki_result_total_unreadable' and '第61页' in str(raised.value)
+
+
+def test_actual_total_change_records_both_values_without_publishing(tmp_path):
+    task,work=collector.prepare('测试方',root=tmp_path)
+    with pytest.raises(browse.PageBlocked,match='result_total_changed'):browse.collect_pages(task,work,Site(changed=True))
+    scan=json.loads((work/'collection_progress.json').read_text(encoding='utf-8'))
+    assert scan['expected_total_results']==3 and scan['observed_total_results']==4 and scan['failed_page']==2
+    with pytest.raises(collector.CollectionValidationError) as raised:collector.validate_scan(task,work,[])
+    assert raised.value.failure_code=='cnki_result_total_changed'
+    assert not (tmp_path/'data/cnki').exists()
+
+
+def test_resume_preserves_the_previous_scan_before_writing_new_progress(tmp_path):
+    task,work=collector.prepare('测试方',root=tmp_path)
+    browse.collect_pages(task,work,Site())
+    before=(work/'collection_progress.json').read_bytes()
+    browse.collect_pages(task,work,Site())
+    history=list((work/'scan_history').glob('scan_*.json'))
+    assert len(history)==1 and history[0].read_bytes()==before
