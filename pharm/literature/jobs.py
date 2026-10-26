@@ -1,4 +1,4 @@
-"""Explicit, single-task web collection; model logs and credentials stay private."""
+"""Phase-coordinated web collection; model logs and credentials stay private."""
 from __future__ import annotations
 
 import json
@@ -33,6 +33,9 @@ class CollectionManager:
         self.condition = threading.Condition(self.lock)
         self.active = {}
         self.running = set()
+        self.running_collection = set()
+        self.running_analysis = set()
+        self.phases = {}
 
     def status(self, root, job_id):
         work = task_directory(root, job_id)
@@ -50,7 +53,7 @@ class CollectionManager:
         if not isinstance(meta, dict): meta = {}
         pages = scan.get("pages", []) if isinstance(scan, dict) else []
         extracted = len(list((work / "extracted").glob("paper_*.json")))
-        phase = "extracting" if task.get("collection_mode") == "local_analysis" or extracted or (scan.get("complete") and running) else "collecting"
+        phase = task.get("pipeline_phase") or ("extracting" if task.get("collection_mode") == "local_analysis" or extracted or (scan.get("complete") and running) else "collecting")
         return {"id": job_id, "keyword": task["keyword"], "model": task.get("model", collector.DEFAULT_MODEL),
                 "runtime_version": collector.RUNTIME_VERSION,
                 "browser_mode": task.get("browser_mode", "background"), "browser_fallback": task.get("browser_fallback"),
@@ -75,7 +78,7 @@ class CollectionManager:
     def _start(self, root, task, work):
         key = str(work)
         (work / "cancel.requested.json").unlink(missing_ok=True)
-        task.update(status="queued")
+        task.update(status="queued", pipeline_phase="collecting")
         task.pop("error", None); task.pop("finished_at", None)
         write_json(work / "task.json", task)
         def run():
@@ -83,14 +86,36 @@ class CollectionManager:
                 with self.condition:
                     while True:
                         if (work / "cancel.requested.json").exists(): raise collector.CollectionCancelled("文献采集已停止，进度已保留")
-                        candidates = [k for k in self.active if Path(k).parent == work.parent]
-                        if not any(Path(k).parent == work.parent for k in self.running) and candidates and candidates[0] == key:
+                        candidates = [k for k in self.active if Path(k).parent == work.parent and self.phases.get(k) == "collecting"]
+                        if not any(Path(k).parent == work.parent for k in self.running_collection) and candidates and candidates[0] == key:
                             self.running.add(key)
+                            self.running_collection.add(key)
                             task.update(status="running", started_at=now())
                             write_json(work / "task.json", task)
                             break
                         self.condition.wait(timeout=0.5)
-                self.execute(task, work, root=root, extract=True)
+                def before_analysis():
+                    with self.condition:
+                        self.running_collection.discard(key)
+                        self.phases[key] = "analysis_pending"
+                        task["pipeline_phase"] = "analysis_pending"
+                        write_json(work / "task.json", task)
+                        self.condition.notify_all()
+                        while True:
+                            if (work / "cancel.requested.json").exists(): raise collector.CollectionCancelled("文献采集已停止，进度已保留")
+                            candidates = [k for k in self.active if Path(k).parent == work.parent and self.phases.get(k) == "analysis_pending"]
+                            if not any(Path(k).parent == work.parent for k in self.running_analysis) and candidates and candidates[0] == key:
+                                self.running_analysis.add(key)
+                                self.phases[key] = "extracting"
+                                task["pipeline_phase"] = "extracting"
+                                write_json(work / "task.json", task)
+                                self.condition.notify_all()
+                                return
+                            self.condition.wait(timeout=0.5)
+                self.execute(task, work, root=root, extract=True, phased=True, before_analysis=before_analysis)
+                if task.get("status") == "succeeded":
+                    task["pipeline_phase"] = "completed"
+                    write_json(work / "task.json", task)
             except BaseException as exc:
                 if task.get("status") not in {"cancelled", "failed_or_partial"}:
                     task.update(status="cancelled" if isinstance(exc, collector.CollectionCancelled) else "failed_or_partial", error=str(exc), finished_at=now())
@@ -99,10 +124,19 @@ class CollectionManager:
                 with self.condition:
                     self.active.pop(key, None)
                     self.running.discard(key)
+                    self.running_collection.discard(key)
+                    self.running_analysis.discard(key)
+                    self.phases.pop(key, None)
                     self.condition.notify_all()
         thread = threading.Thread(target=run, name=task["id"], daemon=True)
         self.active[key] = thread
+        self.phases[key] = "collecting"
         thread.start()
+
+    def _check_external_locks(self, base):
+        for name, owned in (("collector.lock", self.running_collection), ("analysis.lock", self.running_analysis)):
+            if (base / name).exists() and not any(Path(key).parent == base for key in owned):
+                raise RuntimeError("已有终端采集或分析任务或遗留锁，请先核对，不能并发启动")
 
     def start(self, root, keyword, request_id, *, local_only=False, limit=None):
         root = Path(root).resolve()
@@ -121,8 +155,7 @@ class CollectionManager:
                 if Path(key).parent == base:
                     current = self.status(root, Path(key).name)
                     if current["keyword"] == keyword: return current
-            if (base / "collector.lock").exists() and not any(Path(k).parent == base for k in self.running):
-                raise RuntimeError("已有终端采集任务或遗留锁，请先核对，不能并发启动")
+            self._check_external_locks(base)
             task, work = collector.prepare(keyword, limit, root=root, local_only=local_only)
             task["web_request_id"] = request_id
             self._start(root, task, work)
@@ -133,8 +166,7 @@ class CollectionManager:
         with self.lock:
             current = self.status(root, job_id)
             if str(work) in self.active or current["status"] == "succeeded": return current
-            if (work.parent / "collector.lock").exists() and not any(Path(k).parent == work.parent for k in self.running):
-                raise RuntimeError("已有终端采集任务或遗留锁，请先核对")
+            self._check_external_locks(work.parent)
             task = read(work / "task.json")
             self._start(Path(root).resolve(), task, work)
             return self.status(root, job_id)

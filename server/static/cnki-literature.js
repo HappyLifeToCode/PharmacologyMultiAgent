@@ -167,7 +167,7 @@ const CnkiLiterature = (() => {
       if (job?.status === "queued") box.append(node("p", "排队中，尚未开始执行", "cnki-progress-time"));
       let label = "正在核对本地文献…";
       if (state.state === "starting") label = "正在准备文献流程…";
-      if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : job?.browser_mode === "interactive" ? "后台访问被拒绝，已切到专用窗口采集标题和摘要…" : "正在后台采集标题和摘要…";
+      if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "analysis_pending" ? "采集已完成，等待前一文献分析完成…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : job?.browser_mode === "interactive" ? "后台访问被拒绝，已切到专用窗口采集标题和摘要…" : "正在后台采集标题和摘要…";
       if (state.state === "failed") label = "文献任务暂未完成，进度已保留";
       if (state.state === "cancelled") label = "文献任务已停止，进度已保留";
       if (state.state === "unsupported_input") label = state.error || "本次输入暂不支持单一关键词文献分析";

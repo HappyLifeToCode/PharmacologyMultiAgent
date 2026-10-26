@@ -23,7 +23,7 @@ from . import browser_session
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "gpt-5.6-luna"
-RUNTIME_VERSION = "20261026-stable-listing"
+RUNTIME_VERSION = "20261026-phased-analysis"
 
 
 class CollectionCancelled(RuntimeError):
@@ -82,20 +82,66 @@ def valid_limit(limit):
     return limit is None or (type(limit) is int and limit > 0)
 
 
+class _OwnedLock:
+    def __init__(self, path, message):
+        self.path, self.message, self.held = path, message, False
+
+    def acquire(self):
+        if self.held: return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            raise RuntimeError(self.message)
+        with os.fdopen(fd, "w") as stream:
+            stream.write(str(os.getpid()))
+        self.held = True
+
+    def release(self):
+        if not self.held: return
+        try:
+            self.path.unlink(missing_ok=True)
+        finally:
+            self.held = False
+
+
 @contextmanager
-def collector_lock(root):
-    path = Path(root) / "local/agent/cnki-collection/collector.lock"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        raise RuntimeError("已有文献采集任务或遗留锁；请先核对任务状态，不要并发启动")
-    with os.fdopen(fd, "w") as stream:
-        stream.write(str(os.getpid()))
+def _file_lock(path, message):
+    lock = _OwnedLock(path, message)
+    lock.acquire()
     try:
         yield
     finally:
-        path.unlink(missing_ok=True)
+        lock.release()
+
+
+@contextmanager
+def collector_lock(root):
+    with _file_lock(Path(root) / "local/agent/cnki-collection/collector.lock",
+                    "已有文献采集任务或遗留锁；请先核对任务状态，不要并发启动"):
+        yield
+
+
+@contextmanager
+def analysis_lock(root):
+    with _file_lock(Path(root) / "local/agent/cnki-collection/analysis.lock",
+                    "已有文献分析任务或遗留锁；请先核对任务状态，不要并发启动"):
+        yield
+
+
+@contextmanager
+def execution_lock(root, phased):
+    collection = _OwnedLock(Path(root) / "local/agent/cnki-collection/collector.lock",
+                            "已有文献采集任务或遗留锁；请先核对任务状态，不要并发启动")
+    analysis = _OwnedLock(Path(root) / "local/agent/cnki-collection/analysis.lock",
+                          "已有文献分析任务或遗留锁；请先核对任务状态，不要并发启动")
+    collection.acquire()
+    try:
+        if not phased: analysis.acquire()
+        yield collection.release, analysis.acquire
+    finally:
+        analysis.release()
+        collection.release()
 
 
 def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL, local_only=False):
@@ -387,7 +433,7 @@ def extract_papers(papers, work, runner, *, batch_size=1, indexed_quotes=False):
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
 
 
-def execute(task, work, *, root=ROOT, extract=False, runner=None):
+def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, before_analysis=None):
     root, work = Path(root).resolve(), Path(work).resolve()
     if not work.is_relative_to(root / "local/agent/cnki-collection"):
         raise ValueError("任务目录不属于本项目")
@@ -402,7 +448,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
     cancelled = lambda: (work / "cancel.requested.json").is_file()
     production_runner = runner is None
     runner = runner or (lambda prompt, log: run_model(prompt, log, root=root, workspace=work, model=model, browser=log.name == "collection.log", cancel=cancelled))
-    with collector_lock(root):
+    with execution_lock(root, phased) as (release_collection, acquire_analysis):
         task.update(status="running", engine="codex_cli", model=model, started_at=now())
         for key in ("error", "failure_code", "finished_at"): task.pop(key, None)
         write_json(work / "task.json", task)
@@ -459,6 +505,10 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
                 raise ValueError("采集关键词或新论文来源链接无效，未发布")
             if scan and meta.get("total_results") != scan["total_results"]:
                 raise ValueError("检索总数与翻页记录不一致，未发布")
+            if phased:
+                release_collection()
+                if before_analysis: before_analysis()
+                acquire_analysis()
             analyzed = []
             if extract:
                 triples_path = work / "triples.jsonl"

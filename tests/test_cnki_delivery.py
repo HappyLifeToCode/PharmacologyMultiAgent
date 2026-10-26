@@ -172,6 +172,49 @@ def test_collector_lock_is_exclusive_and_failed_contender_does_not_remove_it(tmp
     assert not (tmp_path / "local/agent/cnki-collection/collector.lock").exists()
 
 
+def test_analysis_lock_is_exclusive_and_failed_contender_does_not_remove_it(tmp_path):
+    with collector.analysis_lock(tmp_path):
+        with pytest.raises(RuntimeError):
+            with collector.analysis_lock(tmp_path): pass
+        assert (tmp_path / "local/agent/cnki-collection/analysis.lock").exists()
+    assert not (tmp_path / "local/agent/cnki-collection/analysis.lock").exists()
+
+
+def test_phased_execute_releases_collection_before_analysis(tmp_path):
+    task, work = collector.prepare("温经汤", 1, root=tmp_path)
+    collection_path = tmp_path / "local/agent/cnki-collection/collector.lock"
+    analysis_path = tmp_path / "local/agent/cnki-collection/analysis.lock"
+    seen = {}
+    base_runner = fake_runner(work)
+    def before_analysis():
+        seen["callback"] = (collection_path.exists(), analysis_path.exists())
+    def run(prompt, log):
+        if log.name.startswith("extract"):
+            seen["analysis"] = (collection_path.exists(), analysis_path.exists())
+        return base_runner(prompt, log)
+    result = collector.execute(task, work, root=tmp_path, extract=True, runner=run,
+                               phased=True, before_analysis=before_analysis)
+    assert result["status"] == "succeeded"
+    assert seen["callback"] == (False, False)
+    assert seen["analysis"] == (False, True)
+    assert not collection_path.exists() and not analysis_path.exists()
+
+
+def test_default_execute_holds_both_locks_through_collection_and_analysis(tmp_path):
+    task, work = collector.prepare("温经汤", 1, root=tmp_path)
+    collection_path = tmp_path / "local/agent/cnki-collection/collector.lock"
+    analysis_path = tmp_path / "local/agent/cnki-collection/analysis.lock"
+    seen = []
+    base_runner = fake_runner(work)
+    def run(prompt, log):
+        seen.append((log.name, collection_path.exists(), analysis_path.exists()))
+        return base_runner(prompt, log)
+    result = collector.execute(task, work, root=tmp_path, extract=True, runner=run)
+    assert result["status"] == "succeeded"
+    assert len(seen) == 2 and all(collection and analysis for _, collection, analysis in seen)
+    assert not collection_path.exists() and not analysis_path.exists()
+
+
 def test_collection_cannot_replace_existing_paper_in_staging(tmp_path):
     source, _ = source_data(tmp_path)
     target = tmp_path / "data/cnki"; dataset.import_data(source, target)
@@ -484,15 +527,16 @@ def test_explicit_cli_resume_clears_a_pause_after_terminal_failure(tmp_path, mon
     cli.main()
 
 
-def test_cli_resume_keeps_pause_when_another_collector_holds_the_lock(tmp_path, monkeypatch):
+@pytest.mark.parametrize("lock_name", ["collector.lock", "analysis.lock"])
+def test_cli_resume_keeps_pause_when_another_collector_holds_the_lock(tmp_path, monkeypatch, lock_name):
     from scripts import collect_cnki as cli
     task, work = collector.prepare("测试方", root=tmp_path)
     task["status"] = "failed_or_partial"
     (work / "task.json").write_text(json.dumps(task), encoding="utf-8")
     marker = work / "cancel.requested.json"
     marker.write_text('{}', encoding="utf-8")
+    (work.parent / lock_name).write_text("external-owner", encoding="utf-8")
     monkeypatch.setattr(cli, "ROOT", tmp_path)
     monkeypatch.setattr(sys, "argv", ["collect_cnki.py", "--resume", task["id"], "--execute"])
-    with collector.collector_lock(tmp_path):
-        with pytest.raises(SystemExit): cli.main()
-        assert marker.is_file()
+    with pytest.raises(SystemExit): cli.main()
+    assert marker.is_file()

@@ -324,3 +324,159 @@ def test_default_web_collection_remains_all_results_after_pipeline_merge(tmp_pat
     assert state["collection"]["limit"] is None and state["requested_limit"] is None
     assert state["collection"]["collection_mode"] == "all"
     harness.release.set()
+
+
+def test_analysis_of_one_keyword_overlaps_collection_of_the_next(tmp_path):
+    release_analysis = threading.Event()
+    first_analysis = threading.Event()
+    events, active = [], {"collection": 0, "analysis": 0}
+    peaks = {"collection": 0, "analysis": 0}
+    guard = threading.Lock()
+    def mark(kind, amount):
+        with guard:
+            active[kind] += amount
+            peaks[kind] = max(peaks[kind], active[kind])
+    def execute(task, work, **kwargs):
+        keyword = task["keyword"]
+        assert kwargs["phased"] is True and kwargs["extract"] is True
+        mark("collection", 1)
+        try:
+            if keyword == "第二方": assert first_analysis.is_set()
+            events.append((keyword, "collection_done"))
+        finally:
+            mark("collection", -1)
+        kwargs["before_analysis"]()
+        mark("analysis", 1)
+        try:
+            if keyword == "第一方":
+                first_analysis.set()
+                assert release_analysis.wait(5)
+            events.append((keyword, "analysis_done"))
+            task["status"] = "succeeded"
+            write_json(work / "task.json", task)
+            return task
+        finally:
+            mark("analysis", -1)
+    manager = jobs.CollectionManager(execute=execute)
+    try:
+        first = manager.start(tmp_path, "第一方", "request_first")
+        assert first_analysis.wait(2)
+        second = manager.start(tmp_path, "第二方", "request_second")
+        pending = wait_for(lambda: (s if (s := manager.status(tmp_path, second["id"]))["phase"] == "analysis_pending" else None))
+        assert pending["status"] == "running"
+        assert ("第二方", "collection_done") in events
+        assert ("第二方", "analysis_done") not in events
+        assert active["analysis"] == 1 and active["collection"] == 0
+        release_analysis.set()
+        for job_id in (first["id"], second["id"]):
+            wait_for(lambda: manager.status(tmp_path, job_id)["status"] == "succeeded")
+        assert events.index(("第一方", "analysis_done")) < events.index(("第二方", "analysis_done"))
+        assert peaks == {"collection": 1, "analysis": 1}
+    finally:
+        release_analysis.set()
+        manager.shutdown()
+
+
+def test_cancel_while_waiting_for_analysis_and_explicit_resume(tmp_path):
+    release_analysis = threading.Event()
+    first_analysis = threading.Event()
+    def execute(task, work, **kwargs):
+        if task["keyword"] == "第二方" and not first_analysis.is_set():
+            raise AssertionError("第二方不应先于第一方进入分析")
+        kwargs["before_analysis"]()
+        if task["keyword"] == "第一方":
+            first_analysis.set()
+            assert release_analysis.wait(5)
+        task["status"] = "succeeded"
+        write_json(work / "task.json", task)
+        return task
+    manager = jobs.CollectionManager(execute=execute)
+    try:
+        first = manager.start(tmp_path, "第一方", "cancel_first")
+        assert first_analysis.wait(2)
+        second = manager.start(tmp_path, "第二方", "cancel_second")
+        wait_for(lambda: manager.status(tmp_path, second["id"])["phase"] == "analysis_pending")
+        manager.cancel(tmp_path, second["id"])
+        wait_for(lambda: manager.status(tmp_path, second["id"])["status"] == "cancelled")
+        wait_for(lambda: second["id"] not in [Path(key).name for key in manager.active])
+        release_analysis.set()
+        wait_for(lambda: manager.status(tmp_path, first["id"])["status"] == "succeeded")
+        assert manager.resume(tmp_path, second["id"])["id"] == second["id"]
+        wait_for(lambda: manager.status(tmp_path, second["id"])["status"] == "succeeded")
+    finally:
+        release_analysis.set()
+        manager.shutdown()
+
+
+def test_analysis_failure_releases_the_analysis_slot(tmp_path):
+    first_analysis = threading.Event()
+    def execute(task, work, **kwargs):
+        kwargs["before_analysis"]()
+        if task["keyword"] == "第一方":
+            first_analysis.set()
+            raise RuntimeError("模拟分析失败")
+        task["status"] = "succeeded"
+        write_json(work / "task.json", task)
+        return task
+    manager = jobs.CollectionManager(execute=execute)
+    try:
+        first = manager.start(tmp_path, "第一方", "failure_first")
+        assert first_analysis.wait(2)
+        second = manager.start(tmp_path, "第二方", "failure_second")
+        wait_for(lambda: manager.status(tmp_path, first["id"])["status"] == "failed_or_partial")
+        wait_for(lambda: manager.status(tmp_path, second["id"])["status"] == "succeeded")
+    finally:
+        manager.shutdown()
+
+
+def test_external_analysis_lock_is_not_removed_or_adopted(tmp_path, harness):
+    archive(tmp_path)
+    path = tmp_path / "local/agent/cnki-collection/analysis.lock"
+    path.parent.mkdir(parents=True)
+    path.write_text("external-owner", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="遗留锁"): harness.flows.resolve(tmp_path, "forward_case")
+    assert path.read_text(encoding="utf-8") == "external-owner" and not harness.entered.is_set()
+
+
+def test_real_collector_pipeline_overlaps_and_publishes_both_corpora(tmp_path):
+    release_analysis = threading.Event()
+    first_analysis = threading.Event()
+    events = []
+    analysis_path = tmp_path / "local/agent/cnki-collection/analysis.lock"
+    collection_path = tmp_path / "local/agent/cnki-collection/collector.lock"
+    def execute(task, work, **kwargs):
+        paper, row = paper_and_row(task["keyword"])
+        def runner(prompt, log):
+            if log.name == "collection.log":
+                events.append((task["keyword"], "collection", analysis_path.exists(), collection_path.exists()))
+                write_json(work / "papers/paper_0001.json", paper)
+                write_json(work / "meta.json", {"keyword": task["keyword"], "total_results": 1})
+                write_json(work / "collection_progress.json", {"keyword": task["keyword"], "total_results": 1, "complete": True, "stop_reason": "exhausted",
+                    "pages": [{"number": 1, "total_results": 1, "has_next": False, "items": [
+                        {"position": 1, "rank": 1, "title": paper["title"], "url": paper["url"], "status": "collected"}]}]})
+                return "模拟采集完成"
+            if task["keyword"] == "第一方":
+                first_analysis.set()
+                assert release_analysis.wait(5)
+            events.append((task["keyword"], "analysis"))
+            return json.dumps({"triples": [{k: row[k] for k in ("head", "head_type", "relation", "tail", "tail_type")} | {"evidence": paper["abstract"]}]})
+        return collector.execute(task, work, runner=runner, **kwargs)
+    manager = jobs.CollectionManager(execute=execute)
+    try:
+        first = manager.start(tmp_path, "第一方", "real_first", limit=1)
+        assert first_analysis.wait(2)
+        second = manager.start(tmp_path, "第二方", "real_second", limit=1)
+        wait_for(lambda: manager.status(tmp_path, second["id"])["phase"] == "analysis_pending")
+        assert ("第二方", "collection", True, True) in events
+        assert ("第二方", "analysis") not in events
+        assert not (tmp_path / "data/cnki/manifest.json").exists()
+        release_analysis.set()
+        for job_id in (first["id"], second["id"]):
+            wait_for(lambda: manager.status(tmp_path, job_id)["status"] == "succeeded")
+        listing = dataset.manifest(tmp_path / "data/cnki")
+        assert {entry["keyword"] for entry in listing["corpora"]} == {"第一方", "第二方"}
+        assert all(entry["papers"] == 1 and "triples.jsonl" in entry["files"] for entry in listing["corpora"])
+        assert not analysis_path.exists() and not collection_path.exists()
+    finally:
+        release_analysis.set()
+        manager.shutdown()

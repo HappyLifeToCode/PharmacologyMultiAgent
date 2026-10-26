@@ -83,6 +83,8 @@ Agent 报 failed → 阶段降 partial + blocker（程序产物保留）；会�
 
 ### 正向 Agent 结果边界
 
+2026-10-26分阶段采集与分析：网页不同关键词可重叠一个知网采集与一个AI分析，同一时间各最多一个；分析任务之间仍串行。`pipeline_phase`记录collecting/analysis_pending/extracting/completed。阶段化任务的`collector.lock`只覆盖采集及校验，`analysis.lock`覆盖模型抽取、目标版本核对和manifest发布；直接调用及CLI默认全任务持有两锁，外部/遗留锁不认领不删除。runtime_version=20261026-phased-analysis。同关键词活动任务仍共享，原研究、文献排序、反向关键词及快照合同不变。
+
 2026-10-26采集校验修复：详情record_labels/note保留题录/全文替换/现行等已知控件标记，题名去除附标后仍需document.title精确对应。总数仅从可见countPageDiv读取，分页等待页码与整页书目稳定；result_total_changed与result_total_unreadable分别诊断，失败清单记录expected/observed总数、failed_page，未完成不发布。原扫描存于任务私有scan_history，状态runtime_version标记后端实际版本；原研究请求、范围、模型、排序和冻结快照合同不变。
 
 2026-10-26自动文献证据：新查询未保存偏好时默认启用知网文献流程，显式保存`false`可关闭；首页正反向共用该新查询默认值，工作台正向一致。旧消息及旧工作台归档只有明确保存`enabled=true`才自动接续，缺少启用标记的历史结果不自动追采，仍可手动启用。靶点结果仍先返回，完成后展示知网原记录链接、标题/摘要引文和独立排序；原研究body、缓存键、归档及排名不变。
