@@ -154,10 +154,14 @@ def remember_manual_page(root, url):
             write_json(path, record)
 
 
-def _ensure_session(root, mode):
+def _ensure_session(root, mode, *, collection_owner=False):
     with session_lock(root):
-        if mode == "interactive" and (Path(root).resolve() / "local/agent/cnki-collection/collector.lock").exists():
-            raise BrowserSessionBusy("文献采集正在后台运行，请先停止任务再打开人工处理窗口")
+        collection_lock = Path(root).resolve() / "local/agent/cnki-collection/collector.lock"
+        if collection_owner:
+            if not collection_lock.is_file() or collection_lock.read_text().strip() != str(os.getpid()):
+                raise BrowserSessionBusy("采集未持有本进程的锁，未切换其他任务的浏览器")
+        elif mode == "interactive" and collection_lock.exists():
+            raise BrowserSessionBusy("文献采集正在运行，请先停止任务再手动打开窗口")
         path = session_file(root)
         record = read_json(path) if path.is_file() else {}
         try: address = endpoint(root)
@@ -173,8 +177,12 @@ def background_endpoint(root=ROOT):
     return _ensure_session(root, "background")
 
 
+def interactive_collection_endpoint(root=ROOT):
+    return _ensure_session(root, "interactive", collection_owner=True)
+
+
 def open_session(root=ROOT):
     if (Path(root).resolve() / "local/agent/cnki-collection/collector.lock").exists():
         raise BrowserSessionBusy("文献采集正在后台运行，请先停止任务再打开人工处理窗口")
     _ensure_session(root, "interactive")
-    return {"ready": True, "message": "项目专用窗口已打开。请手动完成需要的登录或验证，然后点击继续采集；任务会切回后台运行。"}
+    return {"ready": True, "message": "项目专用窗口已打开。请手动完成需要的登录或验证，然后点击继续采集；任务会沿用可用模式继续，后台遭拒时会自动使用可见窗口。"}

@@ -227,13 +227,17 @@ def validate_scan(task, work, papers):
     if isinstance(scan, dict) and scan.get("complete") is False:
         reason = str(scan.get("stop_reason") or "").lower()
         if "http_403" in reason or reason in {"http403", "access_denied"}:
-            raise CollectionValidationError("知网检索页返回HTTP 403，当前访问被拒绝；已保留进度和截图，未发布不完整文献。需恢复知网正常访问权限后续跑。", "cnki_access_denied")
+            raise CollectionValidationError("知网返回HTTP 403，当前访问被拒绝。进度已保留；请在专用窗口正常处理后再续跑。", "cnki_access_denied")
+        if reason == "rate_limited":
+            raise CollectionValidationError("知网返回HTTP 429，当前访问受到限流。进度已保留，请稍后显式续跑。", "cnki_rate_limited")
         if reason in {"captcha", "verification_required"}:
             if scan.get("verification", {}).get("blocking_verification") is not True:
                 raise CollectionValidationError("验证码提示缺少可见性核验，可能是页面隐藏模板；请检查实际页面后再续跑，未发布不完整数据。", "cnki_verification_unconfirmed")
             raise CollectionValidationError("知网要求人工验证；已保留进度，完成正常页面验证后才能续跑。", "cnki_verification_required")
         if reason == "login_required":
             raise CollectionValidationError("知网要求登录；已保留进度，请打开登录/验证窗口手动完成后续跑，任务会自动切回后台。", "cnki_login_required")
+        if reason == "search_results_unavailable":
+            raise CollectionValidationError("等待知网检索结果超时，未读到可核对的结果列表。进度已保留，可打开登录/验证窗口检查页面后续跑。", "cnki_search_unavailable")
     if not isinstance(scan, dict) or scan.get("keyword") != task["keyword"] or scan.get("complete") is not True or scan.get("stop_reason") != "exhausted":
         raise ValueError(error)
     total, pages = scan.get("total_results"), scan.get("pages")
@@ -408,7 +412,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None):
                     try:
                         browser_collector.collect(task, work, root=root, cancel=cancelled)
                     except browser_collector.PageBlocked as exc:
-                        if exc.reason in {"http_403", "captcha", "rate_limited", "login_required"}:
+                        if exc.reason in {"http_403", "captcha", "rate_limited", "login_required", "search_results_unavailable"}:
                             current = [json.loads(p.read_text(encoding="utf-8")) for p in (work / "papers").glob("paper_*.json")]
                             validate_scan(task, work, current)
                         raise CollectionValidationError("知网正常页面采集尚未完成（" + exc.reason + "），进度已保留，未发布。", "cnki_page_unavailable") from exc

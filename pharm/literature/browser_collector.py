@@ -128,28 +128,46 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
 
 
 class CnkiSite:
+    SEARCH_WAIT_SECONDS = 30
+
     def __init__(self, context, list_page, work, *, root=None, cancel=lambda: False, timeout=2400):
         self.context, self.page, self.work = context, list_page, Path(work)
         self.article = None
         self.root = root
+        self.blocked_page = None
         self.cancel, self.deadline = cancel, time.monotonic() + timeout
         self.guard = Path(__file__).with_name("browser_guards.js").read_text(encoding="utf-8")
+        self.navigation_responses = {}
+        self.observe_page(list_page)
+
+    def observe_page(self, page):
+        def response_received(response):
+            if response.request.is_navigation_request() and response.frame == page.main_frame:
+                self.navigation_responses[page] = response
+        page.on("response", response_received)
 
     def check(self, page, response=None):
         from .collector import CollectionCancelled
         if self.cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
         if time.monotonic() > self.deadline: raise PageBlocked("collection_timeout")
+        response = response or self.navigation_responses.get(page)
         status = response.status if response else None
         if status in {403, 429}:
-            if self.root and status == 403: browser_session.remember_manual_page(self.root, page.url)
+            self.blocked_page = page
+            self.save_navigation_diagnostic(page, response, "http_403" if status == 403 else "rate_limited")
+            # Chromium may replace a rejected page with chrome-error://chromewebdata/.
+            # The actual navigation response retains the rejected CNKI URL/status.
+            if self.root and status == 403: browser_session.remember_manual_page(self.root, response.url)
             raise PageBlocked("http_403" if status == 403 else "rate_limited")
         if status == 404: raise PageBlocked("http_404")
         state = page.evaluate("() => {" + self.guard + "; return cnkiPageState();}")
         if state["blocking_verification"]:
+            self.blocked_page = page
             page.screenshot(path=str(self.work / "blocking-verification.png"))
             if self.root: browser_session.remember_manual_page(self.root, page.url)
             raise PageBlocked("captcha", state)
         if state.get("login_required"):
+            self.blocked_page = page
             if self.root: browser_session.remember_manual_page(self.root, page.url)
             raise PageBlocked("login_required", state)
         return state
@@ -161,12 +179,35 @@ class CnkiSite:
         field.wait_for(timeout=20000)
         field.fill(keyword)
         self.page.locator(".search-btn").first.click()
-        try: self.page.locator("table.result-table-list tr .name a,.no-result,.no-results").first.wait_for(timeout=30000)
-        except Exception:
-            self.check(self.page)
-            raise PageBlocked("search_results_unavailable")
-        self.page.wait_for_timeout(1200)
+        deadline = min(self.deadline, time.monotonic() + self.SEARCH_WAIT_SECONDS)
+        from playwright.sync_api import Error
+        while time.monotonic() < deadline:
+            # Pump navigation events before inspecting the DOM, so a 403/429 is
+            # diagnosed promptly even when Chromium shows its internal error page.
+            try:
+                self.page.wait_for_timeout(200)
+                state = self.check(self.page)
+                if state["result_rows"] or self.page.locator(".no-result:visible,.no-results:visible").count():
+                    self.page.wait_for_timeout(1200)
+                    self.check(self.page)
+                    return
+            except Error:
+                if self.page.is_closed(): raise PageBlocked("search_page_closed")
+                # A navigation can destroy an execution context between polls.
+                continue
         self.check(self.page)
+        self.blocked_page = self.page
+        self.save_navigation_diagnostic(self.page, self.navigation_responses.get(self.page), "search_results_unavailable")
+        if self.root: browser_session.remember_manual_page(self.root, "https://www.cnki.net/")
+        raise PageBlocked("search_results_unavailable")
+
+    def save_navigation_diagnostic(self, page, response, reason):
+        """Retain only bounded technical state, never form values or page HTML."""
+        from urllib.parse import urlparse
+        url = urlparse(response.url if response else page.url)
+        name = "search-diagnostic.json" if page == self.page else "article-diagnostic.json"
+        write_json(self.work / name, {"host": url.hostname, "path": url.path,
+                   "http_status": response.status if response else None, "reason": reason})
 
     def listing(self):
         self.check(self.page)
@@ -196,7 +237,9 @@ class CnkiSite:
         return self.listing()
 
     def detail(self, item):
-        if self.article is None or self.article.is_closed(): self.article = self.context.new_page()
+        if self.article is None or self.article.is_closed():
+            self.article = self.context.new_page()
+            self.observe_page(self.article)
         response = self.article.goto(item["url"], wait_until="domcontentloaded", timeout=45000)
         self.article.wait_for_timeout(1200)
         self.check(self.article, response)
@@ -228,17 +271,43 @@ class CnkiSite:
         return data
 
 
-def collect(task, work, *, root, cancel=lambda: False):
-    from playwright.sync_api import sync_playwright
-    address = browser_session.background_endpoint(root)
+def collect_in_mode(task, work, *, root, mode, cancel, timeout):
+    from playwright.sync_api import sync_playwright, Error
+    address = browser_session.background_endpoint(root) if mode == "background" else browser_session.interactive_collection_endpoint(root)
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(address)
         context = browser.contexts[0]
         page = context.new_page()
-        site = CnkiSite(context, page, work, root=root, cancel=cancel)
+        site = CnkiSite(context, page, work, root=root, cancel=cancel, timeout=timeout)
+        keep = None
         try: return collect_pages(task, work, site, cancel=cancel)
+        except PageBlocked as exc:
+            if mode == "interactive" and exc.reason in {"captcha", "login_required", "http_403", "search_results_unavailable"}:
+                keep = getattr(site, "blocked_page", None)
+            raise
         finally:
-            # Only close pages created for this collection. The hidden browser
-            # persists with its own profile; interactive recovery is explicit.
+            # Preserve a real visible challenge for manual handling; never
+            # operate it automatically or close unrelated project tabs.
             for owned_page in (page, site.article):
-                if owned_page and not owned_page.is_closed(): owned_page.close()
+                try:
+                    if owned_page and owned_page is not keep and not owned_page.is_closed(): owned_page.close()
+                except Error: pass
+
+
+def collect(task, work, *, root, cancel=lambda: False):
+    from .collector import CollectionCancelled
+    mode = task.get("browser_mode", "background")
+    if mode not in {"background", "interactive"}: raise ValueError("采集浏览器模式无效")
+    deadline = time.monotonic() + 2400
+    for attempt in range(2):
+        if cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
+        try:
+            return collect_in_mode(task, work, root=root, mode=mode, cancel=cancel, timeout=max(1, deadline-time.monotonic()))
+        except PageBlocked as exc:
+            if exc.reason != "http_403" or mode != "background" or attempt:
+                raise
+            # User policy: one normal headed retry after an actual main-frame
+            # 403. The same task/profile/fragments are retained; no UA spoofing.
+            mode = "interactive"
+            task.update(browser_mode=mode, browser_fallback="http_403")
+            write_json(Path(work) / "task.json", task)

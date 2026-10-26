@@ -52,6 +52,7 @@ class CollectionManager:
         extracted = len(list((work / "extracted").glob("paper_*.json")))
         phase = "extracting" if task.get("collection_mode") == "local_analysis" or extracted or (scan.get("complete") and running) else "collecting"
         return {"id": job_id, "keyword": task["keyword"], "model": task.get("model", collector.DEFAULT_MODEL),
+                "browser_mode": task.get("browser_mode", "background"), "browser_fallback": task.get("browser_fallback"),
                 "collection_mode": task.get("collection_mode", "all" if task.get("limit") is None else "incremental"), "limit": task.get("limit"),
                 "status": state, "phase": phase, "created_at": task.get("created_at"), "started_at": task.get("started_at"), "finished_at": task.get("finished_at"),
                 "paper_count": len(papers), "new_papers": sum(p.get("rank") not in task.get("base_ranks", []) for p in papers),

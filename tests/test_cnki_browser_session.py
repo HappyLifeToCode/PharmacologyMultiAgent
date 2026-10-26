@@ -177,3 +177,15 @@ def test_manual_browser_api_reports_busy_without_interrupting_the_worker(tmp_pat
     with TestClient(backend.app,base_url="http://localhost") as client:
         assert client.post('/api/literature/browser/open',json={}).status_code==409
     assert lock.read_text()=="external"
+
+
+def test_automatic_headed_collection_requires_its_own_active_lock(tmp_path,monkeypatch):
+    record=owned_record(tmp_path,'background');calls=[]
+    monkeypatch.setattr(browser_session,'version',lambda _:{'webSocketDebuggerUrl':record['websocket']})
+    monkeypatch.setattr(browser_session,'_close_owned',lambda *a:calls.append('close'))
+    monkeypatch.setattr(browser_session,'_launch',lambda root,mode,**k:calls.append(mode) or 'http://127.0.0.1:9223')
+    with pytest.raises(browser_session.BrowserSessionBusy):browser_session.interactive_collection_endpoint(tmp_path)
+    with collector.collector_lock(tmp_path):
+        assert browser_session.interactive_collection_endpoint(tmp_path).endswith(':9223')
+        with pytest.raises(browser_session.BrowserSessionBusy):browser_session.open_session(tmp_path)
+    assert calls==['close','interactive']
