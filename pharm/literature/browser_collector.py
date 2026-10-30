@@ -110,7 +110,7 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
                             if consecutive_failures >= 3: raise PageBlocked("consecutive_details_unavailable")
                             continue
                     if not detail.get("abstract") and not (detail.get("no_abstract_confirmed") or detail.get("title_only_confirmed")): raise PageBlocked("abstract_not_confirmed")
-                    saved = {**item, **{k: detail.get(k) for k in ("abstract", "abstract_excerpt", "abstract_status", "keywords", "journal_level", "note", "record_labels") if k in detail},
+                    saved = {**item, **{k: detail.get(k) for k in ("abstract", "abstract_excerpt", "abstract_status", "keywords", "journal_level", "note", "record_labels", "bibliography") if k in detail},
                              "rank": next_rank, "cif": None, "is_modified": bool(re.search(r"加味|加减|化裁|合方", item["title"])), "western_diseases": []}
                     if not saved["abstract"]: saved["note"] = detail.get("note") or "正常详情页未提供摘要，仅保留标题和题录"
                     write_json(work / "papers" / ("paper_%04d.json" % next_rank), saved)
@@ -146,6 +146,7 @@ class CnkiSite:
         self.guard = Path(__file__).with_name("browser_guards.js").read_text(encoding="utf-8")
         self.title_reader = Path(__file__).with_name("browser_titles.js").read_text(encoding="utf-8")
         self.listing_reader = Path(__file__).with_name("browser_listing.js").read_text(encoding="utf-8")
+        self.bibliography_reader = Path(__file__).with_name("browser_bibliography.js").read_text(encoding="utf-8")
         self.expected_page = 1
         self.navigation_responses = {}
         self.observe_page(list_page)
@@ -285,6 +286,7 @@ class CnkiSite:
           keywords:[...document.querySelectorAll('.keywords a')].map(a=>a.innerText.trim().replace(/;$/,'')),journal_level:null,
           more_visible:[...document.querySelectorAll('a,span')].some(e=>e.children.length===0&&e.innerText.trim()==='更多'&&e.checkVisibility())};}""")
         if not title_matches(item["title"], data["headings"], self.article.title(), heading_titles=data["heading_titles"]): raise PageBlocked("detail_title_mismatch")
+        data["bibliography"] = self.article.evaluate("() => {" + self.bibliography_reader + "; return cnkiBibliography();}")
         if data["record_labels"]: data["note"] = "知网详情题名附标：" + "、".join(data["record_labels"]) + "。"
         if data["more_visible"]: raise PageBlocked("abstract_may_be_truncated")
         if (data["abstract"] or "").endswith(("...", "…")):

@@ -8,6 +8,7 @@ from uuid import uuid4
 from ..core.common import ROOT, safe_name, write_json, read_json
 from . import cnki
 from . import dataset
+from . import source_ranking
 from .pipeline import run_literature_pipeline
 
 
@@ -80,6 +81,7 @@ def query(run_id, *, root=ROOT, snapshot=None):
             source_sha256=hashlib.sha256(source_raw).hexdigest(),
             concept_catalog_path=catalog_path if catalog is not None else None,
         )
+    value = source_ranking.apply(value, root=root)
     payload = {"run_id": run_id, "snapshot_id": None, "result": value}
     if value["status"] == "ready":
         value["database_archive_sha256"] = hashlib.sha256(raw).hexdigest()

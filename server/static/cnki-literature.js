@@ -33,6 +33,19 @@ const CnkiLiterature = (() => {
       const href = safeUrl(evidence.url);
       if (href) { const link = node("a", "知网原记录 ↗"); link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; section.append(link); }
       section.append(node("p", (evidence.authors || "作者未记录") + " · " + (evidence.date || "时间未记录")));
+      const bibliography = evidence.bibliography || current?.result?.bibliographies?.[evidence.paper_id];
+      if (bibliography) {
+        const named = rows => (rows || []).map(row => row.name + (row.affiliations?.length ? "（" + row.affiliations.join("、") + "）" : "")).join("；") || "未记录";
+        section.append(node("p", "机构：" + named(bibliography.institutions)));
+        section.append(node("p", "第一作者：" + named(bibliography.first_authors) + "；通讯作者：" + named(bibliography.corresponding_authors)));
+        if (bibliography.first_authors?.some(row => row.role_basis?.includes("first_listed"))) section.append(node("p", "第一作者按已列署名顺序记录，共同第一作者尚未核实。", "cnki-note"));
+        const factor = bibliography.impact_factor || {};
+        section.append(node("p", "期刊：" + (bibliography.journal?.name || "未记录") + "；影响因子：" + (factor.value ?? "未记录") + "；口径：" + (factor.kind || "未记录") + "；年份：" + (factor.year || "未记录")));
+        const sources = details("查看作者、机构与期刊信息出处", section);
+        for (const [label, entries] of [["机构", bibliography.institutions], ["第一作者", bibliography.first_authors], ["通讯作者", bibliography.corresponding_authors], ["期刊", [bibliography.journal]], ["影响因子", [factor]]]) {
+          for (const row of entries || []) if (row) sources.append(node("p", label + " · " + (row.name || row.value || "未记录") + " · " + (row.source || "出处未记录"), "cnki-note"));
+        }
+      }
       section.append(node("p", (reverse && evidence.intervention === "same_name" ? "文献中的药材/方剂未标加减或联合" : interventions[evidence.intervention] || evidence.intervention) + "；" + (studies[evidence.study_type] || evidence.study_type)));
       section.append(node("blockquote", evidence.quote));
       section.append(node("p", "引用来自论文" + (evidence.quote_field === "title" ? "标题" : "摘要") + "，已与保存的原文核对。", "cnki-note"));
@@ -90,6 +103,28 @@ const CnkiLiterature = (() => {
       if (catalogErrors.length) root.append(node("p", "部分疾病数据库暂时无法读取，病名匹配可能不完整；已找到的论文仍然保留。", "cnki-notice"));
       root.append(node("p", "已读取 " + source.paper_count + " 条文献记录，去重后 " + source.unique_paper_count + " 篇，其中 " + source.abstract_count + " 篇有摘要。", "cnki-meta"));
       root.append(node("p", "目前只使用已采集的这批论文，不代表知网全部文献，也不是数据库靶点关联排序。", "cnki-note"));
+      if (data.source_ranking && data.source_candidates) {
+        root.append(node("h5", "文献来源优先排序"));
+        if (Object.keys(data.bibliography_conflicts || {}).length) root.append(node("p", "部分重复题录的作者或期刊信息不一致，冲突字段未参与排序。可在导出结果中查看具体字段，核对后再补充。", "cnki-notice"));
+        root.append(node("p", data.source_ranking.note, "cnki-notice"));
+        if (data.source_ranking.status === "awaiting_metadata_or_rules") root.append(node("p", "这批记录尚无可用的优先规则或可比影响因子，当前候选并列。补齐来源信息及规则后重新读取文献即可，不以篇数冒充来源质量。", "cnki-note"));
+        const policy = details("查看本次排序规则和缺失项处理", root);
+        policy.append(node("p", "只按登记名称精确匹配；作者须同时匹配所属机构。未登记不等于较差，未知值不会作为零分参与计算。每个候选使用同一篇论文的五项值，不拼接多篇优势，也不按篇数打破并列。"));
+        const rules = data.source_ranking.policy;
+        data.source_ranking.order.forEach((field, index) => {
+          if (field === "impact_factor") policy.append(node("p", "影响因子：" + rules[field].kind + "，比较年份 " + (rules[field].year || "尚无可比年份") + "；其他口径或年份只显示，不参与排名。"));
+          else policy.append(node("p", data.source_ranking.labels[index] + "：" + ((rules[field] || []).map(rule => rule.name + (rule.affiliation ? "（" + rule.affiliation + "）" : "") + " = " + rule.score + "；依据：" + rule.source).join(" / ") || "未指定优先名单")));
+        });
+        const sourceList = node("div", null, "cnki-list cnki-source-list"); root.append(sourceList);
+        if (!data.source_candidates.length) sourceList.append(node("p", "暂无带可追溯引文的关联候选。", "cnki-note"));
+        renderItems(data.source_candidates, sourceList, true);
+        if (reverse && data.source_formula_candidates?.length) {
+          const formulas = details("按来源排序的方剂线索（" + data.source_formula_candidates.length + "项）", root);
+          renderItems(data.source_formula_candidates, formulas, true);
+        }
+      } else {
+        root.append(node("p", "这份历史快照尚未保存五项来源排序。可点“重新读取本地文献”生成新快照，旧结果保持原样。", "cnki-note"));
+      }
       evidenceLane(data);
       const frequencyOrder = data.ranking?.kind === "descriptive_retrieval_frequency";
       if (!reverse) root.append(node("h5", "检索频次参考（保留原结果）"));
@@ -100,10 +135,26 @@ const CnkiLiterature = (() => {
       explanation.append(node("p", data.evidence_pipeline && !reverse ? "本表仍只反映检索关联篇数；临床、动物和综述的区别以及疗效方向已在上方独立的 P1/P2/P3 证据通道处理。" : "临床、动物和综述目前没有分别加权，摘要中的改善、阴性或不明确结论也尚未系统分类。排序反映这批文献的关联篇数，不能当作疗效强弱。"));
       const list = node("div", null, "cnki-list"); root.append(list);
       if (reverse) root.insertBefore(node("h5", "文献关联药材（论文原名）"), list);
-      function renderItems(items, parent) {
+      function renderItems(items, parent, sourceOrder = false) {
         for (const item of items) {
         const section = details(item.rank + ". " + item.raw_names.join(" / "), parent);
         section.querySelector("summary").append(node("span", (reverse ? "未标加减/联合：" : "方名一致且未标加减/联合：") + item.direct_paper_count + "篇 · 全部关联：" + item.paper_count + "篇", "cnki-counts"));
+        if (sourceOrder) {
+          const score = item.source_priority;
+          section.append(node("p", score.components.map(component => component.label + "：" + (component.value ?? "未参与")).join(" → "), "cnki-meta"));
+          const basis = details("为什么排在这里？", section);
+          const best = item.evidence.find(e => e.paper_id === score.best_paper_id);
+          basis.append(node("p", "排序依据论文：" + (best?.title || "未记录") + "；有可用排序信息的关联论文 " + score.eligible_paper_count + " 篇。"));
+          for (const component of score.components) basis.append(node("p", component.label + "：" + (component.value ?? "未参与") + "，" + component.reason));
+        }
+        const graph = details("查看文献证据溯源图", section);
+        let graphMounted = false;
+        graph.addEventListener("toggle", () => {
+          if (!graph.open || graphMounted) return;
+          graphMounted = true;
+          if (typeof CnkiGraph !== "undefined") CnkiGraph.mount(graph, data, item);
+          else graph.append(node("p", "图组件暂未加载，请刷新页面。下方原始证据仍可查看。", "cnki-note"));
+        });
         if (reverse) {
           section.append(node("p", "论文中的" + (item.candidate_type === "formula" ? "方剂" : "药材") + "原名；尚未自动匹配BATMAN实体，不能据此认定与靶点列表中的条目相同。", "cnki-note"));
         } else if (item.mapping.status === "exact") {

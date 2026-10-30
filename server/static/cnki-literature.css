@@ -28,3 +28,11 @@
 .cnki-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 10px; }
 .cnki-setting { display: flex !important; align-items: center; gap: 7px; margin: 10px 0; font-size: 12px; }
 .cnki-setting input { width: auto !important; flex-shrink: 0; }
+.cnki-source-list { max-height: 720px; border-top: 2px solid #728c6b; }
+.cnki-graph { margin: 12px 0; min-width: 0; }
+.cnki-graph-viewport { overflow-x: auto; max-width: 100%; margin: 12px 0; border: 1px solid #ded5c8; border-radius: 6px; }
+.cnki-graph-viewport svg { display: block; min-width: 1000px; }
+.cnki-graph-viewport g:focus rect, .cnki-graph-viewport g[aria-pressed="true"] rect { stroke: #ac4a36; stroke-width: 2.5; }
+.cnki-graph-inspector { padding: 10px 12px; background: #f1f4eb; border-left: 3px solid #728c6b; }
+.cnki-panel .cnki-graph-record { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 monospace; }
+.cnki-graph .cnki-actions { align-items: center; }

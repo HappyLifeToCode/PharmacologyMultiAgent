@@ -23,7 +23,7 @@ from . import browser_session
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "gpt-5.6-luna"
-RUNTIME_VERSION = "20261026-phased-analysis"
+RUNTIME_VERSION = "20261029-source-metadata"
 
 
 class CollectionCancelled(RuntimeError):

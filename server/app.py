@@ -198,6 +198,11 @@ def cnki_literature_script():
     return FileResponse(ROOT / "server/static/cnki-literature.js", media_type="text/javascript")
 
 
+@app.get("/assets/cnki-graph.js")
+def cnki_graph_script():
+    return FileResponse(ROOT / "server/static/cnki-graph.js", media_type="text/javascript")
+
+
 @app.get("/assets/cnki-literature.css")
 def cnki_literature_style():
     return FileResponse(ROOT / "server/static/cnki-literature.css", media_type="text/css")

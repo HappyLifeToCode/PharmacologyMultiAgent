@@ -126,6 +126,7 @@ def normalise_cnki_snapshot(payload, *, formula=None, formula_aliases=None,
             "query": keyword or formula,
             "accessed_at": _accessed_at(payload),
             "source_metadata": {
+                "bibliography": paper.get("bibliography"),
                 "journal_level": paper.get("journal_level"),
                 "cif": paper.get("cif"),
                 "is_modified": paper.get("is_modified"),
