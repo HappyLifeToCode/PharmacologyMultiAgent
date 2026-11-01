@@ -68,7 +68,7 @@ def _catalog(directory, stamp, monarch_directory, monarch_stamp, glossary_stamp)
             identifiers[normalise(row["mondo_id"])].add(identifier)
         for name in [row["disease_name"], *row.get("aliases", [])]:
             names[normalise(name)].add(identifier)
-        label = glossary.get("by_id", {}).get(str(row.get("mondo_id") or identifier).replace("MONDO_", "MONDO:"))
+        label = glossary.get("by_id", {}).get(str(row.get("mondo_id") or identifier).replace("MONDO_", "MONDO:").replace("EFO_", "EFO:"))
         if not label:
             for english_name in [row["disease_name"], *row.get("aliases", [])]:
                 label = glossary.get("by_name", {}).get(str(english_name).casefold())
@@ -78,6 +78,11 @@ def _catalog(directory, stamp, monarch_directory, monarch_stamp, glossary_stamp)
             row["chinese_name"] = label["label"]
             names[normalise(label["label"])].add(identifier)
             for alias in label.get("input_aliases", []):
+                if isinstance(alias, str) and alias.strip():
+                    names[normalise(alias)].add(identifier)
+        for english_name in [row["disease_name"], *row.get("aliases", [])]:
+            entry = glossary.get("by_name", {}).get(str(english_name).casefold(), {})
+            for alias in [entry.get("label"), *entry.get("input_aliases", [])]:
                 if isinstance(alias, str) and alias.strip():
                     names[normalise(alias)].add(identifier)
     phrase_names = tuple(sorted((name for name in names if _contains_chinese(name)),
@@ -110,7 +115,11 @@ def _embedded_match(value, names, identifiers, phrase_names):
     if id_hits:
         term, matches = id_hits[0]
         return term, set(matches), "embedded_id"
-    found = [name for name in phrase_names if name in key]
+    # Strip only known question wrappers. An unknown subtype containing a
+    # known parent name must not silently resolve to that parent.
+    core = re.sub(r"^(?:请问)?(?:什么|哪些)(?:中药|药材|药物)(?:可以|可)?(?:治疗|缓解)", "", key)
+    core = re.sub(r"(?:可能)?(?:被)?(?:什么|哪些)(?:中药|药物|药材)(?:可以|可)?(?:缓解|治疗)(?:或者治疗)?(?:呢)?$", "", core)
+    found = [name for name in phrase_names if name == core]
     if not found:
         return None, set(), None
     longest = len(found[0])
@@ -119,7 +128,10 @@ def _embedded_match(value, names, identifiers, phrase_names):
     return " | ".join(selected), matches, "embedded_alias"
 
 
-def resolve(text=None, *, disease=None, disease_id=None, data_dir=None, monarch_data_dir=None):
+def resolve(text=None, *, disease=None, disease_id=None, data_dir=None, monarch_data_dir=None,
+            allow_translation=False):
+    if not isinstance(allow_translation, bool):
+        raise ValueError("allow_translation 必须是布尔值")
     if text is not None and disease is not None:
         raise ValueError("text 与 disease 只能选择一种输入")
     value = disease if disease is not None else text
@@ -153,8 +165,26 @@ def resolve(text=None, *, disease=None, disease_id=None, data_dir=None, monarch_
         selected = next(iter(matches))
         return {"status": "ready", "query": query, "match_type": match_type,
                 "disease": dict(entities[selected]), "source_errors": errors}
+    translation = None
+    if allow_translation and not exact and _contains_chinese(query):
+        from . import disease_translation
+        try:
+            terms, cached = disease_translation.suggest(query)
+            translated = set().union(*(names.get(normalise(term), set()) for term in terms))
+            translation = {"status": "matched" if translated else "no_exact_match", "terms": terms,
+                           "cache_hit": cached, "model": disease_translation.MODEL}
+            if translated:
+                return {"status": "needs_selection", "query": query, "exact": False,
+                        "match_type": "translation_exact", "translation": translation,
+                        "choices": [dict(entities[item]) for item in sorted(translated)[:100]],
+                        "candidate_count": len(translated), "source_errors": errors,
+                        "message": "翻译名称已精确命中本地目录，但不代表中英文已确认等价。请核对疾病及亚型，再选择查询。"}
+        except RuntimeError as exc:
+            translation = {"status": "unavailable", "message": str(exc)}
     return {"status": "needs_selection" if matches else "not_found", "query": query, "exact": exact,
             "match_type": match_type,
+            "translation_available": _contains_chinese(query) and not exact,
+            "translation": translation,
             "choices": [dict(entities[identifier]) for identifier in sorted(matches)[:100]],
             "candidate_count": len(matches), "source_errors": errors,
-            "message": "请明确选择疾病及亚型；父子疾病不自动合并" if matches else "本地疾病目录未找到该名称，请尝试英文名或标准 ID"}
+            "message": "请明确选择疾病及亚型；父子疾病不自动合并" if matches else "本地中文名称未命中；可尝试翻译辅助检索，或输入英文名、标准 ID。未命中不代表数据库没有该疾病。"}

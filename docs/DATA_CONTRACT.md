@@ -180,3 +180,9 @@ live 运行逐阶段归档到 `data/pharm/<归档名>/`（方名或 `custom_<tas
 ```
 
 每批不可变：相同哈希复用，不同哈希拒绝覆盖；`_meta.md` 追加流水账；归档时间不可冒充数据库访问时间；partial/blocked 尝试同样归档；fixture 禁止进入；归档≠验收。
+
+## 中文病名翻译辅助协议（2026-11-01）
+
+只有 POST /api/agent/reverse/resolve 新增可选布尔 allow_translation（默认 false）。非布尔值拒绝；研究 POST /api/agent/reverse 不接受该字段。仅中文非精确命中才翻译；返回 translation.status 为 matched/no_exact_match/unavailable，并可含 terms、model、cache_hit。成功回查返回 needs_selection、match_type=translation_exact、exact=false，choices 全部来自当前目录而非模型。前端确认后按真实 disease_id 发起研究；原中文问句留在会话中，研究归档 input 为所选 ID。缓存译名不构成长期别名映射。
+
+中文词表 version=2，input_aliases 包含来源同一 ID 的中文 altLabel 及不同中文语种名称；项目覆写主名时保留来源输入别名。不同 ID 的同名别名只形成歧义，不自动合并实体。Wikidata 公开来源不代表医学人工验收；原科学状态和排序合同不变。

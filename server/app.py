@@ -394,8 +394,8 @@ async def resolve_reverse(request: Request):
         raise HTTPException(413, "查询内容过长")
     try:
         body = await request.json()
-        if not isinstance(body, dict) or set(body) - {"text", "disease", "disease_id"}:
-            raise ValueError("疾病解析只接受 text、disease、disease_id")
+        if not isinstance(body, dict) or set(body) - {"text", "disease", "disease_id", "allow_translation"}:
+            raise ValueError("疾病解析只接受 text、disease、disease_id、allow_translation")
         return await run_in_threadpool(disease_input.resolve, **body)
     except ValueError as exc:
         raise HTTPException(400, str(exc))

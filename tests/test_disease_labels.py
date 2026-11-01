@@ -32,3 +32,29 @@ def test_obesity_and_binge_eating_are_distinct_display_entities():
     assert data["by_name"]["major depressive disorder"]["label"] == "重性抑郁障碍"
     assert data["by_id"]["EFO:0009833"]["label"] == "肾损伤"
     assert "指标" in data["by_id"]["EFO:0600064"]["label"]
+
+
+def test_glossary_alternate_labels_are_attached_without_changing_primary_labels():
+    def row(identifier, label, language, alternate=None):
+        value = {"mondo": {"value": identifier}, "label": {"value": label, "xml:lang": language},
+                 "item": {"value": "http://www.wikidata.org/entity/Q1"}}
+        if alternate:
+            value["altLabel"] = {"value": alternate, "xml:lang": language}
+        return value
+    data = build_glossary({"results": {"bindings": [
+        row("MONDO_0000001", "繁體疾病", "zh", "疾病俗名"),
+        row("MONDO_0000001", "简体疾病", "zh-hans", "疾病俗名"),
+        row("MONDO_0000002", "疾病乙", "zh-hant", "乙病別名"),
+    ]}}, {"description": "display", "entries": []})
+    assert data["version"] == 2
+    assert data["by_id"]["MONDO:0000001"]["label"] == "简体疾病"
+    assert data["by_id"]["MONDO:0000001"]["input_aliases"] == ["疾病俗名", "繁體疾病"]
+    assert data["by_id"]["MONDO:0000002"]["input_aliases"] == ["乙病別名"]
+    assert data["sources"]["wikidata"]["alternate_label_row_count"] == 3
+
+
+def test_reviewed_impotence_alias_is_registered():
+    root = Path(__file__).resolve().parents[1]
+    data = json.loads((root / "server/static/disease-labels.json").read_text(encoding="utf-8"))
+    assert data["by_id"]["MONDO:0005362"]["label"] == "勃起功能障碍"
+    assert "阳痿" in data["by_id"]["MONDO:0005362"]["input_aliases"]

@@ -4,25 +4,62 @@ function queryDirection(message) {
   return message.direction || (String(message.runId || "").startsWith("reverse_") ? "reverse" : "forward");
 }
 
-function chooseDisease(preview) {
+function chooseDisease(preview, text, allowForward = false) {
   return new Promise((resolve) => {
     const dialog = element("dialog", "settings-dialog disease-dialog");
-    dialog.append(element("h2", "", "选择具体疾病"), element("p", "reply-note", preview.message));
+    const note = element("p", "reply-note");
+    const translationNote = element("p", "reply-note");
+    translationNote.setAttribute("role", "status");
+    dialog.append(element("h2", "", "核对疾病名称"), note, translationNote);
     const label = element("label", "", "疾病及亚型");
     const select = element("select");
     select.id = "disease-choice";
-    select.append(new Option("请选择疾病", ""));
-    for (const item of preview.choices || []) {
-      select.append(new Option((item.chinese_name ? item.chinese_name + " · " : "") + item.disease_name + " · " + item.disease_id, item.disease_id));
-    }
     label.append(select);
-    dialog.append(label, element("p", "reply-note", "共 " + preview.candidate_count + " 个候选；当前列出最多 100 个。请核对疾病 ID，父病和亚型不会自动合并。"));
-    const confirm = action("确认疾病并查询", () => { if (select.value) { answer = select.value; dialog.close(); } }, "primary-button");
-    confirm.disabled = true;
+    const count = element("p", "reply-note");
+    dialog.append(label, count);
+    let answer = null, closed = false;
+    const confirm = action("确认疾病并查询", () => {
+      if (select.value) {
+        answer = { diseaseId: select.value, translated: preview.match_type === "translation_exact" };
+        dialog.close();
+      }
+    }, "primary-button");
     select.addEventListener("change", () => { confirm.disabled = !select.value; });
-    dialog.append(confirm, action("取消", () => dialog.close()));
-    let answer = null;
-    dialog.addEventListener("close", () => { dialog.remove(); resolve(answer); }, { once: true });
+    const translate = action("翻译辅助检索（调用 AI）", async () => {
+      translate.disabled = true;
+      confirm.disabled = true;
+      select.disabled = true;
+      translationNote.textContent = "正在翻译病名并核对本地目录，首次可能需要约一分钟…";
+      try {
+        const next = await request("/api/agent/reverse/resolve", { text, allow_translation: true });
+        if (closed) return;
+        preview = next;
+        display();
+      } catch (error) { if (!closed) translationNote.textContent = error.message; }
+      finally {
+        if (!closed) { translate.disabled = false; select.disabled = false; confirm.disabled = !select.value; }
+      }
+    });
+    const display = () => {
+      note.textContent = preview.message;
+      select.replaceChildren(new Option("请选择疾病", ""));
+      for (const item of preview.choices || []) {
+        select.append(new Option((item.chinese_name ? item.chinese_name + " · " : "") + item.disease_name + " · " + item.disease_id, item.disease_id));
+      }
+      confirm.disabled = true;
+      count.textContent = "共 " + (preview.candidate_count || 0) + " 个候选；最多显示 100 个。请核对名称及亚型后选择。";
+      translate.hidden = !preview.translation_available || preview.match_type === "translation_exact";
+      const info = preview.translation;
+      translationNote.textContent = info?.status === "unavailable" ? info.message
+        : info ? "翻译参考：" + (info.terms?.join(" / ") || "未得到可靠译名")
+          + (info.status === "no_exact_match" ? "；本地目录仍无精确匹配，请尝试其他名称或标准 ID。" : "；仅供核对，不会自动选中。")
+          + (info.cache_hit ? "（复用本地翻译缓存）" : "")
+        : "未收录的中文名称可尝试翻译；只发送本次病名或问句，不发送研究结果。";
+    };
+    dialog.append(translate, confirm, action("取消", () => dialog.close()));
+    if (allowForward) dialog.append(action("这是药材，按药材继续", () => { answer = { forward: true }; dialog.close(); }));
+    dialog.addEventListener("close", () => { closed = true; dialog.remove(); resolve(answer); }, { once: true });
+    display();
     document.body.append(dialog);
     dialog.showModal();
   });
@@ -31,20 +68,34 @@ function chooseDisease(preview) {
 async function prepareChatQuery(body, text, context) {
   const mode = context?.chooseComposition ? "forward" : context?.retryDirection || byId("query-direction").value;
   const explicitReverse = mode === "reverse" || /哪些(?:候选)?药材|关联.*药材|^疾病[：:]|^(?:MONDO|EFO)[_:]/i.test(text);
+  const confirmedIdOnly = Boolean(body.disease_id && body.text == null && body.disease == null);
   let preview = null;
   if (mode !== "forward") {
     try {
-      preview = await request("/api/agent/reverse/resolve", { text, ...(body.disease_id ? { disease_id: body.disease_id } : {}) });
+      preview = await request("/api/agent/reverse/resolve", { ...(confirmedIdOnly ? {} : { text }), ...(body.disease_id ? { disease_id: body.disease_id } : {}) });
     } catch (error) {
       if (explicitReverse) throw error;
       // Forward queries remain available when the disease catalog is unavailable.
     }
   }
   if (mode !== "forward" && (explicitReverse || preview?.status === "ready" || (preview?.status === "needs_selection" && preview.exact))) {
-    if (!preview || preview.status === "not_found") throw new Error(preview?.message || "疾病目录暂不可用，请检查本地数据。");
-    const diseaseId = preview.status === "ready" ? preview.disease.disease_id : await chooseDisease(preview);
-    if (!diseaseId) return null;
-    return { direction: "reverse", body: { text, disease_id: diseaseId, top_k: body.top_k } };
+    if (!preview) throw new Error("疾病目录暂不可用，请检查本地数据。");
+    const choice = preview.status === "ready" ? { diseaseId: preview.disease.disease_id } : await chooseDisease(preview, text);
+    if (!choice) return null;
+    // Confirmed translated candidates use their real catalog ID. Never send
+    // the unregistered Chinese alias back as if it were a reviewed mapping.
+    return { direction: "reverse", body: { ...(choice.translated || confirmedIdOnly ? {} : { text }), disease_id: choice.diseaseId, top_k: body.top_k } };
+  }
+  if (mode === "auto" && preview?.translation_available) {
+    const herbPreview = await request("/api/formulas/resolve", { text, use_saved: true });
+    const mappings = herbPreview.resolution?.mappings || [];
+    if (!herbPreview.formula && mappings.length && mappings.every((item) => item.status === "unmatched")) {
+      const choice = await chooseDisease(preview, text, true);
+      if (!choice) return null;
+      if (!choice.forward) return { direction: "reverse", body: {
+        ...(choice.translated ? {} : { text }), disease_id: choice.diseaseId, top_k: body.top_k,
+      } };
+    }
   }
   const prepared = await FormulaPicker.prepare(body, { force: Boolean(context?.chooseComposition) });
   return prepared ? { direction: "forward", body: prepared } : null;

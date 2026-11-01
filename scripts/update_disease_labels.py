@@ -13,22 +13,25 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent.parent
 ENDPOINT = "https://query.wikidata.org/sparql"
-QUERY = ('SELECT ?item ?mondo ?label WHERE { ?item wdt:P5270 ?mondo; rdfs:label ?label . '
-         'FILTER(LANG(?label) IN ("zh", "zh-hans", "zh-cn")) }')
-LANGUAGES = {"zh-hans": 0, "zh-cn": 1, "zh": 2}
+QUERY = ('SELECT ?item ?mondo ?label ?altLabel WHERE { ?item wdt:P5270 ?mondo; rdfs:label ?label . '
+         'OPTIONAL { ?item skos:altLabel ?altLabel . FILTER(LANG(?altLabel) IN ("zh", "zh-hans", "zh-cn", "zh-hant", "zh-tw")) } '
+         'FILTER(LANG(?label) IN ("zh", "zh-hans", "zh-cn", "zh-hant", "zh-tw")) }')
+LANGUAGES = {"zh-hans": 0, "zh-cn": 1, "zh": 2, "zh-hant": 3, "zh-tw": 4}
 
 
 def build_glossary(payload, overrides):
-    grouped = defaultdict(list)
+    grouped, alternates = defaultdict(list), defaultdict(set)
     for row in payload["results"]["bindings"]:
         disease_id = row["mondo"]["value"].replace("MONDO_", "MONDO:")
         label = row["label"]["value"].strip()
         language = row["label"].get("xml:lang")
-        if not re.fullmatch(r"MONDO:\d{7}", disease_id) or language not in LANGUAGES:
-            continue
-        if not re.search(r"[\u3400-\u9fff]", label):
-            continue
-        grouped[disease_id].append((LANGUAGES[language], label, row["item"]["value"].rsplit("/", 1)[-1]))
+        if re.fullmatch(r"MONDO:\d{7}", disease_id) and language in LANGUAGES and re.search(r"[\u3400-\u9fff]", label):
+            grouped[disease_id].append((LANGUAGES[language], label, row["item"]["value"].rsplit("/", 1)[-1]))
+        alternate = row.get("altLabel")
+        if alternate:
+            alias = alternate["value"].strip()
+            if re.fullmatch(r"MONDO:\d{7}", disease_id) and alternate.get("xml:lang") in LANGUAGES and re.search(r"[\u3400-\u9fff]", alias):
+                alternates[disease_id].add(alias)
     by_id, conflicts = {}, []
     for disease_id, rows in sorted(grouped.items()):
         # Conflicting entities or labels at the preferred language are withheld.
@@ -39,6 +42,11 @@ def build_glossary(payload, overrides):
             continue
         label, item = next(iter(preferred))
         by_id[disease_id] = {"label": label, "source": "wikidata", "wikidata_id": item}
+        alternates[disease_id].update(value for _, value, _ in rows)
+    for disease_id, entry in by_id.items():
+        aliases = sorted(alternates[disease_id] - {entry["label"]})
+        if aliases:
+            entry["input_aliases"] = aliases
     by_name = {}
     for row in overrides["entries"]:
         entry = {"label": row["label"], "source": "project_glossary"}
@@ -46,19 +54,25 @@ def build_glossary(payload, overrides):
         if input_aliases:
             entry["input_aliases"] = input_aliases
         if row.get("id"):
-            by_id[row["id"]] = entry
+            existing = by_id.get(row["id"], {})
+            combined = set(existing.get("input_aliases", [])) | set(input_aliases)
+            if existing.get("label"):
+                combined.add(existing["label"])
+            combined.discard(entry["label"])
+            by_id[row["id"]] = {**entry, **({"input_aliases": sorted(combined)} if combined else {})}
         for name in [row["name"], *row.get("aliases", [])]:
             key = name.strip().lower()
             if key in by_name and by_name[key] != entry:
                 raise ValueError("Conflicting exact alias: " + name)
             by_name[key] = entry
     return {
-        "version": 1,
+        "version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": {
             "wikidata": {"url": ENDPOINT, "query": QUERY,
                          "license": "CC0", "license_url": "https://www.wikidata.org/wiki/Wikidata:Licensing",
-                         "languages": list(LANGUAGES), "raw_row_count": len(payload["results"]["bindings"])},
+                         "languages": list(LANGUAGES), "raw_row_count": len(payload["results"]["bindings"]),
+                         "alternate_label_row_count": sum("altLabel" in row for row in payload["results"]["bindings"])},
             "project_glossary": {"file": "pharm/diseases/chinese_labels_overrides.json",
                                  "description": overrides["description"]},
         },
