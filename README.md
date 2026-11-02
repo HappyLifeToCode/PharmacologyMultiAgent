@@ -1,5 +1,7 @@
 # Pharmacology Multi-Agent
 
+2026-11-02 多模型配置：模型窗口可按名称保存、切换多套 API，Windows 默认加密保存在本机；支持显式导入 Codex 的 icrc 配置与 Codex 兼容 Responses 中转。旧 Kimi 等配置保留，真实地址和凭据不随 Git 交付。用法与四层职责的实际完成范围见[研究问答说明](docs/ASSISTANT_CHAT.md)。
+
 2026-11-02 接口兼容修复：首页新增 **Anthropic Messages**，支持 Anthropic/Claude 和 Kimi Code 的消息、工具调用及签名推理块回传。Kimi Code 的 `https://api.kimi.com/coding` 选择 Anthropic；若选 Chat Completions/Responses，Base URL 应为 `https://api.kimi.com/coding/v1`。同时修复修改协议时加密密钥的保留逻辑。已完成隔离适配检查，真实 Kimi 连接及完整回归待验证；详见[配置说明](docs/ASSISTANT_CHAT.md)。
 
 2026-11-02：首页默认进入 **LLM 研究问答**，可填写模型 API（Chat Completions 兼容接口或 Responses），由模型选择本地文献、研究归档、双向靶点查询及 Europe PMC 检索工具，生成带来源的回答并继续追问。原固定查询在“数据库查询”模式，研究工作台保留。支持加密/临时密钥、连接检查、执行预算、停止和刷新恢复。用法、范围与对接验收见 [研究问答与模型 API](docs/ASSISTANT_CHAT.md)；本轮仅完成静态和模拟模型的隔离工程检查，真实模型及完整回归待对接方验证。下方固定句式追问与“非通用聊天”的说明指原数据库查询模式。

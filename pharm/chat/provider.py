@@ -57,6 +57,31 @@ def endpoint_url(config):
     return base + ("/responses" if config.get("api_style") == "responses" else "/chat/completions")
 
 
+async def response_document(response):
+    """Read bounded JSON or SSE; only a completed/incomplete response is an answer."""
+    if "text/event-stream" in response.headers.get("content-type", ""):
+        data, size = [], 0
+        async for line in response.aiter_lines():
+            size += len(line.encode("utf-8"))
+            if size > 2_000_000: raise ModelError("模型响应超过大小限制")
+            if line.startswith("data:"): data.append(line[5:].lstrip())
+            if not line and data:
+                raw = "\n".join(data); data = []
+                if raw == "[DONE]": break
+                event = json.loads(raw)
+                if event.get("type") in {"response.completed", "response.incomplete"}:
+                    return event["response"]
+                if event.get("type") in {"error", "response.failed"}:
+                    raise ModelError("模型中转返回失败事件，请检查模型权限或额度")
+        raise ModelError("模型流式连接提前结束，未收到完整响应")
+    chunks, size = [], 0
+    async for chunk in response.aiter_bytes():
+        size += len(chunk)
+        if size > 2_000_000: raise ModelError("模型响应超过大小限制")
+        chunks.append(chunk)
+    return json.loads(b"".join(chunks))
+
+
 async def complete(config, messages, tools=None, *, short=False, transport=None):
     if not config.get("configured"):
         raise ModelError("请先在模型设置中填写 API 地址、模型名称和密钥")
@@ -72,6 +97,13 @@ async def complete(config, messages, tools=None, *, short=False, transport=None)
                    "include": ["reasoning.encrypted_content"], "max_output_tokens": 512 if short else config["max_output_tokens"]}
         if tools:
             payload["tools"] = [{"type": "function", **t["function"], "strict": False} for t in tools]
+        if config.get("reasoning_effort"):
+            payload["reasoning"] = {"effort": config["reasoning_effort"]}
+        if config.get("responses_mode") == "codex":
+            payload["instructions"] = "\n\n".join(m.get("content", "") for m in messages if m["role"] in {"system", "developer"}) or "Answer the user's request accurately."
+            payload["input"] = response_input([m for m in messages if m["role"] not in {"system", "developer"}])
+            payload["stream"] = True
+            payload.pop("max_output_tokens", None)
     if anthropic:
         system, turns = anthropic_input(messages)
         payload = {"model": config["model"], "messages": turns, "max_tokens": 128 if short else config["max_output_tokens"]}
@@ -90,18 +122,13 @@ async def complete(config, messages, tools=None, *, short=False, transport=None)
         else: headers["Authorization"] = "Bearer " + config["api_key"]
     if anthropic: headers["anthropic-version"] = "2023-06-01"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(65, connect=12), follow_redirects=False, transport=transport) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(65, connect=12), follow_redirects=False, transport=transport,
+                                     trust_env=not config.get("allow_insecure_http", False)) as client:
             async with client.stream("POST", endpoint_url(config), headers=headers, json=payload) as response:
                 if response.status_code != 200:
                     messages_by_code = {401: "密钥无效或没有模型权限", 403: "模型服务拒绝访问", 404: "未找到接口或模型，请核对 API 地址与模型名称", 429: "模型服务限流或额度不足", 400: "模型不接受当前请求格式；请核对接口格式、模型名称及工具调用支持"}
                     raise ModelError(messages_by_code.get(response.status_code, "模型服务暂不可用") + "（HTTP %s）" % response.status_code)
-                chunks, size = [], 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > 2_000_000:
-                        raise ModelError("模型响应超过大小限制")
-                    chunks.append(chunk)
-        value = json.loads(b"".join(chunks))
+                value = await response_document(response)
         if anthropic:
             output = value["content"]
             if not isinstance(output, list): raise ValueError()

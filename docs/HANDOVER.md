@@ -1,5 +1,9 @@
 # 项目交接说明
 
+## 2026-11-02 多模型配置接续
+
+已实现多套 API 命名保存/切换，以及显式读取本机 Codex icrc 的导入入口。私有资料在 Git 忽略的 `local/assistant/model-profiles.json`；旧 model.json 原样保留，新版本重启后采用多配置存储。Codex 兼容 Responses 中转已做本机真实短请求连通检查，真实科研验收不在本轮。勿将私有地址/密钥复制到公共配置或文档；详细边界见 [问答说明](ASSISTANT_CHAT.md)。用户已授权本轮提交推送。
+
 ## 2026-11-02 Anthropic/Kimi 接续
 
 已补 Anthropic Messages 与 Kimi Code 预设，接口格式需和 Base URL 配套；具体示例见 [模型配置说明](ASSISTANT_CHAT.md)。本次还修正了协议变更时密文保留逻辑，配置无法解密时不再覆盖旧密钥。隔离适配检查通过，真实连接未完成，完整回归交对接方。用户已授权推送；服务仍由用户原终端重启。

@@ -1,5 +1,30 @@
 # 研究问答与模型 API
 
+## 多配置保存与 Codex 中转（2026-11-02 补充）
+
+模型窗口增加“已保存配置”、配置名称、“新增配置”和“从本机 Codex 导入 icrc”。保存后按名称切换，不需要重新输入密钥。Windows 新配置默认加密保存；“仅本次服务”仍是可选项，选此项时重启后需要重填密钥。选择另一个服务地址预设会创建新草稿，不覆盖已有配置。清除密钥仅影响当前所选配置。
+
+多配置保存在 **`local/assistant/model-profiles.json`**，各配置分别保存地址、模型、协议、执行设置和 DPAPI 密文，活动项由 active_id 选择。旧 `model.json` 只作为首次迁移来源，迁移保留其原始密文，不改写旧文件。切换配置只更新活动编号，不解密重写其他配置的密钥。新后端以多配置文件为准，旧版服务需用户重启才能使用新配置。
+
+显式点击导入时，只读取本机 Codex 的 icrc provider、模型及其声明的认证来源：优先指定环境变量，再看配置中的显式 token，必要时使用 auth.json 的 OPENAI_API_KEY；不导入 OAuth 登录 token，不复制整个 Codex 配置，也不修改 Codex 文件。保存时加密，接口不返回密钥或密文。重复导入同名、同地址的 icrc 配置更新原项，不无限新增。
+
+普通 Responses 与 Codex 兼容中转分别处理。Codex 兼容模式使用顶层 instructions、stream=true、store=false，并读取 SSE 的 completed/incomplete 事件，保留工具调用和后续结果流程；推理强度沿用导入配置。此类中转不发送标准 max_output_tokens，输出限制以中转支持为准，本机仍有时间与响应大小限制。可信内网 IP 的 HTTP 连接需要显式允许，并禁用环境代理，避免把内网认证请求送往代理；公网仍要求 HTTPS。实际内网地址和密钥不写入共享文档或代码。
+
+新接口：`POST /api/assistant/config/select` 选择 profile_id；`POST /api/assistant/config/import-codex` 仅接受空对象。原 config GET 返回活动配置和不含密钥的配置列表，POST 可用 profile_name/new_profile/profile_id 保存或新增。
+
+本机 icrc 已按 Codex 当前模型完成一次真实的极短连接检查并收到文字回复。这只证明连接与响应格式可用，不代表真实科研流程已验收。已核对旧配置文件不变、配置切换不改密文、新进程可读取加密凭据；源码与可提交文件中未发现导入的真实密钥或中转 URL。`local/` 整体被 Git 忽略，另外添加 model-profiles 文件名排除规则。不要使用 `git add -f` 强行提交本机配置；Git 忽略不是访问控制。
+
+## 四层职责的完成边界
+
+| 层 | 已接通的最小闭环 | 尚未完成的扩展 |
+| --- | --- | --- |
+| LLM | 上下文、工具选择、资料读取、带来源回答、追问 | 更完整的研究计划、冲突分析与检索质量评估 |
+| 程序工具 | 本地 CNKI、研究归档、双向靶点查询、Europe PMC | CNKI 在线采集与 STRING/CytoNCA/DAVID 的 LLM 自动调度 |
+| 证据 | 来源、可用原文、部分文件哈希、运行记录、引用编号存在性 | 逐句支持关系验证与统一核验后的研究类型结构 |
+| 页面 | 回答、来源、过程、多轮对话、打开已有结果和图谱 | 根据任意问答自动组织跨来源证据表和综合图谱 |
+
+以上“已接通”是实现范围，不代表所有真实数据和模型组合均验收通过。
+
 ## Anthropic 与 Kimi Code（2026-11-02 补充）
 
 模型设置新增 Anthropic Messages，发送 `anthropic-version: 2023-06-01` 和 `x-api-key`，支持顶层 system、tool_use/tool_result、多工具结果合并及本轮签名 thinking 块回传；内部推理不展示为回答。到预算上限时保留工具定义但指定 tool_choice=none，要求只综合已有结果。

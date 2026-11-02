@@ -6,6 +6,9 @@
 /.claude/
 /.local/
 /local/
+# Saved model profiles and copies are private, even if moved outside local/.
+**/model-profiles.json
+**/model-profiles.*.json
 /private/
 /docs/private/
 /docs/STATUS.md

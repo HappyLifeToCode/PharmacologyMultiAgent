@@ -34,6 +34,10 @@
 .model-limits { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
 .model-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:15px; }
 .model-actions .primary-button { width:auto; margin:0; padding:10px 16px; }
+.model-profile-actions { display:flex; gap:10px; flex-wrap:wrap; }
+.model-profile-actions button { border:1px solid var(--line); padding:7px 10px; border-radius:6px; font-size:12px; }
+.model-dialog .model-http-toggle { display:flex; align-items:center; gap:8px; }
+.model-dialog .model-http-toggle input { width:auto; margin:0; }
 #model-clear-key { margin-right:auto; }
 .model-test-button { border:1px solid var(--line); padding:10px 12px; border-radius:6px; font-size:12px; }
 #model-feedback { min-height:21px; color:var(--research-accent); font-size:12px; overflow-wrap:anywhere; }

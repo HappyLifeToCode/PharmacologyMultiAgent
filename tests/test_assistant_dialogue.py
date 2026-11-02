@@ -145,12 +145,38 @@ def test_anthropic_protocol_parallel_tools_and_thinking_replay():
 
 def test_protocol_change_preserves_unreadable_encrypted_key(tmp_path):
     original = {**config.DEFAULT, "model": "fixture", "storage": "protected", "protected_key": "opaque-ciphertext-fixture"}
-    write_json(config.settings_path(tmp_path), original)
+    write_json(config.legacy_path(tmp_path), original)
     public = config.save(tmp_path, {"api_style": "anthropic"})
     stored = json.loads(config.settings_path(tmp_path).read_text(encoding="utf-8"))
-    assert stored["protected_key"] == original["protected_key"]
-    assert stored["api_style"] == "anthropic" and public["key_error"]
+    assert stored["profiles"]["legacy"]["protected_key"] == original["protected_key"]
+    assert stored["profiles"]["legacy"]["api_style"] == "anthropic" and public["key_error"]
     before = config.settings_path(tmp_path).read_bytes()
     with pytest.raises(ValueError, match="已保留原配置"):
         config.save(tmp_path, {"storage": "session"})
     assert config.settings_path(tmp_path).read_bytes() == before
+
+
+def test_multiple_profiles_switch_without_reentering_keys(tmp_path):
+    first = config.save(tmp_path, {"profile_name": "First", "model": "fixture-a", "base_url": "https://a.example/v1", "storage": "session", "api_key": "fake-a"})
+    second = config.save(tmp_path, {"new_profile": True, "profile_name": "Second", "model": "fixture-b", "base_url": "https://b.example/v1", "storage": "session", "api_key": "fake-b"})
+    assert len(second["profiles"]) == 2
+    config.select(tmp_path, first["profile_id"])
+    assert config.read(tmp_path, secret=True)["api_key"] == "fake-a"
+    config.select(tmp_path, second["profile_id"])
+    assert config.read(tmp_path, secret=True)["api_key"] == "fake-b"
+    public = json.dumps(config.read(tmp_path))
+    assert "fake-a" not in public and "fake-b" not in public
+
+
+def test_codex_responses_uses_instructions_and_completed_sse():
+    setting = {**config.DEFAULT, "model": "fixture", "configured": True, "api_style": "responses", "responses_mode": "codex"}
+    def handle(request):
+        value = json.loads(request.content)
+        assert value["stream"] is True and value["store"] is False
+        assert value["instructions"] == "fixture instruction"
+        assert "max_output_tokens" not in value
+        result = {"type": "response.completed", "response": {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "OK"}]}]}}
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=("data: " + json.dumps(result) + "\n\n").encode())
+    messages = [{"role": "system", "content": "fixture instruction"}, {"role": "user", "content": "fixture question"}]
+    value = asyncio.run(provider.complete(setting, messages, transport=httpx.MockTransport(handle)))
+    assert value["content"] == "OK"

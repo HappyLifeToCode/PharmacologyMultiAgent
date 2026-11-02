@@ -4,6 +4,7 @@ const AssistantUI = (() => {
   const polling = new Set();
   const loadingAnswers = new Set();
   let configuration = null;
+  let editingProfileId = null;
   const terminal = new Set(["succeeded", "failed", "cancelled", "timed_out", "interrupted"]);
   const modes = { assistant: "研究问答", database: "数据库查询" };
   const nodes = (tag, cls, value) => element(tag, cls, value);
@@ -19,7 +20,7 @@ const AssistantUI = (() => {
   }
   function configStatus() {
     const ready = configuration?.configured;
-    const name = ready ? configuration.model : "配置模型 API";
+    const name = ready ? (configuration.profile_name || configuration.model) : "配置模型 API";
     byId("model-status").textContent = name;
     byId("open-model-settings").classList.toggle("configured", Boolean(ready));
     byId("model-ready-note").textContent = ready ? "模型已配置。先提问，执行过程和引用会随回答保存。" : "首次使用研究问答，请先填写模型 API。数据库查询仍可独立使用。";
@@ -27,38 +28,60 @@ const AssistantUI = (() => {
   async function openModelSettings() {
     byId("model-feedback").textContent = "";
     try { configuration = await request("/api/assistant/config"); } catch (error) { byId("model-feedback").textContent = error.message; }
-    const c = configuration || {};
+    fillModelSettings(configuration || {});
+    if (!byId("model-dialog").open) byId("model-dialog").showModal();
+    byId(configuration?.model ? "model-profile-select" : "model-profile-name").focus();
+  }
+  function fillModelSettings(c) {
+    editingProfileId = c.profile_id || null;
+    const select = byId("model-profile-select"); select.replaceChildren();
+    const fresh = nodes("option", "", "＋ 新增配置"); fresh.value = ""; select.append(fresh);
+    for (const profile of configuration?.profiles || []) { const option = nodes("option", "", profile.name + " · " + profile.model); option.value = profile.id; select.append(option); }
+    select.value = editingProfileId || "";
+    byId("model-profile-name").value = c.profile_name || "";
     byId("model-base-url").value = c.base_url || "https://api.openai.com/v1";
     byId("model-name").value = c.model || "";
     byId("model-api-style").value = c.api_style || "chat_completions";
     byId("model-api-key").value = "";
     byId("model-api-key").placeholder = c.has_key ? "已保存密钥；留空则保留" : "填写服务商提供的 API Key";
-    byId("model-key-storage").value = c.storage || "session";
-    byId("model-protected-option").disabled = !c.protected_storage_available;
+    byId("model-key-storage").value = c.storage || (configuration?.protected_storage_available ? "protected" : "session");
+    byId("model-protected-option").disabled = !configuration?.protected_storage_available;
     byId("model-max-rounds").value = c.max_rounds || 3;
     byId("model-max-output").value = c.max_output_tokens || 2200;
+    byId("model-intranet-http").checked = Boolean(c.allow_insecure_http);
+    byId("model-responses-mode").value = c.responses_mode || "standard";
+    byId("model-reasoning-effort").value = c.reasoning_effort || "";
     if (c.key_error) byId("model-feedback").textContent = c.key_error;
-    if (!byId("model-dialog").open) byId("model-dialog").showModal();
-    byId(c.model ? "model-api-key" : "model-base-url").focus();
+  }
+  function newProfile() {
+    fillModelSettings({});
+    byId("model-feedback").textContent = "正在新增配置，已保存的配置与密钥保持不变。";
+    byId("model-profile-name").focus();
+  }
+  function profileBusy(value) {
+    ["model-profile-select", "model-new-profile", "model-import-codex", "model-save", "model-test", "model-clear-key"].forEach(id => byId(id).disabled = value);
   }
   async function saveModel(test = false) {
     if (!byId("model-form").reportValidity()) return;
     const controls = [byId("model-save"), byId("model-test"), byId("model-clear-key")];
-    controls.forEach(n => n.disabled = true);
+    profileBusy(true);
     byId("model-feedback").textContent = test ? "保存并检查模型连接…" : "正在保存…";
     try {
       configuration = await request("/api/assistant/config", {
+        ...(editingProfileId ? { profile_id: editingProfileId } : { new_profile: true }),
+        profile_name: byId("model-profile-name").value.trim(),
         base_url: byId("model-base-url").value.trim(), model: byId("model-name").value.trim(),
         api_key: byId("model-api-key").value.trim(), storage: byId("model-key-storage").value,
         api_style: byId("model-api-style").value,
+        allow_insecure_http: byId("model-intranet-http").checked,
+        responses_mode: byId("model-responses-mode").value, reasoning_effort: byId("model-reasoning-effort").value,
         max_rounds: Number(byId("model-max-rounds").value), max_output_tokens: Number(byId("model-max-output").value),
       });
-      byId("model-api-key").value = "";
-      byId("model-api-key").placeholder = configuration.has_key ? "已保存密钥；留空则保留" : "填写 API Key";
+      fillModelSettings(configuration);
       configStatus();
       byId("model-feedback").textContent = test ? (await request("/api/assistant/config/test", {})).message : "设置已保存。可以关闭此窗口并开始提问。";
     } catch (error) { byId("model-feedback").textContent = error.message; }
-    finally { controls.forEach(n => n.disabled = false); }
+    finally { profileBusy(false); }
   }
   async function init() {
     try { if (localStorage.getItem("pharm.research.mode") === "database") byId("chat-mode").value = "database"; } catch {}
@@ -71,12 +94,31 @@ const AssistantUI = (() => {
     byId("model-dialog").addEventListener("close", () => { byId("model-api-key").value = ""; });
     byId("model-form").addEventListener("submit", event => { event.preventDefault(); saveModel(false); });
     byId("model-test").addEventListener("click", () => saveModel(true));
+    byId("model-new-profile").addEventListener("click", newProfile);
+    byId("model-profile-select").addEventListener("change", async event => {
+      if (!event.target.value) { newProfile(); return; }
+      profileBusy(true);
+      try { configuration = await request("/api/assistant/config/select", { profile_id: event.target.value }); fillModelSettings(configuration); configStatus(); byId("model-feedback").textContent = configuration.configured ? "已切换到保存的配置，无需重新输入密钥。" : (configuration.key_error || "已切换配置，但当前没有可用密钥，请补填后保存。"); }
+      catch (error) { byId("model-feedback").textContent = error.message; }
+      finally { profileBusy(false); }
+    });
+    byId("model-import-codex").addEventListener("click", async event => {
+      profileBusy(true);
+      byId("model-feedback").textContent = "正在读取本机 Codex 的 icrc 配置…";
+      try { configuration = await request("/api/assistant/config/import-codex", {}); fillModelSettings(configuration); configStatus(); byId("model-feedback").textContent = "icrc 已导入并选用，密钥仅保存在本机。可检查连接。"; }
+      catch (error) { byId("model-feedback").textContent = error.message; }
+      finally { profileBusy(false); }
+    });
     byId("model-clear-key").addEventListener("click", async () => {
-      try { configuration = await request("/api/assistant/config", { clear_key: true }); byId("model-api-key").value = ""; byId("model-api-key").placeholder = "填写 API Key"; configStatus(); byId("model-feedback").textContent = "已清除保存的密钥。"; }
+      if (!editingProfileId) { byId("model-feedback").textContent = "新配置尚未保存。"; return; }
+      try { configuration = await request("/api/assistant/config", { profile_id: editingProfileId, clear_key: true }); fillModelSettings(configuration); configStatus(); byId("model-feedback").textContent = "已清除此配置的密钥，其他配置保持不变。"; }
       catch (error) { byId("model-feedback").textContent = error.message; }
     });
     byId("model-preset").addEventListener("change", event => {
       const urls = { openai: "https://api.openai.com/v1", deepseek: "https://api.deepseek.com/v1", qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1", local: "http://127.0.0.1:11434/v1", anthropic: "https://api.anthropic.com", kimi: "https://api.kimi.com/coding" };
+      const selected = event.target.value;
+      if (urls[selected] && editingProfileId) newProfile();
+      if (urls[selected]) byId("model-profile-name").value = event.target.selectedOptions[0].textContent;
       if (urls[event.target.value]) { byId("model-base-url").value = urls[event.target.value]; byId("model-api-style").value = event.target.value === "openai" ? "responses" : ["anthropic", "kimi"].includes(event.target.value) ? "anthropic" : "chat_completions"; byId("model-name").value = ""; byId("model-api-key").value = ""; byId("model-feedback").textContent = "已切换地址，请填写对应服务商的模型和密钥；切换地址不会复用旧密钥。"; }
     });
     try { configuration = await request("/api/assistant/config"); configStatus(); }

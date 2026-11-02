@@ -41,6 +41,23 @@ async def test_settings(request: Request):
     except (provider.ModelError, ValueError) as exc: raise HTTPException(400, str(exc))
 
 
+@router.post("/api/assistant/config/select")
+async def select_settings(request: Request):
+    value = await body(request)
+    if set(value) != {"profile_id"}: raise HTTPException(400, "请选择一个已保存配置")
+    try: return config.select(ROOT, value["profile_id"])
+    except ValueError as exc: raise HTTPException(400, str(exc))
+    except OSError: raise HTTPException(503, "配置切换未完成")
+
+
+@router.post("/api/assistant/config/import-codex")
+async def import_codex_settings(request: Request):
+    if await body(request): raise HTTPException(400, "导入不接受路径或额外参数")
+    try: return config.import_codex(ROOT)
+    except ValueError as exc: raise HTTPException(400, str(exc))
+    except OSError: raise HTTPException(503, "本机 Codex 的 icrc 配置不可读取")
+
+
 @router.post("/api/assistant/runs", status_code=202)
 async def start_dialogue(request: Request):
     try: return engine.manager.start(ROOT, await body(request, 50000))
