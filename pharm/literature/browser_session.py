@@ -139,7 +139,7 @@ def manual_page(value):
         url = urlparse(value)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.port not in (None, 443): return None
         if url.hostname == "www.cnki.net" and url.path in {"", "/"}: return value
-        if url.hostname == "kns.cnki.net" and (url.path.startswith("/kns8s/") or url.path == "/kcms2/article/abstract"): return value
+        if url.hostname == "kns.cnki.net" and (url.path.startswith("/kns8s/") or url.path in {"/kcms2/article/abstract", "/verify/home", "/verify/home/"}): return value
     except ValueError: pass
     return None
 

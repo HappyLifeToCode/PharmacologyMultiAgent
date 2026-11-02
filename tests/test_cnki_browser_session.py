@@ -166,6 +166,9 @@ def test_manual_recovery_url_is_private_and_limited_to_normal_cnki_pages(tmp_pat
     browser_session.remember_manual_page(tmp_path, "https://kns.cnki.net/kcms2/article/abstract?v=fixture")
     saved=json.loads(browser_session.session_file(tmp_path).read_text(encoding="utf-8"))
     assert saved["manual_url"].endswith("v=fixture")
+    verification_url = "https://kns.cnki.net/verify/home?return=fixture"
+    browser_session.remember_manual_page(tmp_path, verification_url)
+    assert json.loads(browser_session.session_file(tmp_path).read_text(encoding="utf-8"))["manual_url"] == verification_url
     for value in ("https://other.example/login", "file:///C:/private", "https://kns.cnki.net/reader/fulltext", "https://user:secret@kns.cnki.net/kns8s/search"):
         assert browser_session.manual_page(value) is None
 

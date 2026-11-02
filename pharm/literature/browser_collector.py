@@ -237,6 +237,12 @@ class CnkiSite:
             if self.root and status == 403: browser_session.remember_manual_page(self.root, response.url)
             raise PageBlocked("http_403" if status == 403 else "rate_limited")
         if status == 404: raise PageBlocked("http_404")
+        current_url = urlparse(page.url)
+        if current_url.hostname == "kns.cnki.net" and current_url.path.rstrip("/") == "/verify/home":
+            self.blocked_page = page
+            self.save_navigation_diagnostic(page, response, "verification_redirect")
+            if self.root: browser_session.remember_manual_page(self.root, page.url)
+            raise PageBlocked("verification_redirect")
         state = page.evaluate("() => {" + self.guard + "; return cnkiPageState();}")
         if state["blocking_verification"]:
             self.blocked_page = page
@@ -276,7 +282,7 @@ class CnkiSite:
         self.check(self.page)
         self.blocked_page = self.page
         self.save_navigation_diagnostic(self.page, self.navigation_responses.get(self.page), "search_results_unavailable")
-        if self.root: browser_session.remember_manual_page(self.root, "https://www.cnki.net/")
+        if self.root: browser_session.remember_manual_page(self.root, self.page.url)
         raise PageBlocked("search_results_unavailable")
 
     def save_navigation_diagnostic(self, page, response, reason):
@@ -460,7 +466,7 @@ def collect_in_mode(task, work, *, root, mode, cancel, timeout):
                 return inventory.collect(task, work, site, cancel=cancel)
             return collect_pages(task, work, site, cancel=cancel)
         except PageBlocked as exc:
-            if mode == "interactive" and exc.reason in {"captcha", "login_required", "http_403", "search_results_unavailable"}:
+            if mode == "interactive" and exc.reason in {"captcha", "verification_redirect", "login_required", "http_403", "search_results_unavailable"}:
                 keep = getattr(site, "blocked_page", None)
             raise
         finally:

@@ -240,6 +240,8 @@ def validate_scan(task, work, papers):
             raise CollectionValidationError("知网返回HTTP 403，当前访问被拒绝。进度已保留；请在专用窗口正常处理后再续跑。", "cnki_access_denied")
         if reason == "rate_limited":
             raise CollectionValidationError("知网返回HTTP 429，当前访问受到限流。进度已保留，请稍后显式续跑。", "cnki_rate_limited")
+        if reason == "verification_redirect":
+            raise CollectionValidationError("知网检索已跳转到验证页面，尚未取得结果列表。请打开登录/验证窗口检查该页面，完成验证后点击继续采集；首页能打开不代表检索验证已通过。", "cnki_verification_required")
         if reason in {"captcha", "verification_required"}:
             if scan.get("verification", {}).get("blocking_verification") is not True:
                 raise CollectionValidationError("验证码提示缺少可见性核验，可能是页面隐藏模板；请检查实际页面后再续跑，未发布不完整数据。", "cnki_verification_unconfirmed")
@@ -475,7 +477,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                     try:
                         browser_collector.collect(task, work, root=root, cancel=cancelled)
                     except browser_collector.PageBlocked as exc:
-                        if exc.reason in {"http_403", "captcha", "rate_limited", "login_required", "search_results_unavailable",
+                        if exc.reason in {"http_403", "captcha", "verification_redirect", "rate_limited", "login_required", "search_results_unavailable",
                                           "result_total_changed", "result_total_unreadable", "result_total_unstable", "result_list_changed", "inventory_count_mismatch", "inventory_duplicate_record", "inventory_repeated_page", "partition_coverage_unavailable", "partition_total_changed", "partition_unsupported", "page_size_not_applied"}:
                             current = [json.loads(p.read_text(encoding="utf-8")) for p in (work / "papers").glob("paper_*.json")]
                             validate_scan(task, work, current)

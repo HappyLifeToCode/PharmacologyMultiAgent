@@ -277,6 +277,30 @@ def test_search_success_and_subresource_denial_are_not_mistaken_for_main_page_de
     assert site.check(page)['result_rows']==2
 
 
+def test_verification_redirect_without_visible_text_preserves_actual_page(tmp_path, monkeypatch):
+    page = NavigationPage(200)
+    site = browse.CnkiSite(None, page, tmp_path, root=tmp_path)
+    page.url = 'https://kns.cnki.net/verify/home?return=fixture'
+    response = page.emit(200)
+    response.url = page.url
+    remembered = []
+    monkeypatch.setattr(browse.browser_session, 'remember_manual_page', lambda root, url: remembered.append(url))
+    with pytest.raises(browse.PageBlocked) as raised:
+        site.check(page)
+    assert raised.value.reason == 'verification_redirect'
+    assert site.blocked_page is page and remembered == [page.url]
+    diagnostic = json.loads((tmp_path / 'search-diagnostic.json').read_text(encoding='utf-8'))
+    assert diagnostic['path'] == '/verify/home' and '?' not in diagnostic['path']
+
+
+def test_verification_redirect_has_actionable_message(tmp_path):
+    scan = tmp_path / 'collection_progress.json'
+    write_json(scan, {'complete': False, 'stop_reason': 'verification_redirect'})
+    with pytest.raises(collector.CollectionValidationError) as raised:
+        collector.validate_scan({}, tmp_path, [])
+    assert '首页能打开不代表检索验证已通过' in str(raised.value)
+
+
 def test_403_switches_once_to_headed_and_preserves_existing_fragments(tmp_path,monkeypatch):
     task,work=collector.prepare('测试方',root=tmp_path)
     saved=work/'papers/paper_0001.json';write_json(saved,{**item(1),'rank':1,'abstract':'已保存摘要'})

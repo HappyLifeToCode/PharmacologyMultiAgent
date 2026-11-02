@@ -233,7 +233,12 @@ def _input(herbs, formula, text, data):
         if found:
             name = found[0]
             segments = [part.strip() for part in re.split(r"[\n,，、;；]+", clean) if part.strip()]
-            if (any(normalise(part) in data["herbs"] for part in segments)
+            # Built-in compositions remain known when the local BATMAN table is absent.
+            known_herbs = set(data["herbs"])
+            for builtin in FORMULAS:
+                for canonical, candidates in formula_candidates(builtin):
+                    known_herbs.update(normalise(value) for value in [canonical, *candidates])
+            if (any(normalise(part) in known_herbs for part in segments)
                     or re.search(r"加减|加味|去掉|去除|加入|增加|添加|加[\u4e00-\u9fff]|减[\u4e00-\u9fff]", clean.replace(name, ""))):
                 raise ValueError("请单独输入一个方剂名；加减方请直接输入完整的药材组合")
             if re.search(r"(?:不用|不要|不是|排除)\s*" + re.escape(name), normalise(clean)):
