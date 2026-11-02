@@ -55,7 +55,7 @@
       <button type="button" id="jump-to-latest" class="jump-to-latest" aria-label="跳到最新消息" title="跳到最新消息" aria-controls="message-scroll" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>
       <p class="status-message" id="status-message" role="status"></p>
       <form class="composer" id="composer-form">
-        <div class="assistant-composer-options"><label class="sr-only" for="chat-mode">工作模式</label><select id="chat-mode"><option value="assistant">研究问答</option><option value="database">数据库查询</option></select><span id="mode-description">本地资料优先 · 答案附来源</span><label id="online-sources-label"><input id="online-sources" type="checkbox">联网资料</label></div>
+        <div class="assistant-composer-options"><label class="sr-only" for="chat-mode">工作模式</label><select id="chat-mode"><option value="assistant">研究问答</option><option value="database">数据库查询</option></select><span id="mode-description">本地资料优先 · 答案附来源</span><label class="sr-only" for="assistant-source-scope">资料范围</label><select id="assistant-source-scope"><option value="auto">按会话与问题</option><option value="cnki">仅 CNKI</option><option value="all">综合来源</option></select><label id="online-sources-label"><input id="online-sources" type="checkbox">联网资料</label></div>
         <label class="sr-only" for="query-direction">查询方向</label>
         <select id="query-direction" class="query-direction"><option value="auto">自动识别方向</option><option value="forward">方剂/药材 → 疾病</option><option value="reverse">疾病 → 药材</option></select>
         <label class="sr-only" for="chat-input">输入研究问题或继续追问</label>
@@ -108,9 +108,10 @@
 <script src="/assets/evidence-graph.js?v=20261022"></script>
 <script src="/assets/literature-flow.js?v=20261102-batches"></script>
 <script src="/assets/cnki-graph.js?v=20261029-source-graph"></script>
-<script src="/assets/cnki-literature.js?v=20261102-batches"></script>
+<script src="/assets/task-clock.js?v=20261102-cnki-dialogue"></script>
+<script src="/assets/cnki-literature.js?v=20261102-merged-batches"></script>
 <script src="/assets/assistant-markdown.js?v=20261102-markdown"></script>
-<script src="/assets/assistant-ui.js?v=20261102-markdown-network"></script>
+<script src="/assets/assistant-ui.js?v=20261102-cnki-dialogue"></script>
 <script src="/assets/chat.js?v=20261102-batches"></script>
 </body>
 </html>

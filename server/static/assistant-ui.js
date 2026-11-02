@@ -5,7 +5,7 @@ const AssistantUI = (() => {
   const loadingAnswers = new Set();
   let configuration = null;
   let editingProfileId = null;
-  const terminal = new Set(["succeeded", "failed", "cancelled", "timed_out", "interrupted"]);
+  const terminal = new Set(["succeeded", "failed", "cancelled", "timed_out", "interrupted", "needs_attention"]);
   const modes = { assistant: "研究问答", database: "数据库查询" };
   const nodes = (tag, cls, value) => element(tag, cls, value);
   function enabled() { return byId("chat-mode")?.value !== "database"; }
@@ -14,6 +14,7 @@ const AssistantUI = (() => {
     byId("query-direction").hidden = isAssistant;
     byId("choose-composition").hidden = isAssistant;
     byId("online-sources-label").hidden = !isAssistant;
+    byId("assistant-source-scope").hidden = !isAssistant;
     byId("chat-input").placeholder = isAssistant ? "提出研究问题，或继续追问已有证据…" : "输入方剂、药材或疾病，查询数据库关联…";
     byId("mode-description").textContent = isAssistant ? "本地资料优先 · 答案附来源" : "确定性查询 · 展开结果与图谱";
     try { localStorage.setItem("pharm.research.mode", byId("chat-mode").value); } catch {}
@@ -130,7 +131,7 @@ const AssistantUI = (() => {
     const session = currentSession() || createSession({ preserveNetwork: true });
     if (appState.busy.has(session.id)) return;
     const previous = latestResultMessage(session);
-    const body = { session_id: session.id, request_id: uid(), text, network: byId("online-sources").checked,
+    const body = { session_id: session.id, request_id: uid(), text, network: byId("online-sources").checked, source_scope: byId("assistant-source-scope").value,
       ...(previous?.runId ? { context_run_id: previous.runId } : {}) };
     session.messages.push({ id: uid(), role: "user", kind: "text", text });
     const reply = { id: uid(), role: "assistant", kind: "assistant_pending", jobId: body.request_id, text: "正在准备研究问答…", research: null };
@@ -185,12 +186,48 @@ const AssistantUI = (() => {
     try { await watch(session, reply); } finally { polling.delete(reply.jobId); }
   }
   function progress(content, session, reply) {
+    const data = reply.research || {};
+    const clock = nodes("p", "assistant-answer-meta"); clock.append(TaskClock.create(data.started_at || data.created_at, data.finished_at)); content.append(clock);
     content.append(nodes("p", "assistant-progress", reply.research?.phase || "正在准备研究问答…"));
     const events = reply.research?.events || [];
     const last = events[events.length - 1];
-    content.append(nodes("p", "reply-note", "已记录 " + events.length + " 个工具步骤" + (last?.summary ? " · " + last.summary : "") + "。本轮最多 3 分钟，可随时停止。"));
-    content.append(action("停止本轮", async () => {
+    content.append(nodes("p", "reply-note", "已记录 " + events.length + " 个工具步骤" + (last?.summary ? " · " + last.summary : "") + "。问答计算限 3 分钟；等待知网资料单独计时。"));
+    collectionPanel(content, session, reply);
+    content.append(action(data.cnki_pending ? "停止本轮回答（采集继续）" : "停止本轮", async () => {
       try { reply.research = await request("/api/assistant/runs/" + reply.jobId + "/cancel", {}); }
+      catch (error) { byId("status-message").textContent = error.message; }
+    }));
+  }
+  function collectionPanel(content, session, message) {
+    const data = message.research || {}, job = data.cnki_collection;
+    if (!data.cnki_pending) return;
+    const panel = nodes("section", "assistant-cnki-task"); content.append(panel);
+    panel.append(nodes("strong", "", "CNKI · " + data.cnki_pending.keyword));
+    if (job) {
+      const labels = { queued: "排队中", running: "运行中", succeeded: "已完成", failed_or_partial: "需要处理", interrupted: "已中断", cancelled: "已停止", cancelling: "正在停止" };
+      const phases = { collecting: "采集标题摘要", analysis_pending: "等待分析", extracting: "分析文献", completed: "完成" };
+      const clock = nodes("p", "reply-note"); clock.append(TaskClock.create(job.status === "queued" ? job.queued_at : job.started_at, job.finished_at, job.status === "queued" ? "排队用时" : "采集/分析本次用时")); panel.append(clock);
+      panel.append(nodes("p", "", (labels[job.status] || job.status) + " · " + (phases[job.phase] || job.phase || "") + " · 题录 " + job.paper_count + " · 摘要 " + job.abstract_count + " · 已分析 " + job.extracted_papers + " · 页数 " + job.pages_recorded));
+      if (job.error) panel.append(nodes("p", "assistant-warning", job.error));
+    }
+    const controls = nodes("div", "assistant-answer-actions"); panel.append(controls);
+    const invoke = async operation => {
+      try {
+        message.research = await request("/api/assistant/runs/" + message.jobId + "/cnki/" + operation, {});
+        if (operation === "resume") {
+          message.kind = "assistant_pending";
+          resume(session, message);
+        } else message.kind = "assistant_answer";
+        saveSessions(); render();
+      } catch (error) { byId("status-message").textContent = error.message; }
+    };
+    if (terminal.has(data.status) && data.status !== "succeeded") controls.append(action("继续采集并回答", () => invoke("resume")));
+    if (job && ["running", "queued", "cancelling"].includes(job.status)) {
+      controls.append(action("停止采集与回答", () => invoke("cancel")));
+      panel.append(nodes("p", "reply-note", "相同关键词可能被其他会话复用；停止采集会影响所有等待这个任务的会话。"));
+    }
+    if (data.status === "needs_attention" || job?.status === "interrupted") controls.append(action("打开登录/验证窗口", async () => {
+      try { const value = await request("/api/literature/browser/open", {}); byId("status-message").textContent = value.message || "请在专用窗口处理登录或验证，再继续采集。"; }
       catch (error) { byId("status-message").textContent = error.message; }
     }));
   }
@@ -238,12 +275,22 @@ const AssistantUI = (() => {
     }
     const data = message.research || {}, sources = data.sources || [], prefix = "source-" + message.id + "-";
     content.append(nodes("p", "assistant-answer-meta", (data.model || "模型") + " · " + (data.status === "succeeded" ? "回答完成" : "本轮未完成") + " · " + (data.network ? "允许联网资料" : "本地资料")));
+    const duration = nodes("p", "assistant-answer-meta"); duration.append(TaskClock.create(data.started_at || data.created_at, data.finished_at));
+    duration.append(document.createTextNode(data.source_scope === "cnki" ? " · 资料范围：仅 CNKI" : "")); content.append(duration);
+    collectionPanel(content, session, message);
     if (data.answer) prose(content, data.answer, sources, prefix);
     else content.append(nodes("p", "source-state", data.error || "尚无可用回答"));
     const oldUncitedNotice = "本轮回答没有引用已核验来源，请将其视为通用解释或待核实分析";
     const citationNotice = data.citation_notice || ((data.warnings || []).includes(oldUncitedNotice) ? "本轮未附来源引用。排版或整理可基于你提供的内容；研究事实仍需核对来源。" : "");
     for (const warning of data.warnings || []) if (warning !== oldUncitedNotice) content.append(nodes("p", "assistant-warning", warning));
     if (citationNotice) content.append(nodes("p", "reply-note", citationNotice));
+    if (data.cnki_result) {
+      const result = data.cnki_result;
+      const section = details("CNKI 全部关联候选（" + result.candidate_count + "）", content);
+      section.append(nodes("p", "reply-note", "程序整理的已保存文献关联，包含 " + result.paper_count + " 篇去重题录；不等于临床疗效或已核实适应症。"));
+      table(["文献中的疾病/药材/方剂", "全部关联篇数", "未标加减/联合篇数"], result.items.map(row => [row.names.join(" / "), row.paper_count, row.direct_paper_count]), section);
+      const link = nodes("a", "source-link", "下载完整文献明细 JSON"); link.href = "/api/assistant/runs/" + message.jobId + "/cnki-result"; link.setAttribute("download", ""); section.append(link);
+    }
     if (sources.length) {
       const list = details("证据来源（" + sources.length + "）", content); list.classList.add("assistant-sources");
       list.append(nodes("p", "reply-note", "包含本会话已取得的资料。来源存在不代表支持所有结论，需核对对应原句。"));

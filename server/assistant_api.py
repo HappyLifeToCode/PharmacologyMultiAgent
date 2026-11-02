@@ -2,7 +2,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from pharm.core.common import ROOT
+from pharm.core.common import ROOT, digest
+import re
 from pharm.chat import config, provider, engine
 from pharm import llm
 
@@ -84,6 +85,39 @@ async def cancel_dialogue(job_id: str, request: Request):
 @router.get("/assets/assistant-ui.js")
 def assistant_script():
     return FileResponse(ROOT / "server/static/assistant-ui.js", media_type="text/javascript")
+
+
+@router.post("/api/assistant/runs/{job_id}/cnki/{action}", status_code=202)
+async def cnki_action(job_id: str, action: str, request: Request):
+    if await body(request): raise HTTPException(400, "此操作不接受额外参数")
+    if action not in {"resume", "cancel"}: raise HTTPException(404, "未知知网操作")
+    try:
+        fn = engine.manager.resume_cnki if action == "resume" else engine.manager.cancel_cnki
+        return await fn(ROOT, job_id)
+    except FileNotFoundError: raise HTTPException(404, "问答或知网任务不存在")
+    except ValueError as exc: raise HTTPException(400, str(exc))
+    except RuntimeError as exc: raise HTTPException(409, str(exc))
+
+
+@router.get("/api/assistant/runs/{job_id}/cnki-result")
+def cnki_result(job_id: str):
+    try:
+        record = engine.manager.status(ROOT, job_id)
+        saved = record.get("cnki_result") or {}
+        sid = saved.get("snapshot_id", "")
+        if not re.fullmatch(r"[a-f0-9]{32}", sid): raise FileNotFoundError()
+        base = (ROOT / "local/assistant/cnki").resolve()
+        path = (base / job_id / (sid + ".json")).resolve()
+        if not path.is_relative_to(base): raise ValueError("文献路径无效")
+        if digest(path) != saved.get("sha256"): raise ValueError("文献快照校验失败")
+        return FileResponse(path, filename="cnki-literature-" + sid + ".json", media_type="application/json")
+    except FileNotFoundError: raise HTTPException(404, "文献结果尚未就绪")
+    except ValueError as exc: raise HTTPException(400, str(exc))
+
+
+@router.get("/assets/task-clock.js")
+def task_clock_script():
+    return FileResponse(ROOT / "server/static/task-clock.js", media_type="text/javascript")
 
 
 @router.get("/assets/assistant.css")

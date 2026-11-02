@@ -13,6 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from ..core.common import now
+from .cnki_bridge import permits_evidence
 
 
 def definition(name, description, properties, required):
@@ -25,12 +26,14 @@ LIMIT = {"type": "integer", "minimum": 1, "maximum": 5}
 DEFINITIONS = [
     definition("list_local_resources", "查看本地已保存的 CNKI 关键词和最近的研究归档，不联网。", {}, []),
     definition("search_local_literature", "检索本地 CNKI 标题摘要。query 用方剂、疾病等关键词，以空格分隔；返回的原句可作为引文，标题命中不代表疗效。", {"query": TEXT, "limit": LIMIT}, ["query"]),
+    definition("collect_cnki_literature", "CNKI 专用：输入一个明确方剂、药材或疾病关键词。已有文献直接汇总候选；缺少时启动知网正常网页全量标题摘要采集，已有题录则仅补分析。页面显示进度，完成后继续回答；只查CNKI时不改用其他来源。", {"keyword": {"type": "string", "minLength": 1, "maxLength": 150}, "kind": {"type": "string", "enum": ["formula", "herb", "disease"]}}, ["keyword", "kind"]),
     definition("search_online_literature", "联网查询 Europe PMC 文献及可用摘要。用精准中英文关键词；缺少摘要时不能推断研究结果。不会采集 CNKI。", {"query": TEXT, "limit": LIMIT}, ["query"]),
     definition("read_evidence", "读取已取得证据的完整可用文本，核对引文；不自动获取未收录全文。", {"evidence_id": TEXT}, ["evidence_id"]),
     definition("read_research", "读取已保存的正向/反向研究结果及部分来源证据。run_id 来自资源列表或用户当前结果。", {"run_id": TEXT}, ["run_id"]),
     definition("query_pharmacology", "用现有本地 BATMAN、Open Targets、Monarch 查询候选关联。方向 forward 为方剂/药材查疾病，reverse 为疾病查药材。缺数据或输入歧义返回说明，不猜组成、不下载数据；最多返回5项。", {"direction": {"type": "string", "enum": ["forward", "reverse"]}, "text": TEXT}, ["direction", "text"]),
 ]
 LABELS = {"list_local_resources": "查看本地资料", "search_local_literature": "检索本地文献",
+          "collect_cnki_literature": "获取 CNKI 文献与候选",
           "search_online_literature": "检索联网文献", "read_evidence": "核对证据原文",
           "read_research": "读取研究结果", "query_pharmacology": "查询靶点关联"}
 
@@ -58,6 +61,16 @@ def validate(name, args):
             raise ValueError("工具文字参数无效")
     if name == "query_pharmacology" and args["direction"] not in {"forward", "reverse"}:
         raise ValueError("查询方向无效")
+    if name == "collect_cnki_literature" and args["kind"] not in {"formula", "herb", "disease"}:
+        raise ValueError("知网关键词类型无效")
+
+
+def permitted_tool(name, scope):
+    return scope != "cnki" or name in {"list_local_resources", "search_local_literature", "collect_cnki_literature", "read_evidence"}
+
+
+def definitions(scope):
+    return [d for d in DEFINITIONS if permitted_tool(d["function"]["name"], scope)]
 
 
 def add_evidence(state, *, title, text, source, url=None, metadata=None):
@@ -77,10 +90,12 @@ def add_evidence(state, *, title, text, source, url=None, metadata=None):
             "excerpt_truncated": len(full) > 2400, "full_available_via": "read_evidence"}
 
 
-def local_resources(root):
+def local_resources(root, cnki_only=False):
     from ..literature import cnki, dataset
     directory = cnki.data_directory(root)
     listing = dataset.manifest(directory, verify=False) if (directory / "manifest.json").exists() else {"corpora": []}
+    if cnki_only:
+        return {"cnki_corpora": [{"keyword": e["keyword"], "papers": e.get("papers")} for e in listing["corpora"][:100]], "scope": "仅本地 CNKI；未命中时可使用 collect_cnki_literature"}
     paths = []
     for direction in ("forward", "reverse"):
         paths.extend((Path(root) / "local/agent" / direction).glob(direction + "_*/result.json"))
@@ -94,7 +109,7 @@ def search_local(root, args, state):
     from ..literature import cnki, dataset
     directory = cnki.data_directory(root)
     if not (directory / "manifest.json").is_file():
-        return {"status": "missing_data", "message": "本机尚未导入 CNKI 文献包，可启用联网文献检索，或先在已有文献流程完成采集。"}
+        return {"status": "missing_data", "message": "本地没有 CNKI 文献包。可调用 collect_cnki_literature 获取指定关键词的知网文献；需要联网权限，不要自动替换为其他来源。"}
     listing = dataset.manifest(directory, verify=False)
     tokens = [t.casefold() for t in re.split(r"\s+", args["query"].strip()) if t]
     corpora = sorted(listing["corpora"], key=lambda e: -sum(t in e["keyword"].casefold() for t in tokens))
@@ -176,8 +191,13 @@ def read_research(root, run_id, state):
 
 async def execute(name, args, state, root, network):
     validate(name, args)
+    scope = state.get("source_scope", "all")
+    if not permitted_tool(name, scope):
+        return {"status": "disabled", "message": "本轮仅允许 CNKI，不执行其他数据库或文献源查询"}
     if name == "list_local_resources":
-        return await asyncio.to_thread(local_resources, root)
+        result = await asyncio.to_thread(local_resources, root, scope == "cnki")
+        if scope == "cnki": result.pop("research_runs", None)
+        return result
     if name == "search_local_literature":
         return await asyncio.to_thread(search_local, root, args, state)
     if name == "search_online_literature":
@@ -185,8 +205,10 @@ async def execute(name, args, state, root, network):
             return {"status": "disabled", "message": "本轮未开启联网资料检索，请使用本地资料或告知用户可打开联网开关"}
         return await search_online(args, state)
     if name == "read_evidence":
-        row = next((e for e in state["evidence"] if e["id"] == args["evidence_id"]), None)
+        row = next((e for e in state["evidence"] if e["id"] == args["evidence_id"] and permits_evidence(e, scope)), None)
         return {"status": "ok", "record": row} if row else {"status": "not_found", "message": "该证据编号不存在，不可引用"}
+    if name == "collect_cnki_literature":
+        return {"status": "requires_context", "message": "知网采集需要由问答任务关联后执行"}
     if name == "read_research":
         return await asyncio.to_thread(read_research, root, args["run_id"], state)
     from ..batman import local, formula_catalog

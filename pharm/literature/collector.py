@@ -422,7 +422,7 @@ def extract_papers(papers, work, runner, *, batch_size=1, indexed_quotes=False, 
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
 
 
-def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, before_analysis=None):
+def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, before_analysis=None, model_selection=None):
     root, work = Path(root).resolve(), Path(work).resolve()
     if not work.is_relative_to(root / "local/agent/cnki-collection"):
         raise ValueError("任务目录不属于本项目")
@@ -446,7 +446,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
             if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
             # A rescan may reuse only existing extractions and need no model at all.
             # Snapshot the choice now, but require a usable key only if a model is called.
-            selection = llm.capture(root, required=False) if production_runner and extract else None
+            selection = (model_selection if model_selection is not None else llm.capture(root, required=False)) if production_runner and extract else None
             binding = llm.identity(selection) if selection else {"runtime": "test_runner" if not production_runner else "not_requested", "model": None}
             model = binding.get("model") or None
             task.update(model=model, llm=binding)

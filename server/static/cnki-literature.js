@@ -210,11 +210,15 @@ const CnkiLiterature = (() => {
       if (state.state === "ready" && state.literature) { accept(state.literature); return; }
       const job = state.collection;
       const box = node("div", null, "cnki-progress"); box.setAttribute("role", "status"); root.append(box);
-      const start = Date.parse(job?.started_at || job?.created_at || state.created_at || "");
+      const startValue = job?.status === "queued" ? (job.queued_at || job.created_at) : (job?.started_at || state.created_at);
+      const start = Date.parse(startValue || "");
       const end = Date.parse(job?.finished_at || "") || Date.now();
       if (Number.isFinite(start) && !["queued", "cancelling", "cancelled"].includes(job?.status)) {
         const elapsed = Math.max(0, Math.floor((end - start) / 1000));
-        box.append(node("p", "本次运行用时 " + Math.floor(elapsed / 60) + "分" + elapsed % 60 + "秒", "cnki-progress-time"));
+        const timing = node("p", null, "cnki-progress-time");
+        if (typeof TaskClock !== "undefined") timing.append(TaskClock.create(startValue, job?.finished_at, job?.status === "queued" ? "排队用时" : "本次运行用时"));
+        else timing.textContent = "本次运行用时 " + Math.floor(elapsed / 60) + "分" + elapsed % 60 + "秒";
+        box.append(timing);
       }
       if (job?.status === "queued") box.append(node("p", "排队中，尚未开始执行", "cnki-progress-time"));
       let label = "正在核对本地文献…";
