@@ -80,10 +80,10 @@
 <dialog id="model-dialog" class="settings-dialog model-dialog" aria-labelledby="model-dialog-title">
   <form id="model-form" autocomplete="off">
     <div class="dialog-heading"><div><p class="model-kicker">研究问答设置</p><h2 id="model-dialog-title">连接你的模型</h2></div><button type="button" id="close-model-settings" class="icon-button" aria-label="关闭模型设置"><img src="/assets/icons/x.svg" alt=""></button></div>
-    <p class="model-intro">使用支持工具调用的 OpenAI 兼容接口。模型负责理解与答疑，数据查询和证据记录由本机工具执行。</p>
-    <label>服务地址参考<select id="model-preset"><option value="custom">自定义 / 保留当前设置</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问兼容接口</option><option value="local">本机 Ollama</option></select></label>
+    <p class="model-intro">支持 Chat Completions、Responses 和 Anthropic Messages 接口。模型负责理解与答疑，数据查询和证据记录由本机工具执行。</p>
+    <label>服务地址参考<select id="model-preset"><option value="custom">自定义 / 保留当前设置</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic / Claude</option><option value="kimi">Kimi Code（Anthropic 兼容）</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问兼容接口</option><option value="local">本机 Ollama</option></select></label>
     <label>API 地址<input id="model-base-url" type="url" required maxlength="500" placeholder="https://你的服务地址/v1"><small>填写服务商的 Base URL，例如以 /v1 结尾的地址。</small></label>
-    <label>接口格式<select id="model-api-style"><option value="chat_completions">Chat Completions（常见兼容服务）</option><option value="responses">Responses（OpenAI 新模型）</option></select><small>按服务商支持的格式选择；部分 OpenAI 新模型的工具调用需要 Responses。</small></label>
+    <label>接口格式<select id="model-api-style"><option value="chat_completions">Chat Completions（常见兼容服务）</option><option value="responses">Responses（OpenAI 新模型）</option><option value="anthropic">Anthropic Messages（Claude / Kimi Code）</option></select><small>Kimi Code 的 /coding 地址选择 Anthropic Messages；模型名称本身不会决定接口格式。</small></label>
     <label>模型名称<input id="model-name" required maxlength="150" placeholder="填写服务商提供的模型 ID"></label>
     <label>API Key<input id="model-api-key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="填写服务商提供的 API Key"><small>已配置时留空则保留。切换 API 地址时需重新填写；本机无鉴权模型可留空。</small></label>
     <label>密钥保存方式<select id="model-key-storage"><option value="session">仅本次服务运行期间保存</option><option value="protected" id="model-protected-option">在这台电脑加密保存（Windows）</option></select></label>
@@ -102,7 +102,7 @@
 <script src="/assets/literature-flow.js?v=20261026-auto-literature"></script>
 <script src="/assets/cnki-graph.js?v=20261029-source-graph"></script>
 <script src="/assets/cnki-literature.js?v=20261029-source-graph"></script>
-<script src="/assets/assistant-ui.js?v=20261102-dialogue"></script>
+<script src="/assets/assistant-ui.js?v=20261102-anthropic"></script>
 <script src="/assets/chat.js?v=20261102-dialogue"></script>
 </body>
 </html>

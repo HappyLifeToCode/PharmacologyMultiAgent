@@ -76,8 +76,8 @@ const AssistantUI = (() => {
       catch (error) { byId("model-feedback").textContent = error.message; }
     });
     byId("model-preset").addEventListener("change", event => {
-      const urls = { openai: "https://api.openai.com/v1", deepseek: "https://api.deepseek.com/v1", qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1", local: "http://127.0.0.1:11434/v1" };
-      if (urls[event.target.value]) { byId("model-base-url").value = urls[event.target.value]; byId("model-api-style").value = event.target.value === "openai" ? "responses" : "chat_completions"; byId("model-name").value = ""; byId("model-api-key").value = ""; byId("model-feedback").textContent = "已切换地址，请填写对应服务商的模型和密钥；切换地址不会复用旧密钥。"; }
+      const urls = { openai: "https://api.openai.com/v1", deepseek: "https://api.deepseek.com/v1", qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1", local: "http://127.0.0.1:11434/v1", anthropic: "https://api.anthropic.com", kimi: "https://api.kimi.com/coding" };
+      if (urls[event.target.value]) { byId("model-base-url").value = urls[event.target.value]; byId("model-api-style").value = event.target.value === "openai" ? "responses" : ["anthropic", "kimi"].includes(event.target.value) ? "anthropic" : "chat_completions"; byId("model-name").value = ""; byId("model-api-key").value = ""; byId("model-feedback").textContent = "已切换地址，请填写对应服务商的模型和密钥；切换地址不会复用旧密钥。"; }
     });
     try { configuration = await request("/api/assistant/config"); configStatus(); }
     catch { byId("model-ready-note").textContent = "模型设置接口暂不可用，请确认已加载新版服务。"; }

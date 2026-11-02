@@ -62,8 +62,10 @@ def validate(body):
         base = base[:-len("/chat/completions")]
     elif base.endswith("/responses"):
         base = base[:-len("/responses")]
+    elif value["api_style"] == "anthropic" and base.endswith("/messages"):
+        base = base[:-len("/messages")]
     value["base_url"] = base
-    if value["api_style"] not in {"chat_completions", "responses"}:
+    if value["api_style"] not in {"chat_completions", "responses", "anthropic"}:
         raise ValueError("接口格式无效")
     if not isinstance(value["model"], str) or not value["model"].strip() or len(value["model"]) > 150:
         raise ValueError("请填写服务商提供的模型名称")
@@ -100,6 +102,8 @@ def read(root, *, secret=False):
 
 def save(root, body):
     with _lock:
+        path = settings_path(root)
+        original = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         prior = read(root, secret=True)
         value = validate({**{k: prior[k] for k in DEFAULT}, **body})
         token = body.get("api_key") or prior.get("api_key", "")
@@ -108,9 +112,17 @@ def save(root, body):
         # Never forward a previous provider's credential to a newly entered endpoint.
         if value["base_url"] != prior["base_url"] and not body.get("api_key"):
             token = ""
-        path = settings_path(root)
         stored = dict(value)
-        if token and value["storage"] == "protected":
+        preserve_cipher = (original.get("protected_key") and value["storage"] == "protected"
+                           and value["base_url"] == prior["base_url"]
+                           and not body.get("api_key") and body.get("clear_key") is not True)
+        if preserve_cipher:
+            # A protocol/model edit does not need decryption or re-encryption.
+            stored["protected_key"] = original["protected_key"]
+        elif (prior.get("key_error") and value["base_url"] == prior["base_url"]
+              and not body.get("api_key") and body.get("clear_key") is not True):
+            raise ValueError("原密钥无法解密，已保留原配置；请重新输入密钥后再修改保存方式")
+        elif token and value["storage"] == "protected":
             stored["protected_key"] = base64.b64encode(dpapi(token.encode())).decode()
         write_json(path, stored)
         _session_keys[str(path.resolve())] = token if value["storage"] == "session" else ""

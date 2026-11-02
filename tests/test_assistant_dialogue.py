@@ -99,3 +99,58 @@ def test_provider_never_echoes_sensitive_error_response():
     with pytest.raises(provider.ModelError) as exc:
         asyncio.run(provider.complete(setting, [{"role": "user", "content": "test"}], transport=transport))
     assert "fake-secret" not in str(exc.value)
+
+
+@pytest.mark.parametrize("base, expected", [
+    ("https://api.kimi.com/coding", "https://api.kimi.com/coding/v1/messages"),
+    ("https://api.kimi.com/coding/v1", "https://api.kimi.com/coding/v1/messages"),
+    ("https://api.anthropic.com", "https://api.anthropic.com/v1/messages"),
+    ("https://api.anthropic.com/v1/messages", "https://api.anthropic.com/v1/messages"),
+])
+def test_anthropic_endpoint_paths(base, expected):
+    c = config.validate({"base_url": base, "model": "fixture", "api_style": "anthropic"})
+    assert provider.endpoint_url(c) == expected
+
+
+def test_anthropic_protocol_parallel_tools_and_thinking_replay():
+    thinking = {"type": "thinking", "thinking": "synthetic private reasoning", "signature": "fixture-signature"}
+    uses = [{"type": "tool_use", "id": "c" + str(i), "name": "list_local_resources", "input": {}} for i in (1, 2)]
+    schemas = [tools.DEFINITIONS[0]]
+    c = {**config.DEFAULT, "base_url": "https://api.kimi.com/coding", "model": "fixture", "api_style": "anthropic", "configured": True, "api_key": "fake-secret"}
+    requests = []
+    def handle(request):
+        payload = json.loads(request.content); requests.append(payload)
+        assert str(request.url) == "https://api.kimi.com/coding/v1/messages"
+        assert request.headers["x-api-key"] == "fake-secret"
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        assert all(m["role"] != "system" for m in payload["messages"])
+        if len(requests) == 1:
+            assert payload["tools"][0]["input_schema"]["type"] == "object"
+            return httpx.Response(200, json={"content": [thinking, *uses], "stop_reason": "tool_use"})
+        assert payload["messages"][-2]["content"] == [thinking, *uses]
+        assert [b["tool_use_id"] for b in payload["messages"][-1]["content"]] == ["c1", "c2"]
+        assert payload["tool_choice"] == {"type": "none"}
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "工程样本结果"}], "stop_reason": "end_turn"})
+    async def scenario():
+        messages = [{"role": "system", "content": "系统指令"}, {"role": "user", "content": "工程问题"}]
+        transport = httpx.MockTransport(handle)
+        first = await provider.complete(c, messages, schemas, transport=transport)
+        assert first["content"] == ""  # Thinking must not become the user-visible answer.
+        messages.append({"role": "assistant", "content": "", "tool_calls": first["tool_calls"], "_anthropic_content": first["anthropic_content"], "_anthropic_tools": first["anthropic_tools"]})
+        messages.extend({"role": "tool", "tool_call_id": "c" + str(i), "content": "{}"} for i in (1, 2))
+        last = await provider.complete(c, messages, transport=transport)
+        assert last["content"] == "工程样本结果"
+    asyncio.run(scenario())
+
+
+def test_protocol_change_preserves_unreadable_encrypted_key(tmp_path):
+    original = {**config.DEFAULT, "model": "fixture", "storage": "protected", "protected_key": "opaque-ciphertext-fixture"}
+    write_json(config.settings_path(tmp_path), original)
+    public = config.save(tmp_path, {"api_style": "anthropic"})
+    stored = json.loads(config.settings_path(tmp_path).read_text(encoding="utf-8"))
+    assert stored["protected_key"] == original["protected_key"]
+    assert stored["api_style"] == "anthropic" and public["key_error"]
+    before = config.settings_path(tmp_path).read_bytes()
+    with pytest.raises(ValueError, match="已保留原配置"):
+        config.save(tmp_path, {"storage": "session"})
+    assert config.settings_path(tmp_path).read_bytes() == before

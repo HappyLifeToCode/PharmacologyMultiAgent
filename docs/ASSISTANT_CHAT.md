@@ -1,5 +1,22 @@
 # 研究问答与模型 API
 
+## Anthropic 与 Kimi Code（2026-11-02 补充）
+
+模型设置新增 Anthropic Messages，发送 `anthropic-version: 2023-06-01` 和 `x-api-key`，支持顶层 system、tool_use/tool_result、多工具结果合并及本轮签名 thinking 块回传；内部推理不展示为回答。到预算上限时保留工具定义但指定 tool_choice=none，要求只综合已有结果。
+
+| 服务与格式 | Base URL | 实际请求路径 |
+| --- | --- | --- |
+| Kimi Code / Anthropic Messages | `https://api.kimi.com/coding` | `/coding/v1/messages` |
+| Kimi Code / Chat Completions | `https://api.kimi.com/coding/v1` | `/coding/v1/chat/completions` |
+| Kimi Code / Responses | `https://api.kimi.com/coding/v1` | `/coding/v1/responses` |
+| Anthropic / Claude | `https://api.anthropic.com` 或 `https://api.anthropic.com/v1` | `/v1/messages` |
+
+Anthropic 模式也接受以 `/v1/messages` 结尾的完整端点，不重复拼接路径。Kimi 模型和 Anthropic 协议是两个概念；模型名称不会自动决定协议。404 可能是端点路径或模型问题，不能直接归因于密钥错误。Kimi 官方格式及模型列表已核对：[Kimi Code API 文档](https://www.kimi.com/code/docs/en/)。保留用户实际模型 ID，不擅自换成其他模型；不伪装第三方客户端身份绕过服务商访问限制。
+
+仅修改模型名、协议或执行限制时，原 DPAPI 密文字节保持原样。若原密钥解密失败，保留密文并显示错误；无法解密时修改保存方式会拒绝，不静默覆盖为空。显式清除密钥、填写新密钥或切换 API 地址仍按原规则处理。
+
+本次已做隔离的路径、请求头、工具结果与签名块回传检查，新增回归用例；未完成真实 Kimi 连接，也未运行完整回归。设置修改后需用户重启服务刷新页面；未自动重启用户服务。若界面提示未配置密钥，应在界面重新填写，不在聊天中发送密钥。
+
 更新：2026-11-02。首页增加由 LLM 理解问题、选择工具、依据真实返回资料答疑的最小闭环。原有双向数据库查询、方剂选择、文献面板、知识图谱和研究工作台保留。
 
 ## 页面使用

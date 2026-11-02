@@ -140,6 +140,8 @@ class ResearchManager:
                         raise provider.ModelError("模型返回了无效的工具调用列表")
                     assistant = {"role": "assistant", "content": response["content"] or None, "tool_calls": calls}
                     if response.get("response_items"): assistant["_response_items"] = response["response_items"]
+                    if response.get("anthropic_content"): assistant["_anthropic_content"] = response["anthropic_content"]
+                    if response.get("anthropic_tools"): assistant["_anthropic_tools"] = response["anthropic_tools"]
                     if response.get("reasoning_content") is not None: assistant["reasoning_content"] = response["reasoning_content"]
                     messages.append(assistant)
                     for call in calls:
