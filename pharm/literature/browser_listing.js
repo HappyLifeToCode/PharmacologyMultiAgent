@@ -27,5 +27,7 @@ function cnkiListingSnapshot() {
     .find((element) => (/下一页/.test(element.innerText) || element.id === "Page_next_top" || element.id === "PageNext")
       && element.checkVisibility() && !element.classList.contains("disabled") && element.getAttribute("aria-disabled") !== "true");
   return { total_results: total, number, has_next: Boolean(next), items, count_text: raw,
+    page_size: Number(document.querySelector('#perPageDiv .sort-default span')?.innerText?.trim()) || null,
+    accessible_pages: Number(countRoot?.querySelector('.countPageMark')?.getAttribute('data-pagenum')) || null,
     visible_count_values: counts.map((item) => item.total) };
 }

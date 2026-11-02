@@ -28,7 +28,7 @@ const LiteratureFlow = (() => {
     } finally { clearTimeout(timeout); }
   }
 
-  function create(runId, request = api) {
+  function create(runId, request = api, selection) {
     const direction = runId.startsWith("reverse_") ? "reverse" : "forward";
     const path = "/api/agent/" + direction + "/" + encodeURIComponent(runId) + "/literature/flow";
     const listeners = new Set();
@@ -60,7 +60,7 @@ const LiteratureFlow = (() => {
           }
           mayStart = false;
           state = { ...state, state: "starting" }; emit();
-          state = await request(path + "/resolve", { enabled: true });
+          state = await request(path + "/resolve", { enabled: true, ...(selection ? { selection } : {}) });
         }
       });
     }
@@ -86,11 +86,12 @@ const LiteratureFlow = (() => {
   }
   function newQueryEnabled(value) { return value !== false; }
   function archivedQueryEnabled(value) { return value === true; }
-  function get(runId) {
-    if (!controllers.has(runId)) controllers.set(runId, create(runId));
+  function get(runId, selection) {
+    if (!controllers.has(runId)) controllers.set(runId, create(runId, api, selection));
     return controllers.get(runId);
   }
-  return { get, create, newQueryEnabled, archivedQueryEnabled };
+  function selection(value) { return value === "quick-date" || value === "quick-relevance" ? { mode: "quick", order: value === "quick-date" ? "date" : "relevance", limit: 6000 } : { mode: "all", order: "relevance", limit: null }; }
+  return { get, create, newQueryEnabled, archivedQueryEnabled, selection };
 })();
 
 if (typeof module !== "undefined") module.exports = LiteratureFlow;

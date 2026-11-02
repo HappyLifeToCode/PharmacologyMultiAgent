@@ -118,3 +118,22 @@ test('new queries default to automatic literature while archived results require
   assert.equal(archivedQueryEnabled(false), false);
   assert.equal(archivedQueryEnabled(true), true);
 });
+
+test('quick selection is sent only when creating a flow and remains frozen on resume', async () => {
+  const { selection } = require('../server/static/literature-flow.js');
+  assert.deepEqual(selection(), { mode: 'all', order: 'relevance', limit: null });
+  const chosen = selection('quick-date'), calls = [];
+  let state = { state: 'not_started' };
+  const controller = create('forward_quick', async (path, body) => {
+    calls.push({ path, body });
+    if (body) state = { state: 'failed' };
+    return state;
+  }, chosen);
+  const stop = controller.subscribe(() => {});
+  try {
+    await controller.refresh();
+    assert.deepEqual(calls.find(c => c.body).body, { enabled: true, selection: chosen });
+    await controller.resume();
+    assert.deepEqual(calls.at(-1).body, {});
+  } finally { stop(); }
+});

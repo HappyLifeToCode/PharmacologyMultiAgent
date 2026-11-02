@@ -120,6 +120,9 @@ function createSession(options = {}) {
   return session;
 }
 
+function cnkiScope() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").cnki_scope || "all"; } catch { return "all"; }
+}
 function cnkiSetting() {
   try { return LiteratureFlow.newQueryEnabled(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").cnki_enabled); }
   catch { return LiteratureFlow.newQueryEnabled(); }
@@ -397,7 +400,7 @@ function renderResult(result, message, content, sessionId) {
 
 function mountChatLiterature(message, content) {
   CnkiLiterature.mount(content, message.runId, {
-    enabled: LiteratureFlow.archivedQueryEnabled(message.cnkiEnabled), snapshot: message.cnkiSnapshot,
+    selection: message.cnkiSelection, enabled: LiteratureFlow.archivedQueryEnabled(message.cnkiEnabled), snapshot: message.cnkiSnapshot,
     onChange: ({ enabled, snapshot }) => { message.cnkiEnabled = enabled; message.cnkiSnapshot = snapshot; saveSessions(); },
     beforeUpdate: rememberConversationPosition, afterUpdate: restoreConversationPosition,
   });
@@ -640,6 +643,7 @@ async function submitMessage(suppliedText, context) {
         const body = prepared.body;
         reply.direction = prepared.direction;
         reply.cnkiEnabled = cnkiSetting();
+        reply.cnkiSelection = LiteratureFlow.selection(cnkiScope());
         reply.kind = "pending";
         reply.queryBody = body;
         reply.queryText = text;
@@ -701,6 +705,7 @@ function openSettings() {
   byId("setting-top-k").value = values.top_k;
   byId("setting-threshold").value = values.batman_threshold;
   byId("setting-cnki").checked = cnkiSetting();
+  byId("setting-cnki-scope").value = cnkiScope();
   byId("setting-network-default").checked = assistantNetworkDefault();
   byId("settings-dialog").showModal();
 }
@@ -742,7 +747,7 @@ async function bootChat() {
   byId("close-settings").addEventListener("click", () => byId("settings-dialog").close());
   byId("settings-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    const values = { top_k: Number(byId("setting-top-k").value), batman_threshold: Number(byId("setting-threshold").value), cnki_enabled: byId("setting-cnki").checked,
+    const values = { top_k: Number(byId("setting-top-k").value), batman_threshold: Number(byId("setting-threshold").value), cnki_enabled: byId("setting-cnki").checked, cnki_scope: byId("setting-cnki-scope").value,
       assistant_network_default: byId("setting-network-default").checked };
     if (!Number.isInteger(values.top_k) || values.top_k < 1 || values.top_k > 100 || values.batman_threshold < 0 || values.batman_threshold > 1) return;
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(values)); }

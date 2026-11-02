@@ -42,6 +42,9 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
     for paper in stock: by_title.setdefault(cnki.normalise(paper["title"]), []).append(paper)
     next_rank = max((p["rank"] for p in stock), default=0) + 1
     scan = {"keyword": task["keyword"], "snapshot_version": 2, "total_results": None, "complete": False, "stop_reason": "running", "pages": [], "browser_engine": "playwright"}
+    if getattr(site, "inventory_digest", None):
+        scan.update(inventory_sha256=site.inventory_digest, inventory_frozen_at=site.data["frozen_at"],
+                    inventory_count_discrepancies=site.data.get("count_discrepancies", []), collection_stage="abstracts")
     old_path = work / "collection_progress.json"
     old = json.loads(old_path.read_text(encoding="utf-8")) if old_path.is_file() else {}
     if old:
@@ -86,6 +89,8 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
             scan["total_results"] = total
             write_json(work / "meta.json", {"keyword": task["keyword"], "total_results": total, "sort": "中国知网默认相关度排序", "collected_at": now()})
             page = {"number": number, "total_results": total, "has_next": listing["has_next"], "items": []}
+            if scan.get("inventory_sha256"):
+                page["observed_listing_total_results"] = listing["observed_total_results"]
             scan["pages"].append(page)
             save()
             for offset, item in enumerate(listing["items"]):
@@ -295,7 +300,7 @@ class CnkiSite:
                          and data.get("number") == self.expected_page
                          and (bool(data.get("items")) or data["total_results"] == 0))
                 if ready and data == previous:
-                    return {key: data[key] for key in ("total_results", "number", "has_next", "items")}
+                    return {key: data.get(key) for key in ("total_results", "number", "has_next", "items", "page_size", "accessible_pages")}
                 previous = data if ready else None
             except Error:
                 if self.page.is_closed(): raise PageBlocked("search_page_closed")
@@ -320,6 +325,86 @@ class CnkiSite:
 
     def refresh(self, keyword, number):
         self.search(keyword)
+        for page_number in range(2, number + 1): self.next_page(page_number)
+        return self.listing()
+
+    def set_page_size(self, size=50):
+        if size != 50: raise ValueError("采集仅支持每页50条")
+        control = self.page.locator('#perPageDiv .sort-default')
+        control.wait_for(timeout=15000)
+        if control.inner_text().strip() != '50':
+            control.click()
+            self.page.locator('#perPageDiv li[data-val="50"]:visible').click()
+        self.expected_page = 1
+        self.page.wait_for_function("() => document.querySelector('#perPageDiv .sort-default span')?.innerText.trim()==='50'", timeout=15000)
+        self.page.wait_for_function("() => {" + self.listing_reader + "; const s=cnkiListingSnapshot();return s.page_size===50 && s.number===1 && s.total_results!==null && s.items.length===Math.min(50,s.total_results);}", timeout=15000)
+        value = self.listing()
+        if value.get('page_size') != 50 or len(value['items']) != min(50, value['total_results']):
+            raise PageBlocked('page_size_not_applied')
+        return value
+
+    def open_scope(self, keyword, filters=(), order="relevance"):
+        self.search(keyword)
+        for spec in filters:
+            if spec['field'] == 'resource':
+                self._resource_link(spec['value']).click()
+            elif spec['field'] == 'year':
+                self._year_rows()
+                self.page.locator('dl[groupid="YE"] dd li a:visible').filter(has_text=re.compile('^' + re.escape(spec['label']) + '$')).click()
+            else: raise PageBlocked('partition_unsupported')
+            self.expected_page = 1
+            self.page.wait_for_timeout(500)
+            self.listing()
+        order_id = 'PT' if order == 'date' else 'FFD'
+        sort_control = self.page.locator('#orderList #' + order_id)
+        for _ in range(2):
+            classes = (sort_control.get_attribute('class') or '').split()
+            if 'cur' in classes and 'DESC' in classes: break
+            sort_control.click()
+            self.page.wait_for_timeout(300)
+        if not {'cur', 'DESC'}.issubset(set((sort_control.get_attribute('class') or '').split())):
+            raise PageBlocked('partition_unsupported')
+        self.expected_page = 1
+        self.page.wait_for_timeout(500)
+        return self.set_page_size()
+
+    def _resource_link(self, identifier):
+        if not re.fullmatch(r'[A-Za-z0-9]+', identifier): raise PageBlocked('partition_unsupported')
+        link = self.page.locator('a[name="classify"][classid="' + identifier + '"]:visible')
+        if not link.count() and self.page.locator('#more:visible').count():
+            self.page.locator('#more:visible').click()
+            self.page.wait_for_timeout(300)
+        for _ in range(4):
+            if link.count(): return link.first
+            next_button = self.page.locator('.doctype-menus .btn-next:visible:not(.disabled)')
+            if not next_button.count(): break
+            next_button.click()
+            self.page.wait_for_timeout(200)
+        raise PageBlocked('partition_unsupported')
+
+    def _year_rows(self):
+        group = self.page.locator('dl[groupid="YE"]')
+        if not group.locator('dd li').first.is_visible(): group.locator('dt b').click()
+        group.locator('dd li').first.wait_for(timeout=15000)
+        if group.locator('dd li:not(:visible)').count():
+            group.locator('dd .resultlist > a.btn').click()
+        return group
+
+    def partition_options(self, total, filters):
+        used = {item['field'] for item in filters}
+        if 'resource' not in used:
+            choices = self.page.evaluate("""() => [...document.querySelectorAll('.doctype-menus > li > a[name="classify"],.doctype-menus > .is-bottom-list > li > a[name="classify"]')].map(e=>({field:'resource',value:e.getAttribute('classid'),label:e.querySelector('span')?.textContent.trim(),count:Number(e.querySelector('em')?.textContent.replaceAll(',',''))})).filter(x=>x.count>0)""")
+            if len(choices) >= 2 and all(item['count'] < total for item in choices) and sum(item['count'] for item in choices) == total:
+                return choices
+        if 'year' not in used:
+            group = self._year_rows()
+            choices = group.locator('dd li:visible').evaluate_all("""rows => rows.map(e=>({field:'year',value:e.querySelector('input')?.value,label:e.querySelector('a')?.innerText.trim(),count:Number(e.querySelector('span')?.innerText.replace(/[^0-9]/g,''))})).filter(x=>x.count>0)""")
+            if len(choices) >= 2 and all(item['count'] < total for item in choices) and sum(item['count'] for item in choices) == total:
+                return choices
+        raise PageBlocked('partition_coverage_unavailable')
+
+    def refresh_scope(self, keyword, filters, number, order="relevance"):
+        self.open_scope(keyword, filters, order)
         for page_number in range(2, number + 1): self.next_page(page_number)
         return self.listing()
 
@@ -369,7 +454,11 @@ def collect_in_mode(task, work, *, root, mode, cancel, timeout):
         page = context.new_page()
         site = CnkiSite(context, page, work, root=root, cancel=cancel, timeout=timeout)
         keep = None
-        try: return collect_pages(task, work, site, cancel=cancel)
+        try:
+            if task.get("collection_mode") == "all":
+                from . import inventory
+                return inventory.collect(task, work, site, cancel=cancel)
+            return collect_pages(task, work, site, cancel=cancel)
         except PageBlocked as exc:
             if mode == "interactive" and exc.reason in {"captcha", "login_required", "http_403", "search_results_unavailable"}:
                 keep = getattr(site, "blocked_page", None)

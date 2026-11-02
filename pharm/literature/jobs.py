@@ -58,11 +58,15 @@ class CollectionManager:
         scan, meta = read(work / "collection_progress.json", {}), read(work / "meta.json", {})
         if not isinstance(scan, dict): scan = {}
         if not isinstance(meta, dict): meta = {}
+        listing = read(work / "listing_progress.json", {})
+        if not isinstance(listing, dict): listing = {}
+        frozen = (work / "listing_inventory.json").is_file()
+        if listing and not frozen: scan = listing
         pages = scan.get("pages", []) if isinstance(scan, dict) else []
         extracted = len(list((work / "extracted").glob("paper_*.json")))
         phase = task.get("pipeline_phase") or ("extracting" if task.get("collection_mode") == "local_analysis" or extracted or (scan.get("complete") and running) else "collecting")
         failure_code, error = task.get("failure_code"), task.get("error")
-        if state == "failed_or_partial" and failure_code == "cnki_page_unavailable" and scan.get("complete") is False and scan.get("stop_reason") in {"result_total_changed", "result_total_unreadable"}:
+        if state == "failed_or_partial" and failure_code in {"cnki_page_unavailable", "cnki_result_total_changed"} and scan.get("complete") is False and scan.get("stop_reason") in {"result_total_changed", "result_total_unreadable"}:
             # Older tasks saved a generic error despite having precise scan
             # diagnostics. Repair the response only, never rewrite the task.
             try:
@@ -74,6 +78,12 @@ class CollectionManager:
                 "browser_mode": task.get("browser_mode", "background"), "browser_fallback": task.get("browser_fallback"),
                 "collection_mode": task.get("collection_mode", "all" if task.get("limit") is None else "incremental"), "limit": task.get("limit"),
                 "status": state, "phase": phase, "created_at": task.get("created_at"), "started_at": task.get("started_at"), "finished_at": task.get("finished_at"),
+                "collection_stage": "abstracts" if frozen else "listing" if listing else None,
+                "selection": task.get("selection"), "batch_count": listing.get("batch_count", 0), "completed_batches": listing.get("completed_batches", 0), "current_batch": listing.get("current_batch"),
+                "inventory_ready": frozen, "listed_count": listing.get("listed_count", 0),
+                "listed_unique_papers": listing.get("unique_paper_count"),
+                "duplicate_listing_positions": len(listing.get("duplicate_positions", [])),
+                "listing_count_discrepancies": len(listing.get("count_discrepancies", [])),
                 "paper_count": len(papers), "new_papers": sum(p.get("rank") not in task.get("base_ranks", []) for p in papers),
                 "abstract_count": sum(bool(p.get("abstract")) for p in papers), "pages_recorded": len(pages),
                 "total_results": scan.get("total_results", meta.get("total_results")), "extracted_papers": extracted,
@@ -155,7 +165,9 @@ class CollectionManager:
             if (base / name).exists() and not any(Path(key).parent == base for key in owned):
                 raise RuntimeError("已有终端采集或分析任务或遗留锁，请先核对，不能并发启动")
 
-    def start(self, root, keyword, request_id, *, local_only=False, limit=None):
+    def start(self, root, keyword, request_id, *, local_only=False, limit=None, selection=None):
+        from .batches import selection as normalise_selection
+        policy = normalise_selection(selection)
         root = Path(root).resolve()
         keyword = dataset.safe_keyword(keyword)
         if not isinstance(request_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", request_id):
@@ -167,14 +179,18 @@ class CollectionManager:
                 if not isinstance(task, dict): continue
                 if task.get("web_request_id") == request_id:
                     if task.get("keyword") != keyword: raise ValueError("相同请求编号不能更改关键词")
+                    if (task.get("selection") or normalise_selection()) != policy: raise ValueError("相同请求不能修改采集范围")
                     return self.status(root, path.parent.name)
             for key in self.active:
                 if Path(key).parent == base:
                     current = self.status(root, Path(key).name)
-                    if current["keyword"] == keyword: return current
+                    if current["keyword"] == keyword:
+                        if (current.get("selection") or normalise_selection()) == policy: return current
+                        raise RuntimeError("该关键词已有其他范围的采集任务，请等待完成后再创建新查询")
             self._check_external_locks(base)
             task, work = collector.prepare(keyword, limit, root=root, local_only=local_only)
             task["web_request_id"] = request_id
+            task.update(selection=policy, selection_mode=policy["mode"], selection_order=policy["order"], selection_limit=policy["limit"])
             self._start(root, task, work)
             return self.status(root, task["id"])
 

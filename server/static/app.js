@@ -143,7 +143,7 @@ function renderForwardResult(result, order) {
   const literature = $("forward-literature"); literature.replaceChildren();
   const literatureContext = forwardLiterature;
   CnkiLiterature.mount(literature, literatureContext.runId, {
-    enabled: literatureContext.enabled, snapshot: literatureContext.snapshot,
+    selection: literatureContext.selection, enabled: literatureContext.enabled, snapshot: literatureContext.snapshot,
     onChange: ({ enabled, snapshot }) => {
       literatureContext.enabled = enabled; literatureContext.snapshot = snapshot;
       if (forwardLiterature === literatureContext) {
@@ -311,7 +311,7 @@ async function submitForwardQuery(forceComposition = false) {
     const query = await FormulaPicker.prepare({ text, top_k: topK }, { force: forceComposition === true });
     if (!query) { message.textContent = "已取消组成选择，本次未启动查询。"; return; }
     requestId = crypto.randomUUID();
-    forwardLiterature = { enabled: $("forward-cnki").checked, snapshot: null, runId: null, queryId: requestId };
+    forwardLiterature = { selection: LiteratureFlow.selection($("forward-cnki-scope").value), enabled: $("forward-cnki").checked, snapshot: null, runId: null, queryId: requestId };
     try { sessionStorage.setItem("pharmacology.workbench.cnki.v1", JSON.stringify(forwardLiterature)); } catch { /* Optional metadata only. */ }
     sessionStorage.setItem("pharmacology.workbench.query.v1", requestId);
     QueryProgress.render(message, { created_at: new Date().toISOString() });

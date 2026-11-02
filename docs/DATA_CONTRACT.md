@@ -198,3 +198,19 @@ live 运行逐阶段归档到 `data/pharm/<归档名>/`（方名或 `custom_<tas
 全项目统一 API 后，模型调用增加不含凭据的 `llm` 元数据：runtime/profile_id/model/api_style/config_fingerprint。核验运行的 manifest 与阶段签名绑定实际配置；疾病翻译按配置指纹缓存；文献任务保存 llm_attempts，抽取片段与发布的 extraction_models 保留各篇实际模型来源，缓存缺来源时标 legacy_unknown。当前尝试不能覆盖旧片段模型署名；真实地址和密钥不得进入这些记录。
 
 `local/assistant/runs/<request_id>.json` 保存问答状态、问题、模型名、工具事件、回答和编号证据；`sessions` 保存有限上下文。状态为 queued/running/succeeded/failed/cancelled/timed_out/interrupted，succeeded 只表示回答生成完成。旧数据库 run_id 与研究归档不改变。新增 sources 中的 id、text、source、metadata、retrieved_at 用于引用追溯；截断明示，引用检查仅保证编号存在。配置密钥不进入问答归档、浏览器会话或导出。完整字段与边界见 [研究问答与模型 API](ASSISTANT_CHAT.md)。
+
+## 固定题录清单（2026-11-02）
+
+正式网页全量路径新增任务内listing_progress.json和listing_inventory.json。后者包含data与其sha256；data含version=1、keyword、total_results、连续pages、frozen_at、count_policy=unique_positions_and_first_last_total及count_discrepancies。原始pages.total_results保持网站实际读数，中间差异不单独阻断；首末页计数、连续唯一论文身份及实际位置总数必须一致。JSON不完整、重复身份、缺页、校验不一致均不可沿用。listing_history保存未完成清单历史，原papers文件保持。
+
+摘要阶段的collection_progress继续snapshot_version=2，并增加inventory_sha256、inventory_frozen_at、inventory_count_discrepancies、collection_stage=abstracts。该阶段pages.total_results表示固定清单总量，observed_listing_total_results保存原页面计数；验证须逐位置核对固定清单身份，不能仅同题名即接受。发布collection.scope=frozen_keyword_listing并保留清单摘要/时间，旧版本归档不回写。状态接口公开collection_stage/inventory_ready/listed_count/listing_count_discrepancies，不公开详情令牌或私有日志。
+
+### 固定清单 version=2 的去重合同
+
+新版listing_inventory.data增加unique_paper_count、duplicate_positions=[{position,first_position}]，count_policy=listing_positions_and_first_last_total。total_results为完整检索位置数，非去重篇数；按完整论文身份重新推导去重数量和重复列表并验证，与hash/首末页/连续页码检查并行。整页身份序列重复拒绝。摘要进度同rank可重复仅限绑定此版固定清单并逐位置身份校验，发布papers及模型输入仍按论文去重。status增加listed_unique_papers及duplicate_listing_positions；旧冻结快照与排名规则不回写。
+
+## 批次清单 version=3 与截取范围
+
+listing_inventory.data.version=3保留扁平连续pages（用于既有摘要进度）并新增branches、batches、source_total_results和selection。每页batch_id/source_page/source_total_results/source_has_next保存原范围页面信息；branches计数必须由互不重复的同字段子分类完全覆盖，叶批必须连续到末页且位置数量正确，全量叶批合计等于根总数。批次ID由filters摘要验证。unique_paper_count/duplicate_positions跨批重算，发布papers仍去重。
+
+POST /api/agent/{direction}/{run_id}/literature/flow/resolve新增可选selection={mode:"all"|"quick",order:"relevance"|"date",limit:null|正整数}，quick上限6000。默认all，无上限。已有flow不能更改selection，resume不接受覆盖参数；活动同关键词不同范围拒绝混用。quick的collection.complete=false、collection.selection保存实际截取选择，source_total_results保留站点总数。旧冻结清单version1/2仍可读，模型调用继续使用项目统一API和原来源记录。

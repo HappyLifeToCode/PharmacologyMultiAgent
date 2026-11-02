@@ -253,10 +253,10 @@ async def literature_flow_action(direction: str, run_id: str, action: str, reque
     try:
         if direction not in {"forward", "reverse"} or not run_id.startswith(direction + "_"): raise ValueError("研究方向与归档不一致")
         body = await request.json()
-        if not isinstance(body, dict) or (set(body) - {"enabled"} if action == "resolve" else bool(body)):
+        if not isinstance(body, dict) or (set(body) - {"enabled", "selection"} if action == "resolve" else bool(body)):
             raise ValueError("文献流程只接受启用状态，不能更改模型、关键词或数据路径")
         if action == "resolve":
-            return await run_in_threadpool(cnki_flows.manager.resolve, ROOT, run_id, enabled=body.get("enabled", True))
+            return await run_in_threadpool(cnki_flows.manager.resolve, ROOT, run_id, enabled=body.get("enabled", True), selection=body.get("selection"))
         fn = cnki_flows.manager.resume if action == "resume" else cnki_flows.manager.cancel
         return await run_in_threadpool(fn, ROOT, run_id)
     except FileNotFoundError as exc:

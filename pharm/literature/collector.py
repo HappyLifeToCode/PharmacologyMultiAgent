@@ -22,7 +22,7 @@ from .. import llm
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "selected_api"
-RUNTIME_VERSION = "20261102-count-recheck-unified-api"
+RUNTIME_VERSION = "20261102-batched-listing-api"
 
 
 class CollectionCancelled(RuntimeError):
@@ -230,6 +230,8 @@ def validate_scan(task, work, papers):
     """Check the saved browser page inventory; a model saying 'done' is insufficient."""
     error = "关键词全量遍历记录不完整或与题录不一致；保留任务供续跑，未发布"
     path = Path(work) / "collection_progress.json"
+    listing_path = Path(work) / "listing_progress.json"
+    if listing_path.is_file() and not (Path(work) / "listing_inventory.json").exists(): path = listing_path
     if not path.is_file(): raise ValueError(error)
     scan = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(scan, dict) and scan.get("complete") is False:
@@ -246,8 +248,11 @@ def validate_scan(task, work, papers):
             raise CollectionValidationError("知网要求登录；已保留进度，请打开登录/验证窗口手动完成后续跑，任务会自动切回后台。", "cnki_login_required")
         if reason == "search_results_unavailable":
             raise CollectionValidationError("等待知网检索结果超时，未读到可核对的结果列表。进度已保留，可打开登录/验证窗口检查页面后续跑。", "cnki_search_unavailable")
+        if reason in {"inventory_count_mismatch", "inventory_duplicate_record", "inventory_repeated_page", "partition_coverage_unavailable", "partition_total_changed", "partition_unsupported", "page_size_not_applied"}:
+            labels = {"inventory_count_mismatch": "可访问检索位置不能覆盖总数", "inventory_repeated_page": "整页题录重复，无法确认翻页成功", "partition_coverage_unavailable": "可用分组不能完整覆盖当前范围，未跳过未归组记录", "partition_total_changed": "分批范围计数与计划不一致", "partition_unsupported": "当前页面未提供可操作的细分范围", "page_size_not_applied": "未能确认每页50条设置生效"}
+            raise CollectionValidationError(labels.get(reason, "旧清单包含重复论文位置") + "；已存论文与完成批次保留，未发布全量结果。", "cnki_" + reason)
         if reason == "result_total_changed":
-            raise CollectionValidationError(f"检索总数发生变化：第{scan.get('failed_page', '?')}页应为{scan.get('expected_total_results', '?')}条，实际读到{scan.get('observed_total_results', '?')}条。已存题录保留；点击继续后将从第一页重新核对当前清单，复用已采论文并补查缺项。本轮未发布全量结果。", "cnki_result_total_changed")
+            raise CollectionValidationError(f"分页计数与起始页不一致：第{scan.get('failed_page', '?')}页应为{scan.get('expected_total_results', '?')}条，实际读到{scan.get('observed_total_results', '?')}条。已存题录保留；点击继续后将从第一页重新核对当前清单，复用已采论文并补查缺项。本轮未发布全量结果。", "cnki_result_total_changed")
         if reason in {"result_total_unstable", "result_list_changed"}:
             detail = "总数经同页复核仍反复波动" if reason == "result_total_unstable" else "同页复核时题录列表或页码发生变化"
             raise CollectionValidationError(f"第{scan.get('failed_page', '?')}页{detail}，无法确认本轮清单一致。已存题录保留；本轮未发布，复核记录已保存。", "cnki_" + reason)
@@ -273,21 +278,30 @@ def validate_scan(task, work, papers):
     by_rank = {p["rank"]: p for p in papers}
     if len(by_rank) != len(papers): raise ValueError(error)
     position, referenced = 0, set()
+    frozen = None
+    if scan.get("inventory_sha256"):
+        from . import inventory
+        value = inventory.load(work, task["keyword"])
+        if value["sha256"] != scan["inventory_sha256"]: raise ValueError("固定题录清单校验不一致")
+        frozen = value["data"]
+        if total != frozen["total_results"] or len(pages) != len(frozen["pages"]): raise ValueError("摘要进度未覆盖固定清单")
     for number, page in enumerate(pages, 1):
         if not isinstance(page, dict) or type(page.get("number")) is not int or page["number"] != number or type(page.get("total_results")) is not int or page["total_results"] != total or page.get("has_next") is not (number < len(pages)):
             raise ValueError(error)
         items = page.get("items")
         if not isinstance(items, list) or (not items and (total != 0 or len(pages) != 1)):
             raise ValueError(error)
-        for item in items:
+        if frozen and (len(items) != len(frozen["pages"][number-1]["items"]) or page.get("observed_listing_total_results") != frozen["pages"][number-1]["total_results"]): raise ValueError(error)
+        for offset, item in enumerate(items):
             position += 1
             if not isinstance(item, dict) or type(item.get("rank")) is not int or type(item.get("position")) is not int or item["position"] != position or item.get("status") not in {"collected", "existing", "no_abstract", "title_only"}:
                 raise ValueError(error)
             paper = by_rank.get(item["rank"])
-            if scan.get("snapshot_version") == 2 and item["rank"] in referenced:
+            if scan.get("snapshot_version") == 2 and item["rank"] in referenced and not (frozen and frozen["version"] >= 2):
                 raise ValueError(error)
             if not paper or not isinstance(item.get("title"), str) or cnki.normalise(item["title"]) != cnki.normalise(paper.get("title")) or not cnki_url(item.get("url")) or not cnki_url(paper.get("url")):
                 raise ValueError(error)
+            if frozen and cnki.paper_identity(paper) != cnki.paper_identity(frozen["pages"][number-1]["items"][offset]): raise ValueError("论文身份与固定清单不一致")
             if item["status"] == "no_abstract" and (paper.get("abstract") or not isinstance(item.get("note"), str) or not item["note"].strip()):
                 raise ValueError(error)
             if item["status"] == "title_only" and (paper.get("abstract") or paper.get("abstract_status") != "excerpt_only" or not isinstance(paper.get("abstract_excerpt"), str) or not paper["abstract_excerpt"].strip() or not isinstance(item.get("note"), str) or not item["note"].strip()):
@@ -462,7 +476,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                         browser_collector.collect(task, work, root=root, cancel=cancelled)
                     except browser_collector.PageBlocked as exc:
                         if exc.reason in {"http_403", "captcha", "rate_limited", "login_required", "search_results_unavailable",
-                                          "result_total_changed", "result_total_unreadable", "result_total_unstable", "result_list_changed"}:
+                                          "result_total_changed", "result_total_unreadable", "result_total_unstable", "result_list_changed", "inventory_count_mismatch", "inventory_duplicate_record", "inventory_repeated_page", "partition_coverage_unavailable", "partition_total_changed", "partition_unsupported", "page_size_not_applied"}:
                             current = [json.loads(p.read_text(encoding="utf-8")) for p in (work / "papers").glob("paper_*.json")]
                             validate_scan(task, work, current)
                         raise CollectionValidationError("知网正常页面采集尚未完成（" + exc.reason + "），进度已保留，未发布。", "cnki_page_unavailable") from exc
@@ -526,6 +540,11 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                                       "scope": "keyword_search_results_at_collection_time", "limit": task["limit"]}
             if scan is not None:
                 meta["collection_scan"] = scan
+                if scan.get("inventory_sha256"):
+                    from . import inventory
+                    frozen = inventory.load(work, task["keyword"])["data"]
+                    selection = frozen.get("selection", {"mode": "all", "order": "relevance", "complete": True})
+                    meta["collection"].update(scope="frozen_keyword_listing", inventory_sha256=scan["inventory_sha256"], inventory_frozen_at=scan["inventory_frozen_at"], selection=selection, complete=selection["mode"] == "all", mode=selection["mode"])
             elif not local_only:
                 meta.pop("collection_scan", None)
             target = Path(task["target"])

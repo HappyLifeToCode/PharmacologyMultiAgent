@@ -77,25 +77,31 @@ class LiteratureFlowManager:
         self.watchers[key] = thread, stop
         thread.start()
 
-    def resolve(self, root, run_id, *, enabled=True):
+    def resolve(self, root, run_id, *, enabled=True, selection=None):
+        from .batches import selection as normalise_selection
+        policy = normalise_selection(selection)
         path, archive, direction = self._path(root, run_id)
         if type(enabled) is not bool: raise ValueError("enabled必须为布尔值")
         if not enabled: return {"run_id": run_id, "state": "disabled", "collection": None, "literature": None}
         with self.lock:
             existing = jobs.read(path)
-            if existing is not None: return self.status(root, run_id)
+            if existing is not None:
+                if selection is not None and existing.get("selection", normalise_selection()) != policy: raise ValueError("已有文献流程不能修改采集范围，请使用新查询")
+                return self.status(root, run_id)
             record = {"run_id": run_id, "direction": direction, "state": "checking_local", "created_at": now(),
                       "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "collection_id": None,
-                      "snapshot_id": None, "attempt": uuid4().hex}
+                      "snapshot_id": None, "attempt": uuid4().hex, "selection": policy}
             payload = self.query(run_id, root=root)
             result = payload["result"]
+            if result["status"] == "ready" and policy["mode"] == "all" and (result.get("source", {}).get("collection") or {}).get("selection", {}).get("mode") == "quick":
+                result = {**result, "status": "not_found"}
             record["keyword"] = result.get("subject")
             if result["status"] == "ready":
                 record.update(state="ready", snapshot_id=payload["snapshot_id"])
             elif result["status"] in {"not_found", "not_configured", "needs_extraction"}:
                 keyword = service.collection_keyword(run_id, root=root)
                 collection = self.collections.start(root, keyword, service.collection_request_id(run_id),
-                    local_only=result["status"] == "needs_extraction", limit=self.collection_limit)
+                    local_only=result["status"] == "needs_extraction", limit=self.collection_limit, selection=policy)
                 record.update(state="collecting", collection_id=collection["id"], keyword=keyword,
                               requested_limit=self.collection_limit)
             else:

@@ -99,6 +99,7 @@ const CnkiLiterature = (() => {
         root.append(button("重新检查本地文献", () => load(true))); return;
       }
       const source = data.source;
+      if (source.collection?.selection?.mode === "quick") root.append(node("p", "快速探索：按" + (source.collection.selection.order === "date" ? "发表时间" : "相关度") + "截取前 " + (source.collection.selection.requested_limit || 6000) + " 条检索结果。本批不代表全量，截取方式可能影响疾病排序。", "cnki-notice"));
       const catalogErrors = Object.entries(data.catalog_errors || {});
       if (catalogErrors.length) root.append(node("p", "部分疾病数据库暂时无法读取，病名匹配可能不完整；已找到的论文仍然保留。", "cnki-notice"));
       root.append(node("p", "已读取 " + source.paper_count + " 条文献记录，去重后 " + source.unique_paper_count + " 篇，其中 " + source.abstract_count + " 篇有摘要。", "cnki-meta"));
@@ -220,18 +221,27 @@ const CnkiLiterature = (() => {
       if (state.state === "starting") label = "正在准备文献流程…";
       if (state.state === "collecting") label = job?.status === "queued" ? "已排队，等待前一个关键词任务完成" : job?.status === "cancelling" ? "正在停止文献任务…" : job?.phase === "analysis_pending" ? "采集已完成，等待前一文献分析完成…" : job?.phase === "extracting" ? "正在分析论文标题和摘要…" : job?.browser_mode === "interactive" ? "后台访问被拒绝，已切到专用窗口采集标题和摘要…" : "正在后台采集标题和摘要…";
       if (state.state === "failed") label = "文献任务暂未完成，进度已保留";
+      if (state.state === "collecting" && job?.phase === "collecting" && job?.status === "running") {
+        if (job.collection_stage === "listing") label = "正在核对全部题录清单，暂不读取摘要…";
+        if (job.collection_stage === "abstracts") label = "题录清单已固定，正在复用已采论文并补采标题摘要…";
+      }
       if (state.state === "cancelled") label = "文献任务已停止，进度已保留";
       if (state.state === "unsupported_input") label = state.error || "本次输入暂不支持单一关键词文献分析";
       if (state.state === "not_started") label = "文献流程尚未启动";
       box.append(node("p", label, "cnki-progress-stage"));
       if (job) box.append(node("p", "关键词：" + job.keyword + " · 题录 " + job.paper_count + "篇 · 摘要 " + job.abstract_count + "篇 · 已记录 " + job.pages_recorded + "页 · 已分析 " + job.extracted_papers + "篇", "cnki-meta"));
+      if (job?.selection?.mode === "quick") box.append(node("p", "快速探索：按" + (job.selection.order === "date" ? "发表时间" : "相关度") + "采集前 " + job.selection.limit + " 条，不作为全量结果。", "cnki-notice"));
+      if (job?.batch_count) box.append(node("p", "分批清单：已完成 " + job.completed_batches + " 批；当前范围：" + (job.current_batch || "正在核对") + "。每页50条，合并后按论文身份去重。", "cnki-meta"));
+      if (job?.collection_stage) box.append(node("p", "本轮题录清单已核对 " + job.listed_count + " 条。" + (job.inventory_ready ? "清单已固定，摘要续采无需从第一页重新核对总数。" : "清单核验完整后再采摘要，已有论文继续保留。"), "cnki-meta"));
+      if (job?.listed_unique_papers != null) box.append(node("p", "检索位置 " + job.listed_count + " 条，去重后 " + job.listed_unique_papers + " 篇论文；重复位置 " + job.duplicate_listing_positions + " 条，同一篇论文仅采集和计入排序一次。", "cnki-meta"));
+      if (job?.listing_count_discrepancies) box.append(node("p", "已记录 " + job.listing_count_discrepancies + " 页计数差异；中途显示的总数不单独决定停止，最终按首末页计数及实际检索位置完整核验。", "cnki-meta"));
       if (job?.baseline_changed) box.append(node("p", "检索清单已更新：上次 " + job.previous_total_results + " 条，本次 " + job.total_results + " 条。从第一页重新核对，已采论文按身份复用，仅补采缺项。", "cnki-meta"));
       if (job?.excluded_saved_count) box.append(node("p", "有 " + job.excluded_saved_count + " 条旧题录未在本次完整清单中出现，文件仍保留，但不计入本次文献分析与排序。", "cnki-meta"));
       root.append(node("p", "靶点排序已保留；文献准备完成后会在这里自动显示。刷新和切换排序不会重复采集。", "cnki-note"));
       if (state.error) root.append(node("p", state.error, "cnki-notice"));
       if (state.connectionError) root.append(node("p", state.connectionError, "cnki-notice"));
       const controls = node("div", null, "cnki-actions");
-      const flow = LiteratureFlow.get(runId);
+      const flow = LiteratureFlow.get(runId, options.selection);
       if (state.state === "collecting") {
         const stop = button("停止文献任务", () => flow.cancel()); stop.disabled = state.busy || job?.status === "cancelling"; controls.append(stop);
         root.append(node("p", (job?.browser_mode === "interactive" ? "本次沿用可见专用窗口采集，可以切换回助手页面；出现登录或验证时会暂停提示。" : "任务会在后台继续；若知网返回403，会自动切到专用窗口继续。") + "停止会同时影响共享这个关键词任务的其他文献流程，靶点结果保留。", "cnki-note"));
@@ -257,7 +267,7 @@ const CnkiLiterature = (() => {
       root.append(controls);
     }
     function connectFlow(requestRevision) {
-      const flow = LiteratureFlow.get(runId);
+      const flow = LiteratureFlow.get(runId, options.selection);
       const stop = flow.subscribe((state) => queueMicrotask(() => {
         if (requestRevision !== revision || !root.isConnected) { stop(); return; }
         if (state.state === "ready" && state.literature) accept(state.literature);
