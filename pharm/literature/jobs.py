@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import threading
+import time
 
 from ..core.common import now, write_json
 from . import collector, dataset
@@ -20,10 +21,16 @@ def task_directory(root, job_id):
 
 
 def read(path, default=None):
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default
+    # A live writer may briefly truncate a JSON file before filling it.
+    # Do not turn that transient into a missing-task error during resume.
+    for attempt in range(3):
+        try:
+            return json.loads(Path(path).read_text(encoding="utf-8"))
+        except (ValueError, PermissionError):
+            if attempt < 2: time.sleep(0.02)
+        except OSError:
+            return default
+    return default
 
 
 class CollectionManager:
@@ -54,6 +61,14 @@ class CollectionManager:
         pages = scan.get("pages", []) if isinstance(scan, dict) else []
         extracted = len(list((work / "extracted").glob("paper_*.json")))
         phase = task.get("pipeline_phase") or ("extracting" if task.get("collection_mode") == "local_analysis" or extracted or (scan.get("complete") and running) else "collecting")
+        failure_code, error = task.get("failure_code"), task.get("error")
+        if state == "failed_or_partial" and failure_code == "cnki_page_unavailable" and scan.get("complete") is False and scan.get("stop_reason") in {"result_total_changed", "result_total_unreadable"}:
+            # Older tasks saved a generic error despite having precise scan
+            # diagnostics. Repair the response only, never rewrite the task.
+            try:
+                collector.validate_scan(task, work, papers)
+            except collector.CollectionValidationError as exc:
+                failure_code, error = exc.failure_code, str(exc)
         return {"id": job_id, "keyword": task["keyword"], "model": task.get("model", collector.DEFAULT_MODEL),
                 "runtime_version": collector.RUNTIME_VERSION,
                 "browser_mode": task.get("browser_mode", "background"), "browser_fallback": task.get("browser_fallback"),
@@ -62,8 +77,10 @@ class CollectionManager:
                 "paper_count": len(papers), "new_papers": sum(p.get("rank") not in task.get("base_ranks", []) for p in papers),
                 "abstract_count": sum(bool(p.get("abstract")) for p in papers), "pages_recorded": len(pages),
                 "total_results": scan.get("total_results", meta.get("total_results")), "extracted_papers": extracted,
-                "failure_code": task.get("failure_code"),
-                "error": task.get("error") if state in {"failed_or_partial", "cancelled", "interrupted"} else None}
+                "previous_total_results": scan.get("previous_total_results"), "baseline_changed": scan.get("baseline_changed", False),
+                "excluded_saved_count": len(scan.get("excluded_saved_ranks", [])),
+                "failure_code": failure_code,
+                "error": error if state in {"failed_or_partial", "cancelled", "interrupted"} else None}
 
     def list(self, root):
         base = Path(root).resolve() / "local/agent/cnki-collection"

@@ -187,6 +187,12 @@ live 运行逐阶段归档到 `data/pharm/<归档名>/`（方名或 `custom_<tas
 
 中文词表 version=2，input_aliases 包含来源同一 ID 的中文 altLabel 及不同中文语种名称；项目覆写主名时保留来源输入别名。不同 ID 的同名别名只形成歧义，不自动合并实体。Wikidata 公开来源不代表医学人工验收；原科学状态和排序合同不变。
 
+## 采集扫描快照 v2（2026-11-02）
+
+正常网页采集 collection_progress.json 新增 snapshot_version=2、previous_total_results、baseline_changed；完整遍历后写入 excluded_saved_ranks。该集合必须与“任务保存的论文 rank 减清单引用 rank”完全相等，禁止无记录地放宽全量校验。每页总数、页码、连续位置及详情校验仍严格检查，v2同一论文 rank 不可占多个位置。历史无版本扫描仍按旧规则验证。
+
+发布前校验使用任务全部原始文件；发布数据按本轮清单过滤 papers、关系 sources 和 extracted_ranks，旧 fragment 和原抽取缓存留在任务目录。引用全部排除的关系不发布；只排除部分引用时 count 按保留来源条数重算，未变动的关系保持原样。collection_scan 保留被排除的旧 rank 作为审计记录，它们不要求出现在发布 papers 中。任务 status 额外公开 previous_total_results/baseline_changed/excluded_saved_count，paper_count 仍表示任务内累计已存题录，不能冒充本次已核对位置数。
+
 ## LLM 研究问答补充（2026-11-02）
 
 `local/assistant/runs/<request_id>.json` 保存问答状态、问题、模型名、工具事件、回答和编号证据；`sessions` 保存有限上下文。状态为 queued/running/succeeded/failed/cancelled/timed_out/interrupted，succeeded 只表示回答生成完成。旧数据库 run_id 与研究归档不改变。新增 sources 中的 id、text、source、metadata、retrieved_at 用于引用追溯；截断明示，引用检查仅保证编号存在。配置密钥不进入问答归档、浏览器会话或导出。完整字段与边界见 [研究问答与模型 API](ASSISTANT_CHAT.md)。

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import re
 import time
@@ -40,7 +41,7 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
     by_title = {}
     for paper in stock: by_title.setdefault(cnki.normalise(paper["title"]), []).append(paper)
     next_rank = max((p["rank"] for p in stock), default=0) + 1
-    scan = {"keyword": task["keyword"], "total_results": None, "complete": False, "stop_reason": "running", "pages": [], "browser_engine": "playwright"}
+    scan = {"keyword": task["keyword"], "snapshot_version": 2, "total_results": None, "complete": False, "stop_reason": "running", "pages": [], "browser_engine": "playwright"}
     old_path = work / "collection_progress.json"
     old = json.loads(old_path.read_text(encoding="utf-8")) if old_path.is_file() else {}
     if old:
@@ -50,6 +51,8 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
     meta_path = work / "meta.json"
     prior_meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     previous_total = old.get("total_results") if old.get("total_results") is not None else prior_meta.get("total_results")
+    scan["previous_total_results"] = previous_total
+    saved_ranks = {p["rank"] for p in stock}
     added = sum(p["rank"] not in task["base_ranks"] for p in stock)
     position, failed, consecutive_failures = 0, 0, 0
 
@@ -64,11 +67,22 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
             listing = site.listing()
             number = len(scan["pages"]) + 1
             total = listing["total_results"]
-            expected_total = scan["total_results"] if scan["total_results"] is not None else previous_total
+            # A new traversal starts at page one with a fresh, stable baseline.
+            # Earlier snapshots are history, never a permanent resume barrier.
+            expected_total = scan["total_results"]
+            if expected_total is not None and total != expected_total and hasattr(site, "recheck_listing"):
+                scan.update(expected_total_results=expected_total, observed_total_results=total, failed_page=number)
+                listing = site.recheck_listing(expected_total, listing)
+                total = listing["total_results"]
+                if total == expected_total:
+                    for key in ("expected_total_results", "observed_total_results", "failed_page"):
+                        scan.pop(key, None)
             if type(total) is not int or total < 0 or (expected_total is not None and total != expected_total):
                 scan.update(expected_total_results=expected_total, observed_total_results=total, failed_page=number)
                 raise PageBlocked("result_total_unreadable" if type(total) is not int or total < 0 else "result_total_changed")
             if listing["number"] != number or (not listing["items"] and total): raise PageBlocked("page_number_or_rows_unreadable")
+            if number == 1:
+                scan["baseline_changed"] = previous_total is not None and previous_total != total
             scan["total_results"] = total
             write_json(work / "meta.json", {"keyword": task["keyword"], "total_results": total, "sort": "中国知网默认相关度排序", "collected_at": now()})
             page = {"number": number, "total_results": total, "has_next": listing["has_next"], "items": []}
@@ -114,6 +128,7 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
                              "rank": next_rank, "cif": None, "is_modified": bool(re.search(r"加味|加减|化裁|合方", item["title"])), "western_diseases": []}
                     if not saved["abstract"]: saved["note"] = detail.get("note") or "正常详情页未提供摘要，仅保留标题和题录"
                     write_json(work / "papers" / ("paper_%04d.json" % next_rank), saved)
+                    saved_ranks.add(next_rank)
                     by_title.setdefault(cnki.normalise(saved["title"]), []).append(saved)
                     next_rank += 1; added += 1
                     record.update(rank=saved["rank"], status=paper_status(saved))
@@ -125,6 +140,9 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
             if not listing["has_next"]:
                 if position != total: raise PageBlocked("position_count_mismatch")
                 scan.update(complete=failed == 0, stop_reason="failed_positions" if failed else "exhausted")
+                if not failed:
+                    referenced = {entry["rank"] for page in scan["pages"] for entry in page["items"]}
+                    scan["excluded_saved_ranks"] = sorted(saved_ranks - referenced)
                 save(); return scan
             site.next_page(number + 1)
     except BaseException as exc:
@@ -136,6 +154,49 @@ def collect_pages(task, work, site, *, cancel=lambda: False):
 
 class CnkiSite:
     SEARCH_WAIT_SECONDS = 30
+
+    def recheck_listing(self, expected_total, initial):
+        """Read the same visible page at most three more times; never navigate."""
+        def identity(value):
+            return [{key: row.get(key, "") for key in ("title", "authors", "source", "date")}
+                    for row in value.get("items", [])]
+
+        observations = []
+        original_rows = identity(initial)
+        def record(value):
+            observations.append({"total_results": value.get("total_results"), "number": value.get("number"),
+                "rows": len(value.get("items", [])),
+                "identity_sha256": hashlib.sha256(json.dumps(identity(value), ensure_ascii=False, sort_keys=True).encode()).hexdigest()})
+        record(initial)
+        previous = None
+        result = initial
+        outcome = "interrupted"
+        try:
+            for delay in (1000, 2000, 3000):
+                self.check(self.page)
+                self.page.wait_for_timeout(delay)
+                self.check(self.page)
+                result = self.listing()
+                record(result)
+                if result["number"] != initial["number"] or identity(result) != original_rows or result["has_next"] != initial["has_next"]:
+                    outcome = "result_list_changed"
+                    raise PageBlocked(outcome)
+                if result["total_results"] == expected_total and previous == expected_total:
+                    outcome = "recovered"
+                    return result
+                previous = result["total_results"]
+            # A changed total needs two final agreeing observations. Fluctuation
+            # or a single late recovery is unreadable, not proof of a new total.
+            if observations[-1]["total_results"] == observations[-2]["total_results"] != expected_total:
+                outcome = "confirmed_total_changed"
+                return result
+            outcome = "result_total_unstable"
+            raise PageBlocked(outcome)
+        finally:
+            directory = self.work / "count_rechecks"
+            directory.mkdir(exist_ok=True)
+            write_json(directory / (uuid4().hex + ".json"), {"expected_total_results": expected_total,
+                "expected_page": initial["number"], "outcome": outcome, "observations": observations})
 
     def __init__(self, context, list_page, work, *, root=None, cancel=lambda: False, timeout=2400):
         self.context, self.page, self.work = context, list_page, Path(work)
@@ -242,7 +303,7 @@ class CnkiSite:
             self.page.wait_for_timeout(200)
         write_json(self.work / "listing-diagnostic.json", {"expected_page": self.expected_page,
                    "observed_page": data.get("number"), "observed_total_results": data.get("total_results"),
-                   "count_text": str(data.get("count_text") or "")[:80], "rows": len(data.get("items") or [])})
+                   "count_text": str(data.get("count_text") or "")[:80], "visible_count_values": data.get("visible_count_values", [])[:8], "rows": len(data.get("items") or [])})
         raise PageBlocked("result_total_unreadable")
 
     def next_page(self, number):

@@ -411,11 +411,16 @@ function conversationAtBottom() {
   return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= 48;
 }
 
+function updateJumpToLatest() {
+  byId("jump-to-latest").hidden = conversationAtBottom();
+}
+
 function scrollToLatestMessage() {
   const scroll = byId("message-scroll");
   if (appState.viewport) appState.viewport.position = { atBottom: true, top: 0 };
   scroll.scrollTo({ top: scroll.scrollHeight, behavior: "instant" });
   if (appState.viewport) appState.viewport.appliedTop = scroll.scrollTop;
+  updateJumpToLatest();
 }
 
 function layoutTop(node) {
@@ -697,6 +702,15 @@ async function bootChat() {
   loadSessions();
   appState.selected = appState.sessions[0]?.id || null;
   render();
+  byId("jump-to-latest").addEventListener("click", () => {
+    scrollToLatestMessage();
+    rememberConversationPosition();
+    byId("chat-input").focus({ preventScroll: true });
+  });
+  byId("message-scroll").addEventListener("scroll", updateJumpToLatest, { passive: true });
+  const jumpObserver = new ResizeObserver(updateJumpToLatest);
+  for (const id of ["message-scroll", "messages", "welcome"]) jumpObserver.observe(byId(id));
+  updateJumpToLatest();
   byId("new-chat").addEventListener("click", createSession);
   byId("history-search").addEventListener("input", renderHistory);
   byId("composer-form").addEventListener("submit", (event) => { event.preventDefault(); submitMessage(); });

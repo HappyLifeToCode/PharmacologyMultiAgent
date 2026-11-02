@@ -225,6 +225,8 @@ const CnkiLiterature = (() => {
       if (state.state === "not_started") label = "文献流程尚未启动";
       box.append(node("p", label, "cnki-progress-stage"));
       if (job) box.append(node("p", "关键词：" + job.keyword + " · 题录 " + job.paper_count + "篇 · 摘要 " + job.abstract_count + "篇 · 已记录 " + job.pages_recorded + "页 · 已分析 " + job.extracted_papers + "篇", "cnki-meta"));
+      if (job?.baseline_changed) box.append(node("p", "检索清单已更新：上次 " + job.previous_total_results + " 条，本次 " + job.total_results + " 条。从第一页重新核对，已采论文按身份复用，仅补采缺项。", "cnki-meta"));
+      if (job?.excluded_saved_count) box.append(node("p", "有 " + job.excluded_saved_count + " 条旧题录未在本次完整清单中出现，文件仍保留，但不计入本次文献分析与排序。", "cnki-meta"));
       root.append(node("p", "靶点排序已保留；文献准备完成后会在这里自动显示。刷新和切换排序不会重复采集。", "cnki-note"));
       if (state.error) root.append(node("p", state.error, "cnki-notice"));
       if (state.connectionError) root.append(node("p", state.connectionError, "cnki-notice"));

@@ -23,7 +23,7 @@ from . import browser_session
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "gpt-5.6-luna"
-RUNTIME_VERSION = "20261029-source-metadata"
+RUNTIME_VERSION = "20261102-count-recheck"
 
 
 class CollectionCancelled(RuntimeError):
@@ -286,7 +286,10 @@ def validate_scan(task, work, papers):
         if reason == "search_results_unavailable":
             raise CollectionValidationError("等待知网检索结果超时，未读到可核对的结果列表。进度已保留，可打开登录/验证窗口检查页面后续跑。", "cnki_search_unavailable")
         if reason == "result_total_changed":
-            raise CollectionValidationError(f"检索总数发生变化：第{scan.get('failed_page', '?')}页应为{scan.get('expected_total_results', '?')}条，实际读到{scan.get('observed_total_results', '?')}条。已存题录保留，本轮未作为全量结果发布，需重新核对检索清单。", "cnki_result_total_changed")
+            raise CollectionValidationError(f"检索总数发生变化：第{scan.get('failed_page', '?')}页应为{scan.get('expected_total_results', '?')}条，实际读到{scan.get('observed_total_results', '?')}条。已存题录保留；点击继续后将从第一页重新核对当前清单，复用已采论文并补查缺项。本轮未发布全量结果。", "cnki_result_total_changed")
+        if reason in {"result_total_unstable", "result_list_changed"}:
+            detail = "总数经同页复核仍反复波动" if reason == "result_total_unstable" else "同页复核时题录列表或页码发生变化"
+            raise CollectionValidationError(f"第{scan.get('failed_page', '?')}页{detail}，无法确认本轮清单一致。已存题录保留；本轮未发布，复核记录已保存。", "cnki_" + reason)
         if reason == "result_total_unreadable":
             try: diagnostic = json.loads((Path(work) / "listing-diagnostic.json").read_text(encoding="utf-8"))
             except (OSError, ValueError): diagnostic = {}
@@ -320,6 +323,8 @@ def validate_scan(task, work, papers):
             if not isinstance(item, dict) or type(item.get("rank")) is not int or type(item.get("position")) is not int or item["position"] != position or item.get("status") not in {"collected", "existing", "no_abstract", "title_only"}:
                 raise ValueError(error)
             paper = by_rank.get(item["rank"])
+            if scan.get("snapshot_version") == 2 and item["rank"] in referenced:
+                raise ValueError(error)
             if not paper or not isinstance(item.get("title"), str) or cnki.normalise(item["title"]) != cnki.normalise(paper.get("title")) or not cnki_url(item.get("url")) or not cnki_url(paper.get("url")):
                 raise ValueError(error)
             if item["status"] == "no_abstract" and (paper.get("abstract") or not isinstance(item.get("note"), str) or not item["note"].strip()):
@@ -329,7 +334,14 @@ def validate_scan(task, work, papers):
             if not paper.get("abstract") and item["status"] not in {"no_abstract", "title_only"}:
                 raise ValueError(error)
             referenced.add(item["rank"])
-    if position != total or any(p["rank"] not in referenced for p in papers if p["rank"] not in task["base_ranks"]):
+    if position != total:
+        raise ValueError(error)
+    if scan.get("snapshot_version") == 2:
+        excluded = scan.get("excluded_saved_ranks")
+        if (not isinstance(excluded, list) or any(type(rank) is not int for rank in excluded)
+                or len(excluded) != len(set(excluded)) or set(excluded) != set(by_rank) - referenced):
+            raise ValueError(error)
+    elif any(p["rank"] not in referenced for p in papers if p["rank"] not in task["base_ranks"]):
         raise ValueError(error)
     return scan
 
@@ -475,7 +487,8 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                     try:
                         browser_collector.collect(task, work, root=root, cancel=cancelled)
                     except browser_collector.PageBlocked as exc:
-                        if exc.reason in {"http_403", "captcha", "rate_limited", "login_required", "search_results_unavailable"}:
+                        if exc.reason in {"http_403", "captcha", "rate_limited", "login_required", "search_results_unavailable",
+                                          "result_total_changed", "result_total_unreadable", "result_total_unstable", "result_list_changed"}:
                             current = [json.loads(p.read_text(encoding="utf-8")) for p in (work / "papers").glob("paper_*.json")]
                             validate_scan(task, work, current)
                         raise CollectionValidationError("知网正常页面采集尚未完成（" + exc.reason + "），进度已保留，未发布。", "cnki_page_unavailable") from exc
@@ -499,6 +512,10 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
             if not all_results and not local_only and len(new) < task["limit"]:
                 raise RuntimeError(f"本次新增{len(new)}篇，目标{task['limit']}篇；保留任务供续跑，未发布")
             scan = validate_scan(task, work, papers) if all_results else None
+            if scan and scan.get("snapshot_version") == 2:
+                selected = {item["rank"] for page in scan["pages"] for item in page["items"]}
+                papers = [paper for paper in papers if paper["rank"] in selected]
+                new = [paper for paper in new if paper["rank"] in selected]
             meta_path = work / "meta.json"
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if meta.get("keyword") != task["keyword"] or any(not cnki_url(p.get("url")) for p in new):
@@ -516,7 +533,7 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                 done_ranks = set(task.get("base_extracted_ranks", [])) | {s.get("rank") for row in prior_rows for s in row.get("sources", [])}
                 analyzed = [p for p in papers if p["rank"] not in done_ranks]
                 extract_papers(analyzed, work, runner, batch_size=8 if production_runner else 1, indexed_quotes=production_runner)
-                meta["extracted_ranks"] = sorted(done_ranks | {p["rank"] for p in analyzed})
+                meta["extracted_ranks"] = sorted((done_ranks | {p["rank"] for p in analyzed}) & {p["rank"] for p in papers})
             if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
             meta.update(keyword=task["keyword"], source="中国知网（CNKI）", papers=papers, last_updated_at=now(),
                         collector={"engine": "codex_cli", "model": model, "task_id": task["id"]},
@@ -534,7 +551,22 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                 raise RuntimeError("目标文献已由其他任务更新，未覆盖，请重新准备任务")
             publication = work / "publish" / ("cnki_" + task["keyword"]); publication.mkdir(parents=True, exist_ok=True)
             write_json(publication / "papers.json", meta)
-            if (work / "triples.jsonl").exists(): shutil.copyfile(work / "triples.jsonl", publication / "triples.jsonl")
+            if (work / "triples.jsonl").exists():
+                if scan and scan.get("snapshot_version") == 2:
+                    # Keep extraction caches intact; publish only sources in
+                    # the current scan, including when old results disappeared.
+                    ranks = {p["rank"] for p in papers}
+                    rows = []
+                    for line in (work / "triples.jsonl").read_text(encoding="utf-8").splitlines():
+                        if not line.strip(): continue
+                        row = json.loads(line)
+                        sources = [source for source in row.get("sources", []) if source.get("rank") in ranks]
+                        if sources:
+                            rows.append(row if len(sources) == len(row.get("sources", []))
+                                        else {**row, "sources": sources, "count": len(sources)})
+                    (publication / "triples.jsonl").write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
+                else:
+                    shutil.copyfile(work / "triples.jsonl", publication / "triples.jsonl")
             dataset.import_data(publication.parent, target, keywords=[task["keyword"]], update=True)
             task.update(status="succeeded", finished_at=now(), added=len(new), extracted=extract, analyzed=len(analyzed))
         except CollectionCancelled as exc:

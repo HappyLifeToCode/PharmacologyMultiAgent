@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>药理研究助手</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg?v=20261014">
-<link rel="stylesheet" href="/assets/chat.css?v=20261019-ranking-compare">
+<link rel="stylesheet" href="/assets/chat.css?v=20261102-jump-latest">
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
 <link rel="stylesheet" href="/assets/cnki-literature.css?v=20261029-source-graph">
@@ -52,6 +52,7 @@
       <div class="messages" id="messages" aria-live="polite" aria-relevant="additions"></div>
     </div>
     <div class="composer-area">
+      <button type="button" id="jump-to-latest" class="jump-to-latest" aria-label="跳到最新消息" title="跳到最新消息" aria-controls="message-scroll" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>
       <p class="status-message" id="status-message" role="status"></p>
       <form class="composer" id="composer-form">
         <div class="assistant-composer-options"><label class="sr-only" for="chat-mode">工作模式</label><select id="chat-mode"><option value="assistant">研究问答</option><option value="database">数据库查询</option></select><span id="mode-description">本地资料优先 · 答案附来源</span><label id="online-sources-label"><input id="online-sources" type="checkbox">联网资料</label></div>
@@ -104,8 +105,8 @@
 <script src="/assets/evidence-graph.js?v=20261022"></script>
 <script src="/assets/literature-flow.js?v=20261026-auto-literature"></script>
 <script src="/assets/cnki-graph.js?v=20261029-source-graph"></script>
-<script src="/assets/cnki-literature.js?v=20261029-source-graph"></script>
+<script src="/assets/cnki-literature.js?v=20261102-rescan-snapshot"></script>
 <script src="/assets/assistant-ui.js?v=20261102-profiles"></script>
-<script src="/assets/chat.js?v=20261102-dialogue"></script>
+<script src="/assets/chat.js?v=20261102-jump-latest"></script>
 </body>
 </html>
