@@ -288,7 +288,44 @@ const AssistantUI = (() => {
       const result = data.cnki_result;
       const section = details("CNKI 全部关联候选（" + result.candidate_count + "）", content);
       section.append(nodes("p", "reply-note", "程序整理的已保存文献关联，包含 " + result.paper_count + " 篇去重题录；不等于临床疗效或已核实适应症。"));
-      table(["文献中的疾病/药材/方剂", "全部关联篇数", "未标加减/联合篇数"], result.items.map(row => [row.names.join(" / "), row.paper_count, row.direct_paper_count]), section);
+      const grid = table(["文献中的疾病/药材/方剂", "全部关联篇数", "未标加减/联合篇数", "证据"], result.items.map(row => [row.names.join(" / "), row.paper_count, row.direct_paper_count]), section);
+      let snapshotPromise;
+      [...grid.querySelectorAll("tbody tr")].forEach((line, index) => {
+        const row = result.items[index], cell = nodes("td");
+        const evidenceRow = nodes("tr"), evidenceCell = nodes("td"), panel = nodes("div", "cnki-literature");
+        evidenceCell.colSpan = 4; evidenceCell.append(panel); evidenceRow.append(evidenceCell);
+        evidenceRow.hidden = true; line.after(evidenceRow);
+        let loaded = false;
+        const button = action("查看证据", async () => {
+          evidenceRow.hidden = !evidenceRow.hidden;
+          button.setAttribute("aria-expanded", String(!evidenceRow.hidden));
+          if (evidenceRow.hidden || loaded) return;
+          button.disabled = true; panel.replaceChildren(nodes("p", "reply-note", "正在读取已保存的文献证据…"));
+          try {
+            snapshotPromise ||= request("/api/assistant/runs/" + encodeURIComponent(message.jobId) + "/cnki-result").catch(error => { snapshotPromise = null; throw error; });
+            const snapshot = await snapshotPromise;
+            const candidates = [...(snapshot.source_candidates || snapshot.candidates || []), ...(snapshot.source_formula_candidates || snapshot.formula_candidates || [])];
+            const candidate = candidates.find(item => JSON.stringify(item.raw_names) === JSON.stringify(row.names) && (item.candidate_type || "disease") === (row.candidate_type || "disease"));
+            if (!candidate) throw new Error("这份快照中未找到对应候选，未展示其他疾病的证据。");
+            panel.replaceChildren();
+            if (typeof CnkiGraph !== "undefined") CnkiGraph.mount(panel, snapshot, candidate);
+            else panel.append(nodes("p", "reply-note", "图谱组件未加载，请刷新页面；原始证据如下。"));
+            for (const evidence of candidate.evidence || []) {
+              const entry = details(evidence.title || "文献记录", panel);
+              entry.append(nodes("blockquote", "assistant-source-text", evidence.quote || "未保存引用原句"));
+              entry.append(nodes("p", "reply-note", "原句位置：" + (evidence.quote_field === "title" ? "标题" : evidence.quote_field === "abstract" ? "摘要" : "未标注")));
+              const url = safeUrl(evidence.url);
+              if (url) { const source = nodes("a", "source-link", "打开知网原记录 ↗"); source.href = url; source.target = "_blank"; source.rel = "noopener noreferrer"; entry.append(source); }
+            }
+            if (!candidate.evidence?.length) panel.append(nodes("p", "reply-note", "这份候选记录尚无可展示的文献证据。"));
+            loaded = true;
+          } catch (error) {
+            panel.replaceChildren(nodes("p", "source-state", error.message), action("重新读取", () => { evidenceRow.hidden = true; button.click(); }));
+          } finally { button.disabled = false; }
+        });
+        button.setAttribute("aria-expanded", "false");
+        cell.append(button); line.append(cell);
+      });
       const link = nodes("a", "source-link", "下载完整文献明细 JSON"); link.href = "/api/assistant/runs/" + message.jobId + "/cnki-result"; link.setAttribute("download", ""); section.append(link);
     }
     if (sources.length) {
