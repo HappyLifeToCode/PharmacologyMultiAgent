@@ -52,6 +52,8 @@
 .assistant-sources summary { overflow-wrap:anywhere; }
 .assistant-step { font-size:12px !important; color:var(--muted); }
 .assistant-answer-actions { display:flex; gap:15px; margin-top:15px; }
+.assistant-cnki-task { margin:12px 0; padding:12px 14px; border-left:3px solid var(--research-accent); background:var(--research-soft); }
+.assistant-cnki-task .assistant-answer-actions { flex-wrap:wrap; }
 .assistant-md-table-scroll { max-width:100%; overflow-x:auto; margin:15px 0; border:1px solid var(--line); border-radius:7px; }
 .assistant-md-table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.7; }
 .assistant-md-table:not([data-columns="1"]):not([data-columns="2"]) { min-width:560px; }

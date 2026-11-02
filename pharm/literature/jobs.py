@@ -73,7 +73,7 @@ class CollectionManager:
                 "runtime_version": collector.RUNTIME_VERSION,
                 "browser_mode": task.get("browser_mode", "background"), "browser_fallback": task.get("browser_fallback"),
                 "collection_mode": task.get("collection_mode", "all" if task.get("limit") is None else "incremental"), "limit": task.get("limit"),
-                "status": state, "phase": phase, "created_at": task.get("created_at"), "started_at": task.get("started_at"), "finished_at": task.get("finished_at"),
+                "status": state, "phase": phase, "created_at": task.get("created_at"), "queued_at": task.get("queued_at"), "started_at": task.get("started_at"), "finished_at": task.get("finished_at"),
                 "paper_count": len(papers), "new_papers": sum(p.get("rank") not in task.get("base_ranks", []) for p in papers),
                 "abstract_count": sum(bool(p.get("abstract")) for p in papers), "pages_recorded": len(pages),
                 "total_results": scan.get("total_results", meta.get("total_results")), "extracted_papers": extracted,
@@ -92,10 +92,11 @@ class CollectionManager:
                 continue
         return sorted(rows, key=lambda r: r.get("created_at") or "", reverse=True)
 
-    def _start(self, root, task, work):
+    def _start(self, root, task, work, model_selection=None):
         key = str(work)
         (work / "cancel.requested.json").unlink(missing_ok=True)
-        task.update(status="queued", pipeline_phase="collecting")
+        task.update(status="queued", pipeline_phase="collecting", queued_at=now())
+        task.pop("started_at", None)
         task.pop("error", None); task.pop("finished_at", None)
         write_json(work / "task.json", task)
         def run():
@@ -129,7 +130,8 @@ class CollectionManager:
                                 self.condition.notify_all()
                                 return
                             self.condition.wait(timeout=0.5)
-                self.execute(task, work, root=root, extract=True, phased=True, before_analysis=before_analysis)
+                options = {"model_selection": model_selection} if model_selection is not None else {}
+                self.execute(task, work, root=root, extract=True, phased=True, before_analysis=before_analysis, **options)
                 if task.get("status") == "succeeded":
                     task["pipeline_phase"] = "completed"
                     write_json(work / "task.json", task)
@@ -155,7 +157,7 @@ class CollectionManager:
             if (base / name).exists() and not any(Path(key).parent == base for key in owned):
                 raise RuntimeError("已有终端采集或分析任务或遗留锁，请先核对，不能并发启动")
 
-    def start(self, root, keyword, request_id, *, local_only=False, limit=None):
+    def start(self, root, keyword, request_id, *, local_only=False, limit=None, model_selection=None):
         root = Path(root).resolve()
         keyword = dataset.safe_keyword(keyword)
         if not isinstance(request_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", request_id):
@@ -175,17 +177,17 @@ class CollectionManager:
             self._check_external_locks(base)
             task, work = collector.prepare(keyword, limit, root=root, local_only=local_only)
             task["web_request_id"] = request_id
-            self._start(root, task, work)
+            self._start(root, task, work, model_selection=model_selection)
             return self.status(root, task["id"])
 
-    def resume(self, root, job_id):
+    def resume(self, root, job_id, *, model_selection=None):
         work = task_directory(root, job_id)
         with self.lock:
             current = self.status(root, job_id)
             if str(work) in self.active or current["status"] == "succeeded": return current
             self._check_external_locks(work.parent)
             task = read(work / "task.json")
-            self._start(Path(root).resolve(), task, work)
+            self._start(Path(root).resolve(), task, work, model_selection=model_selection)
             return self.status(root, job_id)
 
     def find_request(self, root, request_id):
