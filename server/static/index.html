@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
 <link rel="stylesheet" href="/assets/cnki-literature.css?v=20261029-source-graph">
+<link rel="stylesheet" href="/assets/assistant.css?v=20261102-dialogue">
 </head>
 <body>
 <div class="chat-shell">
@@ -22,7 +23,8 @@
     <div class="history-caption">最近的研究</div>
     <div class="history-list" id="history-list"></div>
     <div class="sidebar-bottom">
-      <span class="local-note">会话保存在当前浏览器</span>
+      <span class="local-note">会话列表在浏览器，研究记录在本机</span>
+      <button id="sidebar-model-settings" class="sidebar-link"><img src="/assets/icons/settings.svg" alt="">模型与 API</button>
       <a href="/workbench" target="_blank" rel="noopener" class="sidebar-link" title="在新标签页打开，保留当前查询连接"><img src="/assets/icons/layout-sidebar.svg" alt="">研究工作台<span class="sr-only">（新标签页）</span></a>
       <button id="open-settings" class="sidebar-link"><img src="/assets/icons/settings.svg" alt="">查询设置</button>
     </div>
@@ -31,33 +33,35 @@
   <main class="chat-main">
     <header class="chat-header">
       <div class="header-left"><button class="icon-button" id="toggle-sidebar" aria-label="切换会话历史"><img src="/assets/icons/layout-sidebar.svg" alt=""></button><span id="conversation-title">新对话</span></div>
-      <span class="header-note">药材 · 靶点 · 疾病双向查询</span>
+      <button type="button" id="open-model-settings" class="model-status-button"><span class="model-dot" aria-hidden="true"></span><span id="model-status">配置模型 API</span><img src="/assets/icons/settings.svg" alt=""></button>
     </header>
     <div class="message-scroll" id="message-scroll">
       <section class="welcome" id="welcome">
         <div class="welcome-mark"><img src="/assets/icons/leaf.svg" alt=""></div>
         <p class="eyebrow">PHARMACOLOGY RESEARCH</p>
-        <h1>从一味药，一张方，或一种疾病开始。</h1>
-        <p class="welcome-description">从药材寻找候选疾病，也从疾病靶点追溯候选药材。</p>
+        <h1>你的药理研究，从一个问题开始。</h1>
+        <p class="welcome-description">结合本地资料和联网文献，分析问题、核对证据，继续追问。</p>
+        <div class="model-onboarding"><p id="model-ready-note">首次使用研究问答，请先填写模型 API。</p><button type="button" id="welcome-model-settings">设置模型 <span aria-hidden="true">↗</span></button></div>
         <div class="welcome-prompts">
-          <button data-prompt="帮我看看温经汤关联哪些候选疾病"><span>方剂探索</span><strong>温经汤关联哪些候选疾病？</strong><small>展开组成，追溯药材与靶点</small></button>
-          <button data-prompt="白芍、甘草"><span>药材组合</span><strong>查询白芍与甘草的关联线索</strong><small>从药材组合出发查看候选</small></button>
-          <button data-prompt="查询肺腺癌关联哪些药材"><span>疾病探索</span><strong>肺腺癌关联哪些候选药材？</strong><small>追溯疾病、靶点与成分关系</small></button>
+          <button data-prompt="温经汤与多囊卵巢综合征有哪些研究证据？先查本地文献，区分临床、动物和计算预测，并标注来源。"><span>文献答疑</span><strong>温经汤与多囊卵巢综合征有哪些研究证据？</strong><small>按研究类型比较，查看引用原文</small></button>
+          <button data-prompt="查看本机已有的文献和研究结果，告诉我有哪些资料可以用于药理分析。"><span>本地资料</span><strong>我有哪些资料可以用于分析？</strong><small>查看已保存的文献与研究归档</small></button>
+          <button data-prompt="帮我查询肺腺癌关联的候选药材，并解释这些靶点关联能够说明什么、不能说明什么。"><span>机制线索</span><strong>肺腺癌与哪些药材存在靶点关联？</strong><small>读取数据库结果，解释证据边界</small></button>
         </div>
-        <p class="data-note">数据来源：BATMAN · Open Targets · Monarch（可用时）</p>
+        <p class="data-note">本地 CNKI · BATMAN · Open Targets · Monarch · Europe PMC（联网时）</p>
       </section>
       <div class="messages" id="messages" aria-live="polite" aria-relevant="additions"></div>
     </div>
     <div class="composer-area">
       <p class="status-message" id="status-message" role="status"></p>
       <form class="composer" id="composer-form">
+        <div class="assistant-composer-options"><label class="sr-only" for="chat-mode">工作模式</label><select id="chat-mode"><option value="assistant">研究问答</option><option value="database">数据库查询</option></select><span id="mode-description">本地资料优先 · 答案附来源</span><label id="online-sources-label"><input id="online-sources" type="checkbox">联网资料</label></div>
         <label class="sr-only" for="query-direction">查询方向</label>
         <select id="query-direction" class="query-direction"><option value="auto">自动识别方向</option><option value="forward">方剂/药材 → 疾病</option><option value="reverse">疾病 → 药材</option></select>
-        <label class="sr-only" for="chat-input">输入疾病、方剂、药材或追问</label>
+        <label class="sr-only" for="chat-input">输入研究问题或继续追问</label>
         <textarea id="chat-input" rows="1" placeholder="输入疾病、方剂或药材，也可以继续追问…" maxlength="10000"></textarea>
         <div class="composer-toolbar"><button type="button" id="composer-settings" class="composer-settings"><img src="/assets/icons/settings.svg" alt="">查询设置</button><button type="button" id="choose-composition" class="composer-settings">选择/修改组成</button><span class="composer-shortcut">Enter 发送 · Shift+Enter 换行</span><button id="send-message" type="submit" class="send-button" aria-label="发送消息"><img src="/assets/icons/arrow-up.svg" alt=""></button></div>
       </form>
-      <p class="composer-disclaimer">匹配支持度用于筛选研究线索，靶点关联不等于治疗有效率。</p>
+      <p class="composer-disclaimer">研究问答会将问题和选中的资料发送至所配置模型。引用可追溯，研究结论仍需复核。</p>
     </div>
   </main>
 </div>
@@ -73,6 +77,22 @@
     <button type="submit" class="primary-button">保存设置</button>
   </form>
 </dialog>
+<dialog id="model-dialog" class="settings-dialog model-dialog" aria-labelledby="model-dialog-title">
+  <form id="model-form" autocomplete="off">
+    <div class="dialog-heading"><div><p class="model-kicker">研究问答设置</p><h2 id="model-dialog-title">连接你的模型</h2></div><button type="button" id="close-model-settings" class="icon-button" aria-label="关闭模型设置"><img src="/assets/icons/x.svg" alt=""></button></div>
+    <p class="model-intro">使用支持工具调用的 OpenAI 兼容接口。模型负责理解与答疑，数据查询和证据记录由本机工具执行。</p>
+    <label>服务地址参考<select id="model-preset"><option value="custom">自定义 / 保留当前设置</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问兼容接口</option><option value="local">本机 Ollama</option></select></label>
+    <label>API 地址<input id="model-base-url" type="url" required maxlength="500" placeholder="https://你的服务地址/v1"><small>填写服务商的 Base URL，例如以 /v1 结尾的地址。</small></label>
+    <label>接口格式<select id="model-api-style"><option value="chat_completions">Chat Completions（常见兼容服务）</option><option value="responses">Responses（OpenAI 新模型）</option></select><small>按服务商支持的格式选择；部分 OpenAI 新模型的工具调用需要 Responses。</small></label>
+    <label>模型名称<input id="model-name" required maxlength="150" placeholder="填写服务商提供的模型 ID"></label>
+    <label>API Key<input id="model-api-key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="填写服务商提供的 API Key"><small>已配置时留空则保留。切换 API 地址时需重新填写；本机无鉴权模型可留空。</small></label>
+    <label>密钥保存方式<select id="model-key-storage"><option value="session">仅本次服务运行期间保存</option><option value="protected" id="model-protected-option">在这台电脑加密保存（Windows）</option></select></label>
+    <details class="model-advanced"><summary>执行限制</summary><div class="model-limits"><label>工具规划轮次<input id="model-max-rounds" type="number" min="1" max="5" value="3" required></label><label>回答 token 上限<input id="model-max-output" type="number" min="256" max="8000" value="2200" required></label></div><p>每轮问题最多 8 次工具调用、3 分钟。到限后停止扩展，已有资料保留。</p></details>
+    <p class="model-privacy">密钥不会写入浏览器会话或回答导出。此设置用于研究问答；旧知网后台抽取和工作台 Agent 仍沿用原有模型配置。连接检查会发送一条极短请求，可能产生服务商费用。</p>
+    <p id="model-feedback" role="status" aria-live="polite"></p>
+    <div class="model-actions"><button type="button" id="model-clear-key" class="text-button">清除密钥</button><button type="button" id="model-test" class="model-test-button">保存并检查连接</button><button type="submit" id="model-save" class="primary-button">保存设置</button></div>
+  </form>
+</dialog>
 <script src="/assets/disease-labels.js?v=20261101-name-lookup"></script>
 <script src="/assets/query-presence.js?v=20261014-tab"></script>
 <script src="/assets/query-progress.js?v=20261015-layout"></script>
@@ -82,6 +102,7 @@
 <script src="/assets/literature-flow.js?v=20261026-auto-literature"></script>
 <script src="/assets/cnki-graph.js?v=20261029-source-graph"></script>
 <script src="/assets/cnki-literature.js?v=20261029-source-graph"></script>
-<script src="/assets/chat.js?v=20261026-auto-literature"></script>
+<script src="/assets/assistant-ui.js?v=20261102-dialogue"></script>
+<script src="/assets/chat.js?v=20261102-dialogue"></script>
 </body>
 </html>

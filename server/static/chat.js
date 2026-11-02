@@ -35,7 +35,7 @@ function diseaseName(candidate) {
   return DiseaseLabels.format(candidate);
 }
 function saveSessions() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.sessions)); }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.sessions, (key, value) => key === "research" ? undefined : value)); }
   catch (error) { byId("status-message").textContent = "浏览器存储空间不足，本轮会话仅在当前页面保留。可以导出查询结果。"; }
 }
 
@@ -58,7 +58,11 @@ async function request(path, body, signal) {
     failure.connectionLost = error.name === "TypeError" || error.name === "AbortError";
     throw failure;
   }
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "请求失败，请检查输入与本机数据配置。");
+  if (!response.ok) {
+    const error = new Error(typeof data.detail === "string" ? data.detail : "请求失败，请检查输入与本机数据配置。");
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -462,6 +466,10 @@ function render() {
       const { article, content } = messageContent(message);
       messages.append(article);
       if (!content) continue;
+      if (message.kind?.startsWith("assistant_")) {
+        AssistantUI.renderReply(content, message, session);
+        continue;
+      }
       if (message.kind === "resolving") {
         content.append(element("p", "pending-content", "正在核对输入、疾病或方剂组成…"));
         continue;
@@ -573,6 +581,7 @@ function candidateIndex(text) {
 async function submitMessage(suppliedText, context) {
   const text = String(suppliedText == null ? byId("chat-input").value : suppliedText).trim();
   if (!text) return;
+  if (AssistantUI.enabled() && !context) return AssistantUI.submit(text);
   if (context?.sessionId && context.sessionId !== appState.selected) return;
   const session = currentSession() || createSession();
   if (appState.busy.has(session.id)) return;
@@ -683,6 +692,7 @@ function openSettings() {
 }
 
 async function bootChat() {
+  await AssistantUI.init();
   await DiseaseLabels.load();
   loadSessions();
   appState.selected = appState.sessions[0]?.id || null;

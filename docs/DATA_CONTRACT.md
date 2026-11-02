@@ -186,3 +186,7 @@ live 运行逐阶段归档到 `data/pharm/<归档名>/`（方名或 `custom_<tas
 只有 POST /api/agent/reverse/resolve 新增可选布尔 allow_translation（默认 false）。非布尔值拒绝；研究 POST /api/agent/reverse 不接受该字段。仅中文非精确命中才翻译；返回 translation.status 为 matched/no_exact_match/unavailable，并可含 terms、model、cache_hit。成功回查返回 needs_selection、match_type=translation_exact、exact=false，choices 全部来自当前目录而非模型。前端确认后按真实 disease_id 发起研究；原中文问句留在会话中，研究归档 input 为所选 ID。缓存译名不构成长期别名映射。
 
 中文词表 version=2，input_aliases 包含来源同一 ID 的中文 altLabel 及不同中文语种名称；项目覆写主名时保留来源输入别名。不同 ID 的同名别名只形成歧义，不自动合并实体。Wikidata 公开来源不代表医学人工验收；原科学状态和排序合同不变。
+
+## LLM 研究问答补充（2026-11-02）
+
+`local/assistant/runs/<request_id>.json` 保存问答状态、问题、模型名、工具事件、回答和编号证据；`sessions` 保存有限上下文。状态为 queued/running/succeeded/failed/cancelled/timed_out/interrupted，succeeded 只表示回答生成完成。旧数据库 run_id 与研究归档不改变。新增 sources 中的 id、text、source、metadata、retrieved_at 用于引用追溯；截断明示，引用检查仅保证编号存在。配置密钥不进入问答归档、浏览器会话或导出。完整字段与边界见 [研究问答与模型 API](ASSISTANT_CHAT.md)。

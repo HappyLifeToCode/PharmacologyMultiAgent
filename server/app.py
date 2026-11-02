@@ -7,6 +7,7 @@ import copy
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -42,6 +43,8 @@ async def app_lifespan(app):
     try:
         yield
     finally:
+        from pharm.chat.engine import manager as dialogue_manager
+        await dialogue_manager.shutdown()
         await run_in_threadpool(stop_literature_workers)
 
 
@@ -76,6 +79,9 @@ class LocalOnlyMiddleware:
 
 
 app.add_middleware(LocalOnlyMiddleware)
+
+from server.assistant_api import router as assistant_router
+app.include_router(assistant_router)
 
 
 @app.get("/")
@@ -214,7 +220,7 @@ def literature_flow_script():
 
 
 @app.get("/api/agent/{direction}/{run_id}/literature")
-def forward_literature(direction: str, run_id: str, snapshot: str | None = None):
+def forward_literature(direction: str, run_id: str, snapshot: Optional[str] = None):
     try:
         if direction not in {"forward", "reverse"} or not run_id.startswith(direction + "_"): raise ValueError("研究方向与归档不一致")
         payload = cnki_literature.query(run_id, root=ROOT, snapshot=snapshot)

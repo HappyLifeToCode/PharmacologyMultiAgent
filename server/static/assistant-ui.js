@@ -1,0 +1,229 @@
+"use strict";
+
+const AssistantUI = (() => {
+  const polling = new Set();
+  const loadingAnswers = new Set();
+  let configuration = null;
+  const terminal = new Set(["succeeded", "failed", "cancelled", "timed_out", "interrupted"]);
+  const modes = { assistant: "研究问答", database: "数据库查询" };
+  const nodes = (tag, cls, value) => element(tag, cls, value);
+  function enabled() { return byId("chat-mode")?.value !== "database"; }
+  function modeChanged() {
+    const isAssistant = enabled();
+    byId("query-direction").hidden = isAssistant;
+    byId("choose-composition").hidden = isAssistant;
+    byId("online-sources-label").hidden = !isAssistant;
+    byId("chat-input").placeholder = isAssistant ? "提出研究问题，或继续追问已有证据…" : "输入方剂、药材或疾病，查询数据库关联…";
+    byId("mode-description").textContent = isAssistant ? "本地资料优先 · 答案附来源" : "确定性查询 · 展开结果与图谱";
+    try { localStorage.setItem("pharm.research.mode", byId("chat-mode").value); } catch {}
+  }
+  function configStatus() {
+    const ready = configuration?.configured;
+    const name = ready ? configuration.model : "配置模型 API";
+    byId("model-status").textContent = name;
+    byId("open-model-settings").classList.toggle("configured", Boolean(ready));
+    byId("model-ready-note").textContent = ready ? "模型已配置。先提问，执行过程和引用会随回答保存。" : "首次使用研究问答，请先填写模型 API。数据库查询仍可独立使用。";
+  }
+  async function openModelSettings() {
+    byId("model-feedback").textContent = "";
+    try { configuration = await request("/api/assistant/config"); } catch (error) { byId("model-feedback").textContent = error.message; }
+    const c = configuration || {};
+    byId("model-base-url").value = c.base_url || "https://api.openai.com/v1";
+    byId("model-name").value = c.model || "";
+    byId("model-api-style").value = c.api_style || "chat_completions";
+    byId("model-api-key").value = "";
+    byId("model-api-key").placeholder = c.has_key ? "已保存密钥；留空则保留" : "填写服务商提供的 API Key";
+    byId("model-key-storage").value = c.storage || "session";
+    byId("model-protected-option").disabled = !c.protected_storage_available;
+    byId("model-max-rounds").value = c.max_rounds || 3;
+    byId("model-max-output").value = c.max_output_tokens || 2200;
+    if (c.key_error) byId("model-feedback").textContent = c.key_error;
+    if (!byId("model-dialog").open) byId("model-dialog").showModal();
+    byId(c.model ? "model-api-key" : "model-base-url").focus();
+  }
+  async function saveModel(test = false) {
+    if (!byId("model-form").reportValidity()) return;
+    const controls = [byId("model-save"), byId("model-test"), byId("model-clear-key")];
+    controls.forEach(n => n.disabled = true);
+    byId("model-feedback").textContent = test ? "保存并检查模型连接…" : "正在保存…";
+    try {
+      configuration = await request("/api/assistant/config", {
+        base_url: byId("model-base-url").value.trim(), model: byId("model-name").value.trim(),
+        api_key: byId("model-api-key").value.trim(), storage: byId("model-key-storage").value,
+        api_style: byId("model-api-style").value,
+        max_rounds: Number(byId("model-max-rounds").value), max_output_tokens: Number(byId("model-max-output").value),
+      });
+      byId("model-api-key").value = "";
+      byId("model-api-key").placeholder = configuration.has_key ? "已保存密钥；留空则保留" : "填写 API Key";
+      configStatus();
+      byId("model-feedback").textContent = test ? (await request("/api/assistant/config/test", {})).message : "设置已保存。可以关闭此窗口并开始提问。";
+    } catch (error) { byId("model-feedback").textContent = error.message; }
+    finally { controls.forEach(n => n.disabled = false); }
+  }
+  async function init() {
+    try { if (localStorage.getItem("pharm.research.mode") === "database") byId("chat-mode").value = "database"; } catch {}
+    modeChanged();
+    byId("chat-mode").addEventListener("change", modeChanged);
+    byId("open-model-settings").addEventListener("click", openModelSettings);
+    byId("sidebar-model-settings").addEventListener("click", openModelSettings);
+    byId("welcome-model-settings").addEventListener("click", openModelSettings);
+    byId("close-model-settings").addEventListener("click", () => { byId("model-api-key").value = ""; byId("model-dialog").close(); });
+    byId("model-dialog").addEventListener("close", () => { byId("model-api-key").value = ""; });
+    byId("model-form").addEventListener("submit", event => { event.preventDefault(); saveModel(false); });
+    byId("model-test").addEventListener("click", () => saveModel(true));
+    byId("model-clear-key").addEventListener("click", async () => {
+      try { configuration = await request("/api/assistant/config", { clear_key: true }); byId("model-api-key").value = ""; byId("model-api-key").placeholder = "填写 API Key"; configStatus(); byId("model-feedback").textContent = "已清除保存的密钥。"; }
+      catch (error) { byId("model-feedback").textContent = error.message; }
+    });
+    byId("model-preset").addEventListener("change", event => {
+      const urls = { openai: "https://api.openai.com/v1", deepseek: "https://api.deepseek.com/v1", qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1", local: "http://127.0.0.1:11434/v1" };
+      if (urls[event.target.value]) { byId("model-base-url").value = urls[event.target.value]; byId("model-api-style").value = event.target.value === "openai" ? "responses" : "chat_completions"; byId("model-name").value = ""; byId("model-api-key").value = ""; byId("model-feedback").textContent = "已切换地址，请填写对应服务商的模型和密钥；切换地址不会复用旧密钥。"; }
+    });
+    try { configuration = await request("/api/assistant/config"); configStatus(); }
+    catch { byId("model-ready-note").textContent = "模型设置接口暂不可用，请确认已加载新版服务。"; }
+  }
+  async function submit(text) {
+    if (!configuration?.configured) { byId("chat-input").value = text; await openModelSettings(); return; }
+    const session = currentSession() || createSession();
+    if (appState.busy.has(session.id)) return;
+    const previous = latestResultMessage(session);
+    const body = { session_id: session.id, request_id: uid(), text, network: byId("online-sources").checked,
+      ...(previous?.runId ? { context_run_id: previous.runId } : {}) };
+    session.messages.push({ id: uid(), role: "user", kind: "text", text });
+    const reply = { id: uid(), role: "assistant", kind: "assistant_pending", jobId: body.request_id, text: "正在准备研究问答…", research: null };
+    session.messages.push(reply);
+    if (session.title === "新对话") session.title = text.slice(0, 32);
+    session.updated = new Date().toISOString();
+    appState.busy.add(session.id);
+    byId("chat-input").value = ""; byId("chat-input").style.height = "";
+    // Register before render so it cannot GET the job before its initial POST arrives.
+    polling.add(reply.jobId); saveSessions(); render(); scrollToLatestMessage();
+    try {
+      const record = await request("/api/assistant/runs", body);
+      reply.research = record;
+      await watch(session, reply);
+    } catch (error) {
+      if (error.status) {
+        reply.kind = "assistant_answer"; reply.research = { status: "failed", error: error.message, sources: [], events: [] };
+        reply.text = error.message; reply.notStarted = true;
+        appState.busy.delete(session.id); saveSessions(); render();
+      } else disconnect(session, reply, error);
+    }
+    finally { polling.delete(reply.jobId); }
+  }
+  function disconnect(session, reply, error) {
+    reply.kind = "assistant_disconnected"; reply.text = error.message;
+    appState.busy.delete(session.id); saveSessions();
+    if (currentSession()?.id === session.id) render();
+  }
+  async function watch(session, reply) {
+    let errors = 0;
+    while (true) {
+      try {
+        const record = await request("/api/assistant/runs/" + encodeURIComponent(reply.jobId)); errors = 0;
+        reply.research = record;
+        if (terminal.has(record.status)) {
+          reply.kind = "assistant_answer"; appState.busy.delete(session.id); saveSessions();
+          if (currentSession()?.id === session.id) { render(); scrollToLatestMessage(); }
+          return;
+        }
+        saveSessions();
+        if (currentSession()?.id === session.id) {
+          const content = document.querySelector('[data-message-id="' + reply.id + '"] .assistant-content');
+          if (content) { content.replaceChildren(); progress(content, session, reply); }
+        }
+      } catch (error) { if (++errors >= 3) { disconnect(session, reply, error); return; } }
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+  }
+  async function resume(session, reply) {
+    if (polling.has(reply.jobId)) return;
+    polling.add(reply.jobId); appState.busy.add(session.id); reply.kind = "assistant_pending";
+    try { await watch(session, reply); } finally { polling.delete(reply.jobId); }
+  }
+  function progress(content, session, reply) {
+    content.append(nodes("p", "assistant-progress", reply.research?.phase || "正在准备研究问答…"));
+    const events = reply.research?.events || [];
+    const last = events[events.length - 1];
+    content.append(nodes("p", "reply-note", "已记录 " + events.length + " 个工具步骤" + (last?.summary ? " · " + last.summary : "") + "。本轮最多 3 分钟，可随时停止。"));
+    content.append(action("停止本轮", async () => {
+      try { reply.research = await request("/api/assistant/runs/" + reply.jobId + "/cancel", {}); }
+      catch (error) { byId("status-message").textContent = error.message; }
+    }));
+  }
+  function safeUrl(value) {
+    try { const u = new URL(value); return ["https:", "http:"].includes(u.protocol) && !u.username && !u.password ? u.href : null; } catch { return null; }
+  }
+  function prose(container, value, sources, prefix) {
+    const known = new Map(sources.map(s => [s.id, s]));
+    for (const line of String(value || "").split("\n")) {
+      if (!line.trim()) continue;
+      const heading = /^(#{1,4})\s+/.test(line);
+      const p = nodes(heading ? "h3" : "p", heading ? "assistant-section-title" : "", "");
+      for (const part of line.replace(/^#{1,4}\s+/, "").split(/(\[E\d+\]|\*\*[^*]+\*\*)/g)) {
+        if (/^\[E\d+\]$/.test(part) && known.has(part.slice(1, -1))) {
+          const id = part.slice(1, -1);
+          const b = action(part, () => { const target = document.getElementById(prefix + id); if (target) { target.parentElement.open = true; target.open = true; target.scrollIntoView({ block: "nearest", behavior: "smooth" }); target.querySelector("summary").focus(); } }, "citation-button");
+          b.setAttribute("aria-label", "查看来源 " + id); p.append(b);
+        } else if (part.startsWith("**") && part.endsWith("**")) p.append(nodes("strong", "", part.slice(2, -2)));
+        else p.append(document.createTextNode(part));
+      }
+      container.append(p);
+    }
+  }
+  function renderReply(content, message, session) {
+    if (message.kind === "assistant_pending") {
+      appState.busy.add(session.id); progress(content, session, message);
+      if (!polling.has(message.jobId)) queueMicrotask(() => resume(session, message));
+      return;
+    }
+    if (message.kind === "assistant_disconnected") {
+      content.append(nodes("p", "source-state", message.text || "连接中断，原问答可能仍在执行。"));
+      content.append(action("恢复原问答", () => { resume(session, message); render(); }));
+      return;
+    }
+    if (!message.research) {
+      if (message.notStarted) { content.append(nodes("p", "source-state", message.text || "请求未启动，请检查模型设置后重新提问")); return; }
+      content.append(nodes("p", "reply-note", "正在读取已保存的回答与来源…"));
+      if (!loadingAnswers.has(message.jobId)) {
+        loadingAnswers.add(message.jobId);
+        request("/api/assistant/runs/" + encodeURIComponent(message.jobId)).then(data => {
+          message.research = data;
+          if (content.isConnected) { content.replaceChildren(); renderReply(content, message, session); }
+        }).catch(error => {
+          if (content.isConnected) { content.replaceChildren(nodes("p", "source-state", error.message)); content.append(action("重新读取回答", render)); }
+        }).finally(() => loadingAnswers.delete(message.jobId));
+      }
+      return;
+    }
+    const data = message.research || {}, sources = data.sources || [], prefix = "source-" + message.id + "-";
+    content.append(nodes("p", "assistant-answer-meta", (data.model || "模型") + " · " + (data.status === "succeeded" ? "回答完成" : "本轮未完成") + " · " + (data.network ? "允许联网资料" : "本地资料")));
+    if (data.answer) prose(content, data.answer, sources, prefix);
+    else content.append(nodes("p", "source-state", data.error || "尚无可用回答"));
+    for (const warning of data.warnings || []) content.append(nodes("p", "assistant-warning", warning));
+    if (sources.length) {
+      const list = details("证据来源（" + sources.length + "）", content); list.classList.add("assistant-sources");
+      list.append(nodes("p", "reply-note", "包含本会话已取得的资料。来源存在不代表支持所有结论，需核对对应原句。"));
+      for (const source of sources) {
+        const item = details("[" + source.id + "] " + source.title, list); item.id = prefix + source.id;
+        item.append(nodes("p", "reply-note", source.source + " · " + (source.metadata?.scope || "来源记录") + (source.truncated ? " · 文本已截断" : "")));
+        item.append(nodes("blockquote", "assistant-source-text", source.text));
+        const url = safeUrl(source.url);
+        if (url) { const a = nodes("a", "source-link", "打开原始来源 ↗"); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; item.append(a); }
+        if (source.metadata?.run_id) item.append(action("查看数据库结果与图谱", () => {
+          session.messages.push({ id: uid(), role: "assistant", kind: "query", runId: source.metadata.run_id, direction: source.metadata.run_id.startsWith("reverse_") ? "reverse" : "forward", cnkiEnabled: false });
+          saveSessions(); render(); scrollToLatestMessage();
+        }));
+        if (source.metadata?.doi) item.append(nodes("p", "reply-note", "DOI：" + source.metadata.doi));
+      }
+    }
+    const process = details("执行过程（" + (data.events?.length || 0) + " 步）", content);
+    for (const event of data.events || []) process.append(nodes("p", "assistant-step", (event.status === "succeeded" ? "完成" : event.status === "limited" ? "受限" : "未完成") + " · " + event.label + (event.reused ? "（复用本轮结果）" : "") + (event.summary ? " — " + event.summary : "")));
+    process.append(nodes("p", "reply-note", data.citation_check || "记录保留了本轮工具执行状态。"));
+    const actions = nodes("div", "assistant-answer-actions");
+    actions.append(action("复制回答", async () => { try { await navigator.clipboard.writeText(data.answer || ""); byId("status-message").textContent = "回答已复制"; } catch { byId("status-message").textContent = "复制失败，可直接选择回答文本"; } }));
+    actions.append(action("导出回答与来源", () => { const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })); const a = nodes("a"); a.href = url; a.download = "research-answer-" + message.jobId + ".json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }));
+    content.append(actions);
+  }
+  return { init, enabled, submit, renderReply };
+})();
