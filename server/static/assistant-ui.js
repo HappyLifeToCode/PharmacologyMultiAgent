@@ -86,6 +86,7 @@ const AssistantUI = (() => {
   async function init() {
     try { if (localStorage.getItem("pharm.research.mode") === "database") byId("chat-mode").value = "database"; } catch {}
     modeChanged();
+    byId("online-sources").checked = assistantNetworkDefault();
     byId("chat-mode").addEventListener("change", modeChanged);
     byId("open-model-settings").addEventListener("click", openModelSettings);
     byId("sidebar-model-settings").addEventListener("click", openModelSettings);
@@ -126,7 +127,7 @@ const AssistantUI = (() => {
   }
   async function submit(text) {
     if (!configuration?.configured) { byId("chat-input").value = text; await openModelSettings(); return; }
-    const session = currentSession() || createSession();
+    const session = currentSession() || createSession({ preserveNetwork: true });
     if (appState.busy.has(session.id)) return;
     const previous = latestResultMessage(session);
     const body = { session_id: session.id, request_id: uid(), text, network: byId("online-sources").checked,
@@ -198,20 +199,17 @@ const AssistantUI = (() => {
   }
   function prose(container, value, sources, prefix) {
     const known = new Map(sources.map(s => [s.id, s]));
-    for (const line of String(value || "").split("\n")) {
-      if (!line.trim()) continue;
-      const heading = /^(#{1,4})\s+/.test(line);
-      const p = nodes(heading ? "h3" : "p", heading ? "assistant-section-title" : "", "");
-      for (const part of line.replace(/^#{1,4}\s+/, "").split(/(\[E\d+\]|\*\*[^*]+\*\*)/g)) {
+    AssistantMarkdown.render(container, value, (p, line) => {
+      for (const part of line.split(/(`[^`]+`|\[E\d+\]|\*\*[^*]+\*\*)/g)) {
         if (/^\[E\d+\]$/.test(part) && known.has(part.slice(1, -1))) {
           const id = part.slice(1, -1);
           const b = action(part, () => { const target = document.getElementById(prefix + id); if (target) { target.parentElement.open = true; target.open = true; target.scrollIntoView({ block: "nearest", behavior: "smooth" }); target.querySelector("summary").focus(); } }, "citation-button");
           b.setAttribute("aria-label", "查看来源 " + id); p.append(b);
         } else if (part.startsWith("**") && part.endsWith("**")) p.append(nodes("strong", "", part.slice(2, -2)));
+        else if (part.startsWith("`") && part.endsWith("`")) p.append(nodes("code", "assistant-md-inline-code", part.slice(1, -1)));
         else p.append(document.createTextNode(part));
       }
-      container.append(p);
-    }
+    });
   }
   function renderReply(content, message, session) {
     if (message.kind === "assistant_pending") {
@@ -242,7 +240,10 @@ const AssistantUI = (() => {
     content.append(nodes("p", "assistant-answer-meta", (data.model || "模型") + " · " + (data.status === "succeeded" ? "回答完成" : "本轮未完成") + " · " + (data.network ? "允许联网资料" : "本地资料")));
     if (data.answer) prose(content, data.answer, sources, prefix);
     else content.append(nodes("p", "source-state", data.error || "尚无可用回答"));
-    for (const warning of data.warnings || []) content.append(nodes("p", "assistant-warning", warning));
+    const oldUncitedNotice = "本轮回答没有引用已核验来源，请将其视为通用解释或待核实分析";
+    const citationNotice = data.citation_notice || ((data.warnings || []).includes(oldUncitedNotice) ? "本轮未附来源引用。排版或整理可基于你提供的内容；研究事实仍需核对来源。" : "");
+    for (const warning of data.warnings || []) if (warning !== oldUncitedNotice) content.append(nodes("p", "assistant-warning", warning));
+    if (citationNotice) content.append(nodes("p", "reply-note", citationNotice));
     if (sources.length) {
       const list = details("证据来源（" + sources.length + "）", content); list.classList.add("assistant-sources");
       list.append(nodes("p", "reply-note", "包含本会话已取得的资料。来源存在不代表支持所有结论，需核对对应原句。"));

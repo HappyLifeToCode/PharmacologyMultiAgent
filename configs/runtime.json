@@ -1,8 +1,6 @@
 {
-  "agent_runtime": "codex-cli",
-  "codex_profile": "icrc",
-  "model": "gpt-5.6-luna",
-  "model_reasoning_effort": "medium",
+  "agent_runtime": "configured-api",
+  "model_selection": "active_ui_profile_at_run_start",
   "candidate_output_top_k": 50,
   "output_retention": "compact"
 }

@@ -11,8 +11,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import signal
-import subprocess
 import time
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -20,10 +18,11 @@ from uuid import uuid4
 from ..core.common import ROOT, now, write_json
 from . import dataset, cnki
 from . import browser_session
+from .. import llm
 
 PROMPTS = Path(__file__).with_name("prompts")
-DEFAULT_MODEL = "gpt-5.6-luna"
-RUNTIME_VERSION = "20261102-count-recheck"
+DEFAULT_MODEL = "selected_api"
+RUNTIME_VERSION = "20261102-count-recheck-unified-api"
 
 
 class CollectionCancelled(RuntimeError):
@@ -73,8 +72,8 @@ def browser_failure(log_path):
 
 
 def validate_model(model):
-    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,149}", model):
-        raise ValueError("Codex模型名称无效")
+    if not isinstance(model, str) or not model.strip() or len(model) > 150 or any(c in model for c in "\r\n"):
+        raise ValueError("模型名称无效")
     return model
 
 
@@ -149,6 +148,9 @@ def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL, local_only=F
     if not valid_limit(limit):
         raise ValueError("新增篇数应为正整数；不指定时按关键词采集全部结果")
     validate_model(model)
+    configured_model = llm.describe(root)
+    if model != DEFAULT_MODEL and model != configured_model.get("model"):
+        raise ValueError("请在页面选择模型，任务不接受独立模型覆盖")
     root = Path(root).resolve()
     job_id = "cnki_collect_" + uuid4().hex
     work = root / "local/agent/cnki-collection" / job_id
@@ -170,7 +172,8 @@ def prepare(keyword, limit=None, *, root=ROOT, model=DEFAULT_MODEL, local_only=F
     if local_only and not existing: raise ValueError("没有可分析的本地题录")
     if local_only: write_json(work / "meta.json", original_meta)
     task = {"id": job_id, "keyword": keyword, "limit": limit, "created_at": now(), "base_files": base,
-            "collection_mode": "local_analysis" if local_only else "all" if limit is None else "incremental", "engine": "codex_cli", "model": model,
+            "collection_mode": "local_analysis" if local_only else "all" if limit is None else "incremental", "engine": "configured_api", "model": configured_model.get("model") or None,
+            "llm_policy": "selected_at_execution_or_resume",
             "base_extracted_ranks": original_meta.get("extracted_ranks", []),
             "base_ranks": [p["rank"] for p in existing],
             "base_papers": {str(p["rank"]): dataset.digest(json.dumps(p, sort_keys=True, ensure_ascii=False).encode()) for p in existing},
@@ -198,62 +201,20 @@ def render_prompt(task, work):
     return text
 
 
-def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=DEFAULT_MODEL, browser=True, timeout=2400, command=None, cancel=None):
-    validate_model(model)
-    if cancel and cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
-    executable = os.environ.get("CODEX_BIN") or shutil.which("codex")
-    if command is None and not executable:
-        raise RuntimeError("未找到Codex CLI；请安装Codex或配置CODEX_BIN。默认模型为" + DEFAULT_MODEL)
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-    log_path = Path(log_path); log_path.parent.mkdir(parents=True, exist_ok=True)
-    workspace = Path(workspace or root).resolve()
-    response_path = log_path.resolve().with_suffix(".response.txt")
-    response_path.unlink(missing_ok=True)  # Never accept a stale final message after a failed retry.
-    args = list(command or [executable]) + ["exec", "--model", model, "--cd", str(workspace)]
-    if browser:
-        # Browser MCP calls can require approval. Collection runs without an
-        # interactive terminal, so route those requests through Codex's
-        # workspace-scoped automatic reviewer. This option supplies its own
-        # workspace-write sandbox and is mutually exclusive with --sandbox.
-        args.append("--approve-for-me")
-    else:
-        args.extend(["--sandbox", "read-only"])
-    args.extend(["--skip-git-repo-check", "--ephemeral", "--json", "--output-last-message", str(response_path), "-c", 'model_reasoning_effort="low"'])
-    if browser:
-        server = mcp_configuration(root, output=workspace / "browser")["mcp_servers"]["playwright"]
-        for key, value in server.items():
-            args.extend(["-c", "mcp_servers.playwright." + key + "=" + json.dumps(value, ensure_ascii=False)])
-    args.append("-")  # UTF-8 stdin avoids command-line length limits for titles/abstracts.
-    with log_path.open("w", encoding="utf-8") as log:
-        process = subprocess.Popen(args, cwd=workspace, stdin=subprocess.PIPE, text=True, encoding="utf-8",
-                                   stdout=log, stderr=subprocess.STDOUT, **options)
-        try:
-            deadline, sent = time.monotonic() + timeout, False
-            while True:
-                if cancel and cancel(): raise CollectionCancelled("文献采集已停止，进度已保留")
-                remaining = deadline - time.monotonic()
-                if remaining <= 0: raise subprocess.TimeoutExpired(args, timeout)
-                try:
-                    process.communicate(prompt if not sent else None, timeout=min(1, remaining))
-                    break
-                except subprocess.TimeoutExpired:
-                    sent = True
-            code = process.returncode
-        except BaseException:
-            if process.poll() is None:
-                if os.name == "nt":
-                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                else:
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=10)
-            raise
-    blocked = browser_failure(log_path)
-    if blocked: raise blocked
-    if code:
-        raise RuntimeError("采集/抽取进程未成功结束；日志已保存，未发布不完整数据")
-    if not response_path.is_file():
-        raise RuntimeError("Codex未生成最终响应；日志已保存，未发布数据")
-    return response_path.read_text(encoding="utf-8")
+def run_model(prompt, log_path, *, root=ROOT, workspace=None, model=None, browser=False,
+              timeout=180, command=None, cancel=None, selection=None):
+    Path(log_path).with_suffix(".response.txt").unlink(missing_ok=True)
+    if command is not None or browser:
+        raise RuntimeError("模型调用统一使用页面选定 API；不再执行 CLI 命令或模型浏览器")
+    if cancel and cancel(): raise CollectionCancelled("文献分析已停止，进度已保留")
+    selection = selection if selection is not None else llm.capture(root)
+    if model not in (None, DEFAULT_MODEL, selection["model"]):
+        raise ValueError("请在页面选择模型，文献任务不接受独立模型覆盖")
+    try:
+        return llm.text_sync(prompt, root=root, selection=selection, purpose="cnki_extraction",
+                             timeout=timeout, cancel=cancel, log_path=log_path)
+    except llm.ModelCancelled as exc:
+        raise CollectionCancelled("文献分析已停止，进度已保留") from exc
 
 
 def cnki_url(value):
@@ -384,7 +345,7 @@ def modification_flag(paper, keyword):
     return False
 
 
-def extract_papers(papers, work, runner, *, batch_size=1, indexed_quotes=False):
+def extract_papers(papers, work, runner, *, batch_size=1, indexed_quotes=False, llm_info=None):
     path = Path(work) / "triples.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] if path.exists() else []
     instructions = (PROMPTS / "cnki_extract.md").read_text(encoding="utf-8")
@@ -425,7 +386,7 @@ def extract_papers(papers, work, runner, *, batch_size=1, indexed_quotes=False):
                     if attempt: raise
                     correction = "\n上次输出未通过程序核对（" + str(exc) + "）。请重新检查下列原始标题摘要，严格逐字复制支撑片段；不要为了凑关系改写原文。只纠正本批，最多重试这一次。\n"
             for paper in batch:
-                write_json(Path(work) / "extracted" / ("paper_%04d.json" % paper["rank"]), {"triples": by_rank[paper["rank"]]["triples"]})
+                write_json(Path(work) / "extracted" / ("paper_%04d.json" % paper["rank"]), {"triples": by_rank[paper["rank"]]["triples"], "llm": llm_info or {"runtime": "test_runner"}})
     for paper in papers:
         fragment = Path(work) / "extracted" / ("paper_%04d.json" % paper["rank"])
         if fragment.is_file():
@@ -435,11 +396,13 @@ def extract_papers(papers, work, runner, *, batch_size=1, indexed_quotes=False):
             output = runner(prompt, Path(work) / "logs" / ("extract_%04d.log" % paper["rank"]))
             start, end = output.find("{"), output.rfind("}")
             raw = json.loads(output[start:end+1])
+            raw["llm"] = llm_info or {"runtime": "test_runner"}
         validate_extraction(raw, paper)
         for triple in raw["triples"]:
             row = {k: triple[k] for k in ("head", "head_type", "relation", "tail", "tail_type")}
             row.update(count=1, sources=[{"rank": paper["rank"], "title": paper["title"], "url": paper.get("url"),
-                                        "is_modified": paper.get("is_modified"), "evidence": triple["evidence"]}])
+                                        "is_modified": paper.get("is_modified"), "evidence": triple["evidence"],
+                                        "llm": raw.get("llm", {"runtime": "legacy_unknown"})}])
             if row not in rows: rows.append(row)
         if not fragment.exists(): write_json(fragment, raw)
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
@@ -452,20 +415,31 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
     dataset.safe_keyword(task["keyword"])
     if task["id"] != work.name or Path(task["target"]).resolve() != cnki.data_directory(root).resolve() or not valid_limit(task["limit"]):
         raise ValueError("任务定义或目标文献目录已变化，请重新准备任务")
-    model = validate_model(task.get("model", DEFAULT_MODEL))
+    model = None
     local_only = task.get("collection_mode") == "local_analysis"
     if local_only: extract = True
     all_results = task["limit"] is None and not local_only
     if task.get("status") == "succeeded": return task
     cancelled = lambda: (work / "cancel.requested.json").is_file()
     production_runner = runner is None
-    runner = runner or (lambda prompt, log: run_model(prompt, log, root=root, workspace=work, model=model, browser=log.name == "collection.log", cancel=cancelled))
     with execution_lock(root, phased) as (release_collection, acquire_analysis):
-        task.update(status="running", engine="codex_cli", model=model, started_at=now())
+        if task.get("engine") == "codex_cli":
+            task.setdefault("legacy_model_selection", {"engine": "codex_cli", "model": task.get("model"), "scope": "prior_task_metadata_only"})
+        task.update(status="running", engine="configured_api" if production_runner else "test_runner", model=None, started_at=now())
         for key in ("error", "failure_code", "finished_at"): task.pop(key, None)
         write_json(work / "task.json", task)
         try:
             if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
+            # A rescan may reuse only existing extractions and need no model at all.
+            # Snapshot the choice now, but require a usable key only if a model is called.
+            selection = llm.capture(root, required=False) if production_runner and extract else None
+            binding = llm.identity(selection) if selection else {"runtime": "test_runner" if not production_runner else "not_requested", "model": None}
+            model = binding.get("model") or None
+            task.update(model=model, llm=binding)
+            task.setdefault("llm_attempts", []).append({**binding, "started_at": now()})
+            write_json(work / "task.json", task)
+            if production_runner:
+                runner = lambda prompt, log: run_model(prompt, log, root=root, workspace=work, selection=selection, cancel=cancelled)
             stock = [json.loads(path.read_text(encoding="utf-8")) for path in (work / "papers").glob("paper_*.json")]
             if local_only:
                 collect = False
@@ -532,11 +506,20 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                 prior_rows = [json.loads(line) for line in triples_path.read_text(encoding="utf-8").splitlines() if line.strip()] if triples_path.exists() else []
                 done_ranks = set(task.get("base_extracted_ranks", [])) | {s.get("rank") for row in prior_rows for s in row.get("sources", [])}
                 analyzed = [p for p in papers if p["rank"] not in done_ranks]
-                extract_papers(analyzed, work, runner, batch_size=8 if production_runner else 1, indexed_quotes=production_runner)
+                extract_papers(analyzed, work, runner, batch_size=4 if production_runner else 1, indexed_quotes=production_runner, llm_info=binding)
                 meta["extracted_ranks"] = sorted((done_ranks | {p["rank"] for p in analyzed}) & {p["rank"] for p in papers})
+                models = meta.setdefault("extraction_models", {})
+                for paper in analyzed:
+                    fragment = work / "extracted" / ("paper_%04d.json" % paper["rank"])
+                    models[str(paper["rank"])] = json.loads(fragment.read_text(encoding="utf-8")).get("llm", {"runtime": "legacy_unknown"})
+            if "extraction_models" in meta:
+                active_ranks = {str(p["rank"]) for p in papers}
+                meta["extraction_models"] = {k: v for k, v in meta["extraction_models"].items() if k in active_ranks}
             if cancelled(): raise CollectionCancelled("文献采集已停止，进度已保留")
             meta.update(keyword=task["keyword"], source="中国知网（CNKI）", papers=papers, last_updated_at=now(),
-                        collector={"engine": "codex_cli", "model": model, "task_id": task["id"]},
+                        collector={"engine": "playwright" if production_runner else "test_runner", "model": model, "task_id": task["id"]},
+                        extraction_llm=binding,
+                        extraction_model_scope="current_attempt_only; existing_fragments_keep_original_provenance",
                         extraction_status="completed_for_available_papers" if extract and local_only else "completed_for_new_papers" if extract else "not_requested_for_new_papers")
             if not local_only:
                 meta["collection"] = {"mode": "all" if all_results else "incremental", "complete": all_results,

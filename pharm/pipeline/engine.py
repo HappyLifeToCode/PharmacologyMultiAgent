@@ -11,7 +11,6 @@ import csv
 import hashlib
 import json
 import os
-import shutil
 import sqlite3
 import threading
 import uuid
@@ -28,6 +27,7 @@ from ..network import cytoscape, metrics as network_metrics, string_local
 from ..enrich import david
 from ..diseases import online_pipeline
 from ..agents import runtime
+from .. import llm
 from . import scheduler
 from .scheduler import execute_graph
 
@@ -232,7 +232,7 @@ class Runner:
         if self.manifest.get("workflow_version") != WORKFLOW_VERSION:
             raise ValueError("旧结构运行不能由新流水线恢复，请新建运行")
         self.task = self.manifest["task"]
-        self.home = None
+        self.llm_selection = None
         self._agents = self.manifest["mode"] == "live" and self.task.get("agents") is True
         self.pipeline = self.manifest.get("pipeline", "discovery")
         self.stages = scheduler.stages_for(self.pipeline)
@@ -290,6 +290,7 @@ class Runner:
                               for key, path in self.manifest.get("verified_targets", {}).items()
                               if key in upstream and (self.directory / path).is_file()}
         if self._agents and role in self.agent_roles:
+            inputs["llm"] = llm.identity(self.llm_selection) if self.llm_selection is not None else self.manifest.get("llm", {"runtime": "configured_api", "selection": "not_bound"})
             prompt = ROOT / "agents" / (self.agent_roles[role] + ".md")
             inputs["agent_prompt"] = digest(prompt) if prompt.is_file() else None
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -365,11 +366,10 @@ class Runner:
                 self.save()
 
     def _check_agents(self):
-        """多 Agent 模式开工前检查：Codex CLI 存在 + 本机 profile 可用。"""
-        if not (shutil.which("codex.exe") or shutil.which("codex")):
-            return False, "找不到 Codex CLI"
+        """Bind one selected API for all verification roles in this run/resume."""
         try:
-            self.home = runtime.prepare_home()
+            self.llm_selection = llm.capture(ROOT)
+            self.manifest["llm"] = llm.identity(self.llm_selection)
         except Exception as exc:
             return False, str(exc)
         return True, None
@@ -379,6 +379,7 @@ class Runner:
         prompt = "\n".join([
             "你是药理反向发现流水线的独立核验会话。使用中文。范围只限本次核验：不修改任何文件，不读取账号文件，不安装软件，不访问网络，不重新计算。",
             "所有数字由确定性程序产出；你的职责是核验与解释，不得修改或“修正”程序产物中的数字；发现不一致如实上报。",
+            "你通过统一 API 接收下方证据，没有文件系统或浏览器工具；不得声称自行打开文件、联网或重算。若摘要不足以核验，请明确 partial 与缺口。",
             "角色：" + agent_role,
             definition,
             "任务：" + json.dumps(self.task, ensure_ascii=False),
@@ -390,7 +391,7 @@ class Runner:
         directory.mkdir(parents=True, exist_ok=True)
         return runtime.execute(prompt, directory,
                                timeout=int(os.environ.get("PHARM_AGENT_TIMEOUT", "900")),
-                               home=self.home)
+                               selection=self.llm_selection, root=ROOT)
 
     def _maybe_agent_review(self, role, result, directory, evidence):
         """程序计算完成且成功后由对应 Agent 核验；Agent 结论不改变程序产物。"""
@@ -405,7 +406,9 @@ class Runner:
                       "status": agent_result["status"], "summary": agent_result.get("summary"),
                       "confidence": agent_result.get("confidence"),
                       "findings": agent_result.get("findings", []),
-                      "model": meta.get("model"), "elapsed_seconds": meta.get("elapsed_seconds")}
+                      "model": meta.get("model"), "elapsed_seconds": meta.get("elapsed_seconds"),
+                      "runtime": meta.get("runtime"), "profile_id": meta.get("profile_id"),
+                      "config_fingerprint": meta.get("config_fingerprint")}
             result["agent_review"] = review
             result.setdefault("artifacts", []).append("agent/execution.json")
             self.event(role, "agent.completed", "%s：%s" % (agent_role, agent_result["status"]))
@@ -1145,7 +1148,7 @@ class Runner:
                 ok, error = self._check_agents()
                 if not ok:
                     self.manifest["status"] = "failed"
-                    self.manifest["fatal_error"] = ("多 Agent 模式需要可用的 Codex 环境：" + error
+                    self.manifest["fatal_error"] = ("多 Agent 模式需要可用的页面模型 API：" + error
                                                     + "；核验环境后将任务 agents 保持 true 重试，或设 agents=false 仅用程序流水线")
                     self.event("system", "agents.unavailable", error)
                     for stage in self.manifest["stages"].values():

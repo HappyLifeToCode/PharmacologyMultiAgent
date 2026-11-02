@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
 <link rel="stylesheet" href="/assets/cnki-literature.css?v=20261029-source-graph">
-<link rel="stylesheet" href="/assets/assistant.css?v=20261102-dialogue">
+<link rel="stylesheet" href="/assets/assistant.css?v=20261102-markdown">
 </head>
 <body>
 <div class="chat-shell">
@@ -70,6 +70,8 @@
   <form id="settings-form">
     <div class="dialog-heading"><h2>查询设置</h2><button type="button" id="close-settings" class="icon-button" aria-label="关闭设置"><img src="/assets/icons/x.svg" alt=""></button></div>
     <p>设置用于下一次查询，已有结果保留当时的参数。</p>
+    <label class="cnki-setting"><input id="setting-network-default" type="checkbox" checked>研究问答默认允许联网检索</label>
+    <small>新建会话和刷新页面时使用此默认值；输入框旁的开关可临时覆盖。只影响资料检索，不会自动启动知网采集，也不改变运行中任务。</small>
     <label>返回候选数量<input id="setting-top-k" type="number" min="1" max="100" value="10" required></label>
     <label>BATMAN 预测靶点阈值<input id="setting-threshold" type="number" min="0" max="1" step="0.01" value="0.84" required></label>
     <small>当前正向、反向会话查询均采用 known-only 已知证据，调整阈值不会开启预测靶点，也不改变已知证据结果。</small>
@@ -92,7 +94,7 @@
     <label>API Key<input id="model-api-key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="填写服务商提供的 API Key"><small>已配置时留空则保留。切换 API 地址时需重新填写；本机无鉴权模型可留空。</small></label>
     <label>密钥保存方式<select id="model-key-storage"><option value="session">仅本次服务运行期间保存</option><option value="protected" id="model-protected-option">在这台电脑加密保存（Windows）</option></select></label>
     <details class="model-advanced"><summary>执行限制与中转兼容</summary><div class="model-limits"><label>工具规划轮次<input id="model-max-rounds" type="number" min="1" max="5" value="3" required></label><label>回答 token 上限<input id="model-max-output" type="number" min="256" max="8000" value="2200" required></label></div><label>Responses 模式<select id="model-responses-mode"><option value="standard">标准 API</option><option value="codex">Codex 兼容中转（流式）</option></select></label><label>推理强度<select id="model-reasoning-effort"><option value="">服务商默认</option><option>none</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option><option>ultra</option></select></label><label class="model-http-toggle"><input id="model-intranet-http" type="checkbox">允许可信内网 IP 使用 HTTP</label><small>仅用于可信实验室内网。Codex 兼容模式的输出长度由中转控制，本机仍限制时间和响应大小。</small><p>每轮问题最多 8 次工具调用、3 分钟。到限后停止扩展，已有资料保留。</p></details>
-    <p class="model-privacy">密钥不会写入浏览器会话或回答导出。此设置用于研究问答；旧知网后台抽取和工作台 Agent 仍沿用原有模型配置。连接检查会发送一条极短请求，可能产生服务商费用。</p>
+    <p class="model-privacy">此处选中的 API 用于全部模型功能：研究问答、知网文献抽取、病名翻译和工作台 Agent 核验。运行中任务保留开始时的配置，新任务及续跑使用当前选择。密钥不会写入浏览器会话或回答导出。连接检查会发送极短请求，可能产生服务商费用。</p>
     <p id="model-feedback" role="status" aria-live="polite"></p>
     <div class="model-actions"><button type="button" id="model-clear-key" class="text-button">清除密钥</button><button type="button" id="model-test" class="model-test-button">保存并检查连接</button><button type="submit" id="model-save" class="primary-button">保存设置</button></div>
   </form>
@@ -106,7 +108,8 @@
 <script src="/assets/literature-flow.js?v=20261026-auto-literature"></script>
 <script src="/assets/cnki-graph.js?v=20261029-source-graph"></script>
 <script src="/assets/cnki-literature.js?v=20261102-rescan-snapshot"></script>
-<script src="/assets/assistant-ui.js?v=20261102-profiles"></script>
-<script src="/assets/chat.js?v=20261102-jump-latest"></script>
+<script src="/assets/assistant-markdown.js?v=20261102-markdown"></script>
+<script src="/assets/assistant-ui.js?v=20261102-markdown-network"></script>
+<script src="/assets/chat.js?v=20261102-markdown-network"></script>
 </body>
 </html>

@@ -230,16 +230,21 @@ def test_collection_cannot_replace_existing_paper_in_staging(tmp_path):
     assert original == (target / "cnki_温经汤/papers.json").read_bytes()
 
 
-def test_model_runner_timeout_stops_its_own_process(tmp_path, monkeypatch):
-    real = subprocess.Popen
-    processes = []
-    def tracked(*args, **kwargs):
-        process = real(*args, **kwargs); processes.append(process); return process
-    monkeypatch.setattr(subprocess, "Popen", tracked)
-    with pytest.raises(subprocess.TimeoutExpired):
-        collector.run_model("test", tmp_path / "model.log", root=tmp_path, timeout=.15,
-                            command=[sys.executable, "-c", "import time;time.sleep(10)"])
-    assert processes and processes[0].poll() is not None
+def test_model_runner_timeout_cancels_api_without_starting_process(tmp_path, monkeypatch):
+    import asyncio
+    from pharm import llm
+    cancelled = []
+    async def complete(*args, **kwargs):
+        try: await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+    monkeypatch.setattr(llm, "capture", lambda root: {"model": "test-api", "configured": True})
+    monkeypatch.setattr(llm, "complete", complete)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("API must not launch CLI"))
+    with pytest.raises(RuntimeError, match="超时"):
+        collector.run_model("test", tmp_path / "model.log", root=tmp_path, timeout=.02)
+    assert cancelled
 
 
 def full_scan(work, count=23):
@@ -260,11 +265,11 @@ def full_scan(work, count=23):
     return scan
 
 
-def test_default_is_codex_luna_and_all_keyword_results_without_model_call(tmp_path, monkeypatch):
+def test_default_uses_selected_api_and_all_keyword_results_without_model_call(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("prepare is offline"))
     task, work = collector.prepare("白芍", root=tmp_path)
     assert task["limit"] is None and task["collection_mode"] == "all"
-    assert task["engine"] == "codex_cli" and task["model"] == "gpt-5.6-luna"
+    assert task["engine"] == "configured_api" and task["model"] is None
     text = (work / "prompt.md").read_text(encoding="utf-8")
     assert "{{" not in text and "不设篇数上限" in text and "不获取论文正文" in text
     assert "collection_progress.json" in text
@@ -285,7 +290,7 @@ def test_full_keyword_scan_publishes_all_pages_without_a_20_or_100_cap(tmp_path,
     assert entry["papers"] == count and len(meta["papers"]) == count
     assert meta["collection"]["mode"] == "all" and meta["collection"]["complete"] is True
     assert meta["collection_scan"]["total_results"] == count
-    assert meta["collector"]["model"] == "gpt-5.6-luna"
+    assert meta["collector"]["engine"] == "test_runner" and meta["collector"]["model"] is None
 
 
 @pytest.mark.parametrize("fault", ["missing_page", "still_has_next", "failed_paper", "changing_total", "wrong_position", "wrong_title", "no_progress", "unexplained_missing_abstract"])
@@ -329,30 +334,21 @@ def test_all_scan_with_existing_papers_can_complete_with_no_new_papers(tmp_path)
     assert dataset.read_corpus(tmp_path / "data/cnki", "温经汤")[0]["papers"] == 1
 
 
-def test_codex_runner_uses_pinned_model_stdin_and_separate_final_output(tmp_path):
-    stub = tmp_path / "fake_codex.py"
-    stub.write_text('''import json, sys
-from pathlib import Path
-args = sys.argv[1:]
-prompt = sys.stdin.buffer.read().decode("utf-8")
-Path("invocation.json").write_text(json.dumps({"args":args,"prompt":prompt}), encoding="utf-8")
-Path(args[args.index("--output-last-message")+1]).write_text('{"triples": []}', encoding="utf-8")
-print('{"event": "log with unrelated braces"}')
-''', encoding="utf-8")
-    for browser in (True, False):
-        prompt = "只读标题与摘要：" + "中文" * 20000
-        output = collector.run_model(prompt, tmp_path / "logs/model.log", root=tmp_path, browser=browser,
-                                     command=[sys.executable, str(stub)])
-        assert json.loads(output) == {"triples": []}
-        invocation = json.loads((tmp_path / "invocation.json").read_text(encoding="utf-8"))
-        args = invocation["args"]
-        assert invocation["prompt"] == prompt and prompt not in args
-        assert args[:3] == ["exec", "--model", "gpt-5.6-luna"]
-        assert ("--sandbox" not in args) if browser else (args[args.index("--sandbox") + 1] == "read-only")
-        assert ("mcp_servers.playwright.command=" in " ".join(args)) == browser
-        assert ("--approve-for-me" in args) == browser
-        assert "--dangerously-bypass-approvals-and-sandbox" not in args
-        assert not (tmp_path / ".codex/config.toml").exists()
+def test_api_runner_uses_selected_model_and_keeps_secret_out_of_log(tmp_path, monkeypatch):
+    from pharm import llm
+    selection = {"model": "selected-model", "configured": True, "api_key": "secret-fixture", "base_url": "https://private.example/v1"}
+    seen = []
+    async def complete(c, messages, tools=None):
+        seen.append((c, messages))
+        return {"content": '{"triples": []}', "tool_calls": []}
+    monkeypatch.setattr(llm, "capture", lambda root: selection)
+    monkeypatch.setattr(llm, "complete", complete)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("no CLI"))
+    log = tmp_path / "model.log"
+    assert json.loads(collector.run_model("标题摘要", log, root=tmp_path)) == {"triples": []}
+    assert seen[0][0]["model"] == "selected-model"
+    assert "secret-fixture" not in log.read_text(encoding="utf-8")
+    assert "private.example" not in log.read_text(encoding="utf-8")
 
 
 def test_extraction_only_sends_title_and_abstract_not_saved_fulltext(tmp_path):
@@ -378,28 +374,36 @@ def test_full_scan_keeps_a_paper_when_cnki_explicitly_provides_no_abstract(tmp_p
     assert entry["papers"] == 1 and entry["abstracts"] == 0
 
 
-def test_codex_zero_exit_without_a_new_final_message_cannot_reuse_stale_output(tmp_path):
+def test_empty_api_response_cannot_reuse_stale_output(tmp_path, monkeypatch):
+    from pharm import llm
     log = tmp_path / "model.log"
     log.with_suffix(".response.txt").write_text('{"triples": []}', encoding="utf-8")
-    with pytest.raises(RuntimeError, match="未生成最终响应"):
-        collector.run_model("标题和摘要", log, root=tmp_path, browser=False, command=[sys.executable, "-c", "pass"])
+    monkeypatch.setattr(llm, "capture", lambda root: {"model": "test-api", "configured": True})
+    async def empty(*args, **kwargs): return {"content": "", "tool_calls": []}
+    monkeypatch.setattr(llm, "complete", empty)
+    with pytest.raises(RuntimeError, match="有效文本"):
+        collector.run_model("标题和摘要", log, root=tmp_path)
     assert not log.with_suffix(".response.txt").exists()
 
 
-def test_model_cancellation_stops_only_its_own_child_process(tmp_path, monkeypatch):
-    processes = []
-    real = subprocess.Popen
-    def tracked(*args, **kwargs):
-        process = real(*args, **kwargs); processes.append(process); return process
-    monkeypatch.setattr(subprocess, "Popen", tracked)
+def test_model_cancellation_aborts_api_request(tmp_path, monkeypatch):
+    import asyncio
+    from pharm import llm
+    monkeypatch.setattr(llm, "capture", lambda root: {"model": "test-api", "configured": True})
+    stopped = []
+    async def wait(*args, **kwargs):
+        try: await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            stopped.append(True)
+            raise
+    monkeypatch.setattr(llm, "complete", wait)
     cancel = threading.Event()
-    timer = threading.Timer(.15, cancel.set); timer.start()
+    timer = threading.Timer(.05, cancel.set); timer.start()
     try:
         with pytest.raises(collector.CollectionCancelled):
-            collector.run_model("test", tmp_path / "cancel.log", root=tmp_path, cancel=cancel.is_set,
-                                command=[sys.executable, "-c", "import time; time.sleep(10)"])
+            collector.run_model("test", tmp_path / "cancel.log", root=tmp_path, cancel=cancel.is_set)
     finally: timer.cancel()
-    assert processes and processes[0].poll() is not None
+    assert stopped
 
 
 def test_collection_browser_authorization_is_scoped_to_the_three_enabled_tools(tmp_path):
@@ -409,18 +413,11 @@ def test_collection_browser_authorization_is_scoped_to_the_three_enabled_tools(t
     assert "approval_policy" not in collector.mcp_configuration(tmp_path)
 
 
-def test_structured_browser_approval_error_is_not_reported_as_incomplete_papers(tmp_path):
-    stub = tmp_path / "blocked_codex.py"
-    stub.write_text('''import json, sys
-from pathlib import Path
-args=sys.argv[1:]
-sys.stdin.buffer.read()
-Path(args[args.index("--output-last-message")+1]).write_text("Browser tool denied",encoding="utf-8")
-print(json.dumps({"type":"item.completed","item":{"type":"mcp_tool_call","tool":"browser_run_code","status":"failed","error":{"message":"MCP tool call requires approval, but approval policy is never"}}}))
-''', encoding="utf-8")
-    with pytest.raises(collector.CollectionRuntimeError, match="尚未进入知网") as raised:
-        collector.run_model("test", tmp_path / "denied.log", root=tmp_path, command=[sys.executable, str(stub)])
-    assert raised.value.failure_code == "browser_approval_required"
+def test_legacy_cli_or_model_browser_is_rejected(tmp_path):
+    with pytest.raises(RuntimeError, match="统一使用页面"):
+        collector.run_model("test", tmp_path / "model.log", root=tmp_path, browser=True)
+    with pytest.raises(RuntimeError, match="统一使用页面"):
+        collector.run_model("test", tmp_path / "model.log", root=tmp_path, command=["codex"])
 
 
 def test_recovered_browser_error_does_not_discard_later_success(tmp_path):

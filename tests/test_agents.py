@@ -183,7 +183,7 @@ def test_agents_false_live_runs_pure_program(root, live_root, monkeypatch, calls
 
 
 def test_agents_unavailable_fails_run_early(root, monkeypatch, calls):
-    monkeypatch.setattr(engine.Runner, "_check_agents", lambda self: (False, "找不到 Codex CLI"))
+    monkeypatch.setattr(engine.Runner, "_check_agents", lambda self: (False, "模型 API 未就绪"))
     monkeypatch.setattr(engine.runtime, "execute",
                         lambda *a, **k: calls.append("called"))
     task, _ = save_task({"herbs": ["白芍"], "agents": True}, root)

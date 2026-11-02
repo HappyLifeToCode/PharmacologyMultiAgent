@@ -1,5 +1,9 @@
 # Pharmacology Multi-Agent
 
+2026-11-02 合并与界面修复：已拉取合作者 `92e35b8`，保留知网重扫、计数复核和跳到最新消息功能，并合入统一模型 API。回答支持 Markdown 表格；查询设置可保存研究问答默认联网（初始开启），单次输入框可覆盖。旧回答刷新可按新格式展示，历史归档不改写。用法见[研究问答说明](docs/ASSISTANT_CHAT.md)。
+
+2026-11-02 全项目模型入口统一：研究问答、CNKI 标题摘要抽取、病名翻译和六角色核验全部使用页面“模型与 API”中选中的配置。运行中锁定本次选择，新任务/续跑重新读取当前配置；不再调用 Codex CLI、不固定模型、不自动回退到其他接口。采集和数值计算仍由程序执行。详见 [统一模型 API](docs/CODEX_RUNTIME.md)。
+
 2026-11-02 多模型配置：模型窗口可按名称保存、切换多套 API，Windows 默认加密保存在本机；支持显式导入 Codex 的 icrc 配置与 Codex 兼容 Responses 中转。旧 Kimi 等配置保留，真实地址和凭据不随 Git 交付。用法与四层职责的实际完成范围见[研究问答说明](docs/ASSISTANT_CHAT.md)。
 
 2026-11-02 接口兼容修复：首页新增 **Anthropic Messages**，支持 Anthropic/Claude 和 Kimi Code 的消息、工具调用及签名推理块回传。Kimi Code 的 `https://api.kimi.com/coding` 选择 Anthropic；若选 Chat Completions/Responses，Base URL 应为 `https://api.kimi.com/coding/v1`。同时修复修改协议时加密密钥的保留逻辑。已完成隔离适配检查，真实 Kimi 连接及完整回归待验证；详见[配置说明](docs/ASSISTANT_CHAT.md)。
@@ -8,7 +12,7 @@
 
 中药复方 → BATMAN 本地成分/靶点 → 本地疾病索引反查候选疾病的可追溯研究工具。输入一个方剂（或自由药材组合），程序在本地数据中解析药材—成分—靶点关系，再用本地 SQLite 疾病索引反查"哪些疾病与这些靶点有关联"，输出候选疾病与逐条证据及透明启发式置信度。工作台顶部另提供正向 Agent 对话框，可直接输入内置方剂名（如温经汤，自动展开 12 味药材）或药材名，调用本地 BATMAN、Open Targets 和 Monarch 查询候选疾病。对候选疾病可继续做机制分析：共同靶点 → STRING/CytoNCA 网络 → DAVID 富集 → 验收。
 
-核心原则：**能本地化的全部本地化**——主链路是确定性程序；本地数据缺失时明确 blocked 并给出指引，不用合成数据顶替。**多 Agent 编排层**：live 运行默认启用六个独立 Codex 会话（协调/药材靶点/疾病发现/网络/富集/验收），程序做全部计算，Agent 只做核验与解释、结论不改程序产物。第三阶段默认查询 Open Targets 本地快照，只有显式指定 `online` 才调用 GraphQL；结果生成运行专用疾病索引；GeneCards/OMIM 采集与人机协助已于 2026-10-01 移除。
+核心原则：**能本地化的全部本地化**——主链路是确定性程序；本地数据缺失时明确 blocked 并给出指引，不用合成数据顶替。**多 Agent 编排层**：live 运行默认启用六个独立角色 API 核验调用（协调/药材靶点/疾病发现/网络/富集/验收），程序做全部计算，Agent 只做核验与解释、结论不改程序产物。第三阶段默认查询 Open Targets 本地快照，只有显式指定 `online` 才调用 GraphQL；结果生成运行专用疾病索引；GeneCards/OMIM 采集与人机协助已于 2026-10-01 移除。
 
 首页现已支持双向查询：方剂/药材 → 候选疾病，以及疾病 → 靶点 → 成分 → 候选关联药材。可输入“查询肺腺癌关联哪些药材”，或用输入框上方的方向选择。反向采用 BATMAN known-only，疾病歧义先选择，支持证据、疾病靶点、匹配指标追问及 JSON 导出；与正向共用任务接续、关闭取消和历史功能。详见 [疾病到药材查询](docs/DISEASE_TO_HERB.md)。反向使用透明匹配数量和覆盖率，不沿用正向启发式评分，不构成治疗推荐。
 
@@ -55,7 +59,7 @@ python -m venv .venv
 
 点击正向候选“查看证据”，可用交互图追溯“药材 → 成分 → 靶点 → 候选疾病”，按靶点与来源浏览并下载当前分组的SVG。节点和连线对应归档中的记录，旧数据缺失路径会明确提示；原证据表及排名保留。用法见[证据图说明](docs/EVIDENCE_VISUALIZATION.md)。
 
-首页正反向会话和工作台正向查询默认启用“知网文献证据（本地优先）”，可在查询设置或工作台复选框中关闭。新查询先显示靶点排序；本地有文献直接生成文献排序，只有题录则仅分析标题摘要，缺少文献才后台采集，完成后自动显示知网原记录链接、标题/摘要引文和独立文献排序。页面显示实际进度，可停止和续跑，刷新不重复启动；旧结果保持当时启用状态，不会自动追采，也可手动点“启用文献辅助”，无须重算靶点查询。不同关键词按阶段调度：一个方剂的AI分析可与另一个方剂的知网采集重叠，同一时间仍最多一个采集和一个分析，分析本身不并发。文献列表不设Top-N，保持现有篇数排序，与数据库排序分别展示。所需代码和数据已迁入本项目，不再依赖旧UI-Agent文件夹；正常网页先在后台采集，复用专用登录状态；后台被403拒绝时自动切到可见专用窗口继续，登录或验证码仍需手动处理，默认摘要分析模型为Codex `gpt-5.6-luna`，只取标题摘要、不获取正文。用法及验证边界见[文献流程](docs/LITERATURE_FLOW.md)和[交付说明](docs/CNKI_DELIVERY.md)。
+首页正反向会话和工作台正向查询默认启用“知网文献证据（本地优先）”，可在查询设置或工作台复选框中关闭。新查询先显示靶点排序；本地有文献直接生成文献排序，只有题录则仅分析标题摘要，缺少文献才后台采集，完成后自动显示知网原记录链接、标题/摘要引文和独立文献排序。页面显示实际进度，可停止和续跑，刷新不重复启动；旧结果保持当时启用状态，不会自动追采，也可手动点“启用文献辅助”，无须重算靶点查询。不同关键词按阶段调度：一个方剂的AI分析可与另一个方剂的知网采集重叠，同一时间仍最多一个采集和一个分析，分析本身不并发。文献列表不设Top-N，保持现有篇数排序，与数据库排序分别展示。所需代码和数据已迁入本项目，不再依赖旧UI-Agent文件夹；正常网页先在后台采集，复用专用登录状态；后台被403拒绝时自动切到可见专用窗口继续，登录或验证码仍需手动处理，摘要分析使用页面当前选中的模型 API，只取标题摘要、不获取正文。用法及验证边界见[文献流程](docs/LITERATURE_FLOW.md)和[交付说明](docs/CNKI_DELIVERY.md)。
 
 2026-10-25已完成大建中汤13页/246条真实采集及分析，生成51项文献疾病关联；214份完整摘要，4份网站节选单列，其他缺文字摘要记录只按标题分析，不取正文。数据包现为6组346条，详见[交付说明](docs/CNKI_DELIVERY.md)。
 
@@ -73,7 +77,7 @@ live 模式需要本地 BATMAN 数据，以及本地疾病索引或启用 Open T
 - **BATMAN-TCM v2.0 全量下载文件**：配置 `configs/batman_data.local.json`（模板 `configs/batman_data.example.json`）指向本机数据目录。
 - **本地疾病索引或 Open Targets**：用合格批次执行 `python -m pharm.discovery.query prepare --batch <批次目录>` 建立；也可启用工作台 Open Targets 数据查询，使用 API 或本地快照生成运行专用索引（见 [导入说明](docs/IMPORTS.md)）。
 
-live 运行默认启用多 Agent 核验（任务 `agents=true`），需要可用的 Codex CLI 与 profile（见 [Codex 执行配置](docs/CODEX_RUNTIME.md)）；环境不可用时运行会明确失败并提示改用 `agents=false`——纯程序 live 运行不需要模型服务。
+live 运行默认启用多 Agent 核验（任务 `agents=true`），需要页面已选用的模型 API（见 [统一执行配置](docs/CODEX_RUNTIME.md)）；环境不可用时运行会明确失败并提示改用 `agents=false`——纯程序 live 运行不需要模型服务。
 
 ### 5. 测试
 
@@ -100,7 +104,7 @@ flowchart LR
     C --> D[review<br/>程序验收与报告]
     E[BATMAN v2.0<br/>本地全量文件] -.-> B
     F[SQLite 疾病索引<br/>只读、可插拔批次] -.-> C
-    M[六个 Codex 核验会话<br/>程序计算·Agent 核验] -.-> A
+    M[六角色 API 核验<br/>程序计算·Agent 核验] -.-> A
     M -.-> B
     M -.-> C
     M -.-> D
@@ -116,7 +120,7 @@ flowchart LR
 ```
 
 - 两条流水线（`pharm/pipeline/scheduler.py` 注册 DAG）：discovery（四阶段反向发现）与 analysis（候选疾病的机制分析，经 POST /api/analysis 触发）。manifest.json 是唯一状态源；参数即身份（task_id 为内容哈希）、代码即签名（resume 只复用输入/代码/数据/产物哈希全一致的成功阶段）。
-- **多 Agent 编排**：程序完成计算后启动对应 Codex 会话核验（提示词在 `agents/*.md`，内容哈希参与阶段签名）；Agent 报 failed 只把阶段降为 partial，程序产物不改；会话错误如实记录。
+- **多 Agent 编排**：程序完成计算后启动对应角色通过统一 API 核验（提示词在 `agents/*.md`，内容哈希参与阶段签名）；Agent 报 failed 只把阶段降为 partial，程序产物不改；会话错误如实记录。
 - 本地数据缺失 → 阶段 blocked + 数据配置 guidance；启用 Open Targets 查询时，第三阶段可由查询结果建库。blocked/failed 也是终态，下游如实记录。
 - scientific_complete 恒为 false：关键词关联≠疗效；置信度是启发式（heuristic_v2）而非统计检验；零结果如实保留。
 
@@ -125,7 +129,7 @@ flowchart LR
 ```text
 pharm/            全部运行时代码
   core/           公共基础（路径/IO、归档、导入校验、符号校验）
-  agents/         Codex 会话适配器（多 Agent 核验层）
+  agents/         统一 API 角色核验适配器
   batman/         BATMAN 本地数据查询、全药材目录扩展、内置四方剂组成表
   diseases/       Open Targets API/快照、Monarch 本地证据与通用关联批次建库
   agent/          正向药材→靶点→候选疾病查询
@@ -156,7 +160,7 @@ data/ runs/ reports/ local/   运行生成或本机私有内容，默认不提�
 | [数据导入说明](docs/IMPORTS.md) | 通用批次与 Open Targets 快照的校验纪律 |
 | [数据交接约定](docs/DATA_CONTRACT.md) | 双流水线产物、状态语义、归档布局 |
 | [环境准备](docs/ENVIRONMENT_SETUP.md) | 软件、浏览器与数据来源准备 |
-| [Codex 执行配置](docs/CODEX_RUNTIME.md) | 多 Agent 核验层的模型会话配置（live 默认启用） |
+| [统一模型执行配置](docs/CODEX_RUNTIME.md) | 多 Agent 核验层的模型会话配置（live 默认启用） |
 | [任务模板](tasks/tasks.example.jsonl) / [填写说明](tasks/README.md) | 任务字段与示例 |
 
 ## 历史

@@ -10,10 +10,17 @@ import threading
 from uuid import uuid4
 
 from ..core.common import ROOT
+from .. import llm
 
-MODEL = "gpt-5.6-luna"
-VERSION = 1
+VERSION = 2
 _lock = threading.Lock()
+
+
+class TranslationResult(tuple):
+    def __new__(cls, terms, cached, model_info):
+        value = super().__new__(cls, (terms, cached))
+        value.model_info = model_info
+        return value
 
 
 def validate(payload):
@@ -31,7 +38,9 @@ def validate(payload):
 
 def suggest(query, *, root=ROOT, runner=None):
     """Single-flight bounded model call; cache only valid terms, recheck catalog later."""
-    key = hashlib.sha256(json.dumps([VERSION, MODEL, query], ensure_ascii=False).encode()).hexdigest()
+    selection = llm.capture(root) if runner is None else None
+    model_info = llm.identity(selection) if selection else {"runtime": "test_runner", "model": "test-runner", "config_fingerprint": "test-runner"}
+    key = hashlib.sha256(json.dumps([VERSION, model_info["config_fingerprint"], query], ensure_ascii=False).encode()).hexdigest()
     directory = Path(root) / "local/agent/disease-translation"
     path = directory / (key + ".json")
     if not _lock.acquire(timeout=1):
@@ -39,8 +48,8 @@ def suggest(query, *, root=ROOT, runner=None):
     try:
         try:
             cached = json.loads(path.read_text(encoding="utf-8"))
-            if cached.get("version") == VERSION and cached.get("query") == query and cached.get("model") == MODEL:
-                return validate({"terms": cached["terms"]}), True
+            if cached.get("version") == VERSION and cached.get("query") == query and cached.get("llm") == model_info:
+                return TranslationResult(validate({"terms": cached["terms"]}), True, model_info)
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             pass
         work = directory / "attempts" / uuid4().hex
@@ -52,19 +61,19 @@ def suggest(query, *, root=ROOT, runner=None):
             'or generate ontology IDs. Preserve every subtype modifier. If uncertain return an empty list. '
             'Return ONLY JSON of the form {"terms":["English disease name"]}.\n'
             + json.dumps({"input": query}, ensure_ascii=False))
-        if runner is None:
-            from ..literature.collector import run_model
-            runner = run_model
         try:
-            raw = runner(prompt, work / "translation.log", root=root, workspace=work,
-                         model=MODEL, browser=False, timeout=60)
-            terms = validate(json.loads(raw))
+            if runner is None:
+                raw = llm.text_sync(prompt, root=root, selection=selection, purpose="disease_translation", timeout=60, log_path=work / "translation.log")
+            else:
+                raw = runner(prompt, work / "translation.log", root=root, workspace=work,
+                             model=model_info["model"], browser=False, timeout=60)
+            terms = validate(llm.parse_json(raw))
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             raise RuntimeError("疾病名称翻译暂不可用（模型未就绪、超时或响应不合格）；可输入英文名或标准 ID 重试") from exc
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"version": VERSION, "model": MODEL, "query": query,
+        temporary.write_text(json.dumps({"version": VERSION, "model": model_info["model"], "llm": model_info, "query": query,
                                          "terms": terms}, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
-        return terms, False
+        return TranslationResult(terms, False, model_info)
     finally:
         _lock.release()

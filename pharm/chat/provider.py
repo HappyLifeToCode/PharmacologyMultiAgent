@@ -122,7 +122,7 @@ async def complete(config, messages, tools=None, *, short=False, transport=None)
         else: headers["Authorization"] = "Bearer " + config["api_key"]
     if anthropic: headers["anthropic-version"] = "2023-06-01"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(65, connect=12), follow_redirects=False, transport=transport,
+        async with httpx.AsyncClient(timeout=httpx.Timeout(float(config.get("_request_timeout", 65)), connect=12), follow_redirects=False, transport=transport,
                                      trust_env=not config.get("allow_insecure_http", False)) as client:
             async with client.stream("POST", endpoint_url(config), headers=headers, json=payload) as response:
                 if response.status_code != 200:

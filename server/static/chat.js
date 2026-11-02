@@ -100,10 +100,18 @@ function settings() {
   } catch (error) { return { top_k: 10, batman_threshold: .84 }; }
 }
 
-function createSession() {
+function assistantNetworkDefault() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}").assistant_network_default;
+    return typeof value === "boolean" ? value : true;
+  } catch { return true; }
+}
+
+function createSession(options = {}) {
   const session = { id: uid(), title: "新对话", updated: new Date().toISOString(), messages: [] };
   appState.sessions.unshift(session);
   appState.selected = session.id;
+  if (!options.preserveNetwork) byId("online-sources").checked = assistantNetworkDefault();
   byId("history-search").value = "";
   saveSessions();
   render();
@@ -693,6 +701,7 @@ function openSettings() {
   byId("setting-top-k").value = values.top_k;
   byId("setting-threshold").value = values.batman_threshold;
   byId("setting-cnki").checked = cnkiSetting();
+  byId("setting-network-default").checked = assistantNetworkDefault();
   byId("settings-dialog").showModal();
 }
 
@@ -711,7 +720,7 @@ async function bootChat() {
   const jumpObserver = new ResizeObserver(updateJumpToLatest);
   for (const id of ["message-scroll", "messages", "welcome"]) jumpObserver.observe(byId(id));
   updateJumpToLatest();
-  byId("new-chat").addEventListener("click", createSession);
+  byId("new-chat").addEventListener("click", () => createSession());
   byId("history-search").addEventListener("input", renderHistory);
   byId("composer-form").addEventListener("submit", (event) => { event.preventDefault(); submitMessage(); });
   byId("chat-input").addEventListener("keydown", (event) => {
@@ -733,10 +742,12 @@ async function bootChat() {
   byId("close-settings").addEventListener("click", () => byId("settings-dialog").close());
   byId("settings-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    const values = { top_k: Number(byId("setting-top-k").value), batman_threshold: Number(byId("setting-threshold").value), cnki_enabled: byId("setting-cnki").checked };
+    const values = { top_k: Number(byId("setting-top-k").value), batman_threshold: Number(byId("setting-threshold").value), cnki_enabled: byId("setting-cnki").checked,
+      assistant_network_default: byId("setting-network-default").checked };
     if (!Number.isInteger(values.top_k) || values.top_k < 1 || values.top_k > 100 || values.batman_threshold < 0 || values.batman_threshold > 1) return;
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(values)); }
     catch (error) { byId("status-message").textContent = "浏览器无法保存查询设置。"; return; }
+    byId("online-sources").checked = values.assistant_network_default;
     byId("settings-dialog").close();
     byId("chat-input").focus();
   });

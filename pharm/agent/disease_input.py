@@ -169,10 +169,12 @@ def resolve(text=None, *, disease=None, disease_id=None, data_dir=None, monarch_
     if allow_translation and not exact and _contains_chinese(query):
         from . import disease_translation
         try:
-            terms, cached = disease_translation.suggest(query)
+            translated_result = disease_translation.suggest(query)
+            terms, cached = translated_result
             translated = set().union(*(names.get(normalise(term), set()) for term in terms))
             translation = {"status": "matched" if translated else "no_exact_match", "terms": terms,
-                           "cache_hit": cached, "model": disease_translation.MODEL}
+                           "cache_hit": cached, "model": getattr(translated_result, "model_info", {}).get("model"),
+                           "llm": getattr(translated_result, "model_info", None)}
             if translated:
                 return {"status": "needs_selection", "query": query, "exact": False,
                         "match_type": "translation_exact", "translation": translation,

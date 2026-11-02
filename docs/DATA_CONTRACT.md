@@ -195,4 +195,6 @@ live 运行逐阶段归档到 `data/pharm/<归档名>/`（方名或 `custom_<tas
 
 ## LLM 研究问答补充（2026-11-02）
 
+全项目统一 API 后，模型调用增加不含凭据的 `llm` 元数据：runtime/profile_id/model/api_style/config_fingerprint。核验运行的 manifest 与阶段签名绑定实际配置；疾病翻译按配置指纹缓存；文献任务保存 llm_attempts，抽取片段与发布的 extraction_models 保留各篇实际模型来源，缓存缺来源时标 legacy_unknown。当前尝试不能覆盖旧片段模型署名；真实地址和密钥不得进入这些记录。
+
 `local/assistant/runs/<request_id>.json` 保存问答状态、问题、模型名、工具事件、回答和编号证据；`sessions` 保存有限上下文。状态为 queued/running/succeeded/failed/cancelled/timed_out/interrupted，succeeded 只表示回答生成完成。旧数据库 run_id 与研究归档不改变。新增 sources 中的 id、text、source、metadata、retrieved_at 用于引用追溯；截断明示，引用检查仅保证编号存在。配置密钥不进入问答归档、浏览器会话或导出。完整字段与边界见 [研究问答与模型 API](ASSISTANT_CHAT.md)。

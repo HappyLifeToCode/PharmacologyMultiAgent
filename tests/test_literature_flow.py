@@ -123,7 +123,7 @@ def test_missing_literature_returns_targets_first_then_generates_ranking_in_back
     harness.release.set()
     result = wait_for(lambda: (s if (s := harness.flows.status(tmp_path, "forward_case"))["state"] == "ready" else None))
     assert result["literature"]["result"]["candidates"][0]["paper_count"] == 1
-    assert result["collection"]["model"] == "gpt-5.6-luna"
+    assert result["collection"]["model"] is None
     assert path.read_bytes() == before
 
 

@@ -1,1 +1,1 @@
-"""Agent runtime adapters (Codex CLI sessions)."""
+"""Independent role reviewers using the centrally selected model API."""

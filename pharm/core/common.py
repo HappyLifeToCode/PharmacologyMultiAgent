@@ -96,6 +96,6 @@ def public_artifact(path):
     if any(part.lower() in ("traces", "input_snapshot", "sources") for part in path.parts):
         return False
     name = path.name.lower()
-    if name in ("prompt.txt", "response.json", "response.schema.json", "stderr.log", "codex.events.jsonl"):
+    if name in ("prompt.txt", "response.json", "response.schema.json", "stderr.log", "codex.events.jsonl", "api_call.json", "api_call.response.txt"):
         return False
     return path.suffix.lower() in (".png", ".csv", ".tsv", ".json", ".txt", ".md")

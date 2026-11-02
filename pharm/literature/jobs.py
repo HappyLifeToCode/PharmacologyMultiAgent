@@ -69,7 +69,7 @@ class CollectionManager:
                 collector.validate_scan(task, work, papers)
             except collector.CollectionValidationError as exc:
                 failure_code, error = exc.failure_code, str(exc)
-        return {"id": job_id, "keyword": task["keyword"], "model": task.get("model", collector.DEFAULT_MODEL),
+        return {"id": job_id, "keyword": task["keyword"], "model": task.get("model"), "llm": task.get("llm"),
                 "runtime_version": collector.RUNTIME_VERSION,
                 "browser_mode": task.get("browser_mode", "background"), "browser_fallback": task.get("browser_fallback"),
                 "collection_mode": task.get("collection_mode", "all" if task.get("limit") is None else "incremental"), "limit": task.get("limit"),

@@ -69,7 +69,7 @@ def test_cache_reuses_terms_but_rechecks_current_catalog(tmp_path, catalog, monk
     result = resolver.resolve("未登记病名", allow_translation=True)
     assert result["status"] == "not_found" and result["translation"]["cache_hit"] is True
     assert len(calls) == 1 and calls[0]["browser"] is False and calls[0]["timeout"] == 60
-    assert calls[0]["model"] == "gpt-5.6-luna"
+    assert calls[0]["model"] == "test-runner"
 
 
 @pytest.mark.parametrize("payload", [{"terms": "cancer"}, {"terms": ["MONDO:123"]}, {"terms": ["疾病"]},

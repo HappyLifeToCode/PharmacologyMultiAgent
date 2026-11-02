@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 
 from pharm.core.common import ROOT
 from pharm.chat import config, provider, engine
+from pharm import llm
 
 router = APIRouter()
 
@@ -35,10 +36,10 @@ async def save_settings(request: Request):
 async def test_settings(request: Request):
     if await body(request): raise HTTPException(400, "连接检查不接受额外参数")
     try:
-        value = config.read(ROOT, secret=True)
-        await provider.complete(value, [{"role": "user", "content": "Reply only OK."}], short=True)
+        value = llm.capture(ROOT)
+        await llm.complete(value, [{"role": "user", "content": "Reply only OK."}], short=True)
         return {"ok": True, "message": "模型接口连接成功；工具调用能力将在实际问答时核验", "model": value["model"]}
-    except (provider.ModelError, ValueError) as exc: raise HTTPException(400, str(exc))
+    except (RuntimeError, ValueError) as exc: raise HTTPException(400, str(exc))
 
 
 @router.post("/api/assistant/config/select")
@@ -88,3 +89,8 @@ def assistant_script():
 @router.get("/assets/assistant.css")
 def assistant_style():
     return FileResponse(ROOT / "server/static/assistant.css", media_type="text/css")
+
+
+@router.get("/assets/assistant-markdown.js")
+def assistant_markdown():
+    return FileResponse(ROOT / "server/static/assistant-markdown.js", media_type="text/javascript")
