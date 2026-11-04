@@ -1,4 +1,4 @@
-:root { --research-accent: #315b4b; --research-soft: #e9efea; }
+:root { --research-accent: var(--ui-research); --research-soft: var(--ui-research-soft); }
 .model-status-button { display:flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:22px; padding:8px 13px; font-size:12px; background:var(--surface); max-width:260px; }
 .model-status-button img { width:14px; height:14px; opacity:.6; }
 #model-status { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

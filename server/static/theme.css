@@ -1,0 +1,15 @@
+:root {
+  --ui-page: #f8f5ef;
+  --ui-sidebar: #eee9df;
+  --ui-surface: #fffcf7;
+  --ui-text: #342f2a;
+  --ui-muted: #6b6259;
+  --ui-line: #d9cfc2;
+  --ui-brand: #9f4433;
+  --ui-brand-soft: #f1e4dc;
+  --ui-research: #315b4b;
+  --ui-research-hover: #254839;
+  --ui-research-soft: #e9efea;
+  --ui-focus: #315b4b;
+  --ui-font: "Segoe UI", "Microsoft YaHei", sans-serif;
+}

@@ -1,16 +1,16 @@
 :root {
-  --page: #f8f5ef;
-  --sidebar: #eee9df;
-  --surface: #fffcf7;
-  --ink: #342f2a;
-  --muted: #82796d;
-  --line: #e3dace;
-  --accent: #ac4a36;
-  --accent-soft: #f1e4dc;
+  --page: var(--ui-page);
+  --sidebar: var(--ui-sidebar);
+  --surface: var(--ui-surface);
+  --ink: var(--ui-text);
+  --muted: var(--ui-muted);
+  --line: var(--ui-line);
+  --accent: var(--ui-brand);
+  --accent-soft: var(--ui-brand-soft);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; color: var(--ink); background: var(--page); font: 15px/1.75 "Segoe UI", "Microsoft YaHei", sans-serif; }
+body { margin: 0; color: var(--ink); background: var(--page); font: 15px/1.75 var(--ui-font); }
 button, input, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; color: inherit; }
@@ -44,6 +44,10 @@ kbd { margin-left: auto; border: 1px solid var(--line); border-radius: 4px; padd
 .history-delete { padding: 7px; margin-right: 2px; opacity: .45; }
 .history-delete img { width: 14px; height: 14px; }
 .history-delete:hover { opacity: 1; }
+.history-rename { padding: 7px; opacity: 0; transition: opacity .15s; }
+.history-rename img { width: 14px; height: 14px; }
+.history-item:hover .history-rename, .history-item:focus-within .history-rename { opacity: .75; }
+.rename-actions { display: flex; justify-content: flex-end; gap: 16px; align-items: center; }
 .sidebar-bottom { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .local-note { display: block; font-size: 10px; color: var(--muted); padding: 0 10px 9px; }
 .sidebar-link { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; font-size: 12px; border-radius: 6px; text-align: left; }
@@ -74,6 +78,17 @@ h1 { font-family: "Noto Serif SC", "SimSun", serif; font-size: clamp(25px, 2.5vw
 .message { margin: 13px 0 30px; animation: message-enter .18s ease-out; }
 .message.user { display: flex; justify-content: flex-end; }
 .user-content { background: #ece4d9; padding: 12px 18px; border-radius: 15px 15px 3px 15px; max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.user-message-body { max-width: 85%; min-width: 0; }
+.user-message-body .user-content { max-width: 100%; }
+.message-copy { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 5px 0 0 25px; border-radius: 6px; opacity: 0; pointer-events: none; transition: opacity .15s, background .15s; }
+.message-copy img { width: 15px; height: 15px; opacity: .65; }
+.user-message-body .message-copy { margin-left: 0; }
+.message:hover .message-copy, .message:focus-within .message-copy { opacity: 1; pointer-events: auto; }
+.message-copy:hover, .message-copy.copied { background: #e2d8ca; }
+.message-copy.copied::after { content: "已复制"; position: absolute; margin-left: 76px; font-size: 11px; white-space: nowrap; color: var(--muted); }
+@media (hover: none) { .message-copy, .history-rename { opacity: 1; pointer-events: auto; } }
+@media (max-width: 700px) { .message-copy { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .message-copy, .history-rename { transition: none; } }
 .assistant-heading { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--accent); margin-bottom: 12px; font-weight: 600; }
 .assistant-heading img { width: 17px; height: 17px; }
 .assistant-content { padding-left: 25px; }

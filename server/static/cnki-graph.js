@@ -13,11 +13,12 @@ const CnkiGraph = (() => {
     let excluded = 0;
     for (const [index, e] of (candidate.evidence || []).entries()) {
       if (!e.paper_id || !e.quote || !e.legacy_head || !e.raw_disease || !["title", "abstract"].includes(e.quote_field)) { excluded++; continue; }
-      const identity = JSON.stringify([e.paper_id, e.legacy_head, e.raw_disease, e.quote_field, e.quote]);
+      const identity = JSON.stringify([e.paper_id, e.legacy_head, e.legacy_relation || null, e.raw_disease, e.quote_field, e.quote]);
       if (seen.has(identity)) continue;
       seen.add(identity);
       const bibliography = e.bibliography || data.bibliographies?.[e.paper_id] || {};
       paths.push({ id: identity, evidence_index: index, evidence: e, bibliography,
+        triple: { subject: e.legacy_head, predicate: text(e.legacy_relation) || null, object: e.raw_disease },
         source_files: data.source?.files || {}, mapping: candidate.mapping,
         // Author names remain scoped to a paper; names alone do not identify people.
         nodes: [
@@ -43,11 +44,24 @@ const CnkiGraph = (() => {
     const markerId = "cnki-arrow-" + (++graphSequence);
     const root = node("section", null, "cnki-graph"), controls = node("div", null, "cnki-actions"), status = node("span");
     parent.append(root);
-    root.append(node("p", "方剂/药材 → 论文 → 标题或摘要原句 → 疾病。点击节点查看记录与出处；连线表示文献记录关系，不表示疗效或靶点机制。", "cnki-note"));
+    root.append(node("p", "流程图展示文献出处；三元组展示“主体 — 关系 — 客体”。点击节点查看原句。关系保留原提取记录，仍需结合文献复核。", "cnki-note"));
     if (!model.paths.length) { root.append(node("p", "这份记录缺少完整原句路径，请查看下方证据表；未补画推断关系。", "cnki-notice")); return; }
     const viewport = node("div", null, "cnki-graph-viewport"), inspector = node("div", null, "cnki-graph-inspector");
     inspector.setAttribute("aria-live", "polite");
     let page = 0, svg;
+    const views = node("fieldset", null, "cnki-graph-views");
+    views.append(node("legend", "图谱形式（可多选）"));
+    const choices = {};
+    for (const [key, title] of [["flow", "流程图"], ["triple", "三元组"]]) {
+      const label = node("label"), input = node("input");
+      input.type = "checkbox"; input.checked = key === "flow";
+      input.addEventListener("change", () => {
+        if (!choices.flow.checked && !choices.triple.checked) input.checked = true;
+        render();
+      });
+      choices[key] = input; label.append(input, document.createTextNode(title)); views.append(label);
+    }
+    root.append(views);
     const action = (label, fn) => { const b = node("button", label); b.type = "button"; b.onclick = fn; return b; };
     const previous = action("上一组", () => { page--; render(); });
     const next = action("下一组", () => { page++; render(); });
@@ -86,12 +100,14 @@ const CnkiGraph = (() => {
       const rows = model.paths.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
       status.textContent = (page + 1) + " / " + pages + " 组 · " + model.paths.length + " 条原句路径";
       previous.disabled = !page; next.disabled = page === pages - 1;
-      svg = svgNode("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: `0 0 1000 ${rows.length * 220}`, width: 1000, height: rows.length * 220, role: "img", "aria-label": "CNKI 文献证据溯源图", style: "background:#fffdf8;font-family:Microsoft YaHei,sans-serif" });
+      const rowHeight = (choices.flow.checked ? 220 : 0) + (choices.triple.checked ? 130 : 0);
+      svg = svgNode("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: `0 0 1000 ${rows.length * rowHeight}`, width: 1000, height: rows.length * rowHeight, role: "img", "aria-label": "CNKI 文献证据溯源图", style: "background:#fffdf8;font-family:Microsoft YaHei,sans-serif" });
       const defs = svgNode("defs"), marker = svgNode("marker", { id: markerId, markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: "auto" });
       marker.append(svgNode("path", { d: "M0,0 L8,4 L0,8 Z", fill: "#928476" })); defs.append(marker); svg.append(defs);
       function edge(x1, y1, x2, y2, dashed) { svg.append(svgNode("path", { d: `M${x1},${y1} L${x2},${y2}`, stroke: "#928476", "stroke-width": 1.3, fill: "none", "stroke-dasharray": dashed ? "4 3" : "none", "marker-end": "url(#" + markerId + ")" })); }
       rows.forEach((path, i) => {
-        const y = i * 220 + 12;
+        const y = i * rowHeight + 12;
+        if (choices.flow.checked) {
         [220, 470, 720].forEach(x => edge(x, y + 32, x + 35, y + 32));
         [[170, "authors"], [500, "institutions"], [830, "journal"]].forEach(([x]) => edge(365, y + 64, x, y + 116, true));
         path.nodes.forEach((n, j) => box(path, n.type, n.label, n.relation, 10 + j * 250, y, 210, j === 2 ? "#f8eddb" : "#edf3ec"));
@@ -99,6 +115,16 @@ const CnkiGraph = (() => {
         box(path, "authors", "第一：" + (named(b.first_authors) || "未记录") + "；通讯：" + (named(b.corresponding_authors) || "未记录"), "论文署名（按篇区分身份）", 20, y + 116, 300, "#f3efe8");
         box(path, "institutions", named(b.institutions) || "机构未记录", "论文所列机构", 350, y + 116, 300, "#f3efe8");
         box(path, "journal", b.journal?.name || "期刊未记录", "刊载来源 · 点击查看影响因子", 680, y + 116, 300, "#f3efe8");
+        }
+        if (choices.triple.checked) {
+          const top = y + (choices.flow.checked ? 220 : 0);
+          svg.append(svgNode("text", { x: 20, y: top + 12, fill: "#6a6056", "font-size": 12 }, "三元组 · " + path.evidence.title));
+          edge(280, top + 60, 350, top + 60);
+          edge(650, top + 60, 720, top + 60);
+          box(path, "intervention", path.triple.subject, "主体 · 原文方剂/药材", 20, top + 28, 260, "#edf3ec");
+          box(path, "relation", path.triple.predicate || "关系未记录", "关系 · 原提取记录，待复核", 350, top + 28, 300, "#f8eddb");
+          box(path, "disease", path.triple.object, "客体 · 原文疾病", 720, top + 28, 260, "#edf3ec");
+        }
       });
       viewport.replaceChildren(svg);
       inspect(rows[0], "paper");

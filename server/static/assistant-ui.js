@@ -136,7 +136,7 @@ const AssistantUI = (() => {
     session.messages.push({ id: uid(), role: "user", kind: "text", text });
     const reply = { id: uid(), role: "assistant", kind: "assistant_pending", jobId: body.request_id, text: "正在准备研究问答…", research: null };
     session.messages.push(reply);
-    if (session.title === "新对话") session.title = text.slice(0, 32);
+    if (!session.customTitle && session.title === "新对话") session.title = text.slice(0, 32);
     session.updated = new Date().toISOString();
     appState.busy.add(session.id);
     byId("chat-input").value = ""; byId("chat-input").style.height = "";
@@ -348,7 +348,6 @@ const AssistantUI = (() => {
     for (const event of data.events || []) process.append(nodes("p", "assistant-step", (event.status === "succeeded" ? "完成" : event.status === "limited" ? "受限" : "未完成") + " · " + event.label + (event.reused ? "（复用本轮结果）" : "") + (event.summary ? " — " + event.summary : "")));
     process.append(nodes("p", "reply-note", data.citation_check || "记录保留了本轮工具执行状态。"));
     const actions = nodes("div", "assistant-answer-actions");
-    actions.append(action("复制回答", async () => { try { await navigator.clipboard.writeText(data.answer || ""); byId("status-message").textContent = "回答已复制"; } catch { byId("status-message").textContent = "复制失败，可直接选择回答文本"; } }));
     actions.append(action("导出回答与来源", () => { const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })); const a = nodes("a"); a.href = url; a.download = "research-answer-" + message.jobId + ".json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }));
     content.append(actions);
   }

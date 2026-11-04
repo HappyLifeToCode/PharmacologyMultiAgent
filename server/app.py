@@ -154,6 +154,11 @@ def chat_script():
     return FileResponse(ROOT / "server/static/chat.js", media_type="text/javascript")
 
 
+@app.get("/assets/theme.css")
+def theme_style():
+    return FileResponse(ROOT / "server/static/theme.css", media_type="text/css")
+
+
 @app.get("/assets/chat.css")
 def chat_style():
     return FileResponse(ROOT / "server/static/chat.css", media_type="text/css")
@@ -272,7 +277,7 @@ async def literature_flow_action(direction: str, run_id: str, action: str, reque
 @app.get("/assets/icons/{filename}")
 def chat_icon(filename: str):
     allowed = {"leaf.svg", "plus.svg", "search.svg", "arrow-up.svg", "settings.svg",
-               "layout-sidebar.svg", "download.svg", "x.svg", "trash.svg", "favicon.svg"}
+               "layout-sidebar.svg", "download.svg", "x.svg", "trash.svg", "favicon.svg", "copy.svg", "pencil.svg"}
     if filename not in allowed:
         raise HTTPException(404)
     return FileResponse(ROOT / "server/static/icons" / filename, media_type="image/svg+xml")

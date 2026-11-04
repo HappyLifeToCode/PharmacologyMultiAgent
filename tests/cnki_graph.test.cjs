@@ -32,3 +32,13 @@ test('reverse paths preserve raw formula and disease names and source metadata',
   assert.equal(graph.paths[0].nodes[3].label, '示例病');
   assert.equal(graph.paths[0].bibliography.institutions[0].name, '记录机构');
 });
+
+test('triples preserve recorded predicates including negative relations and never fill missing ones', () => {
+  const graph = buildModel({}, { evidence: [evidence, { ...evidence, legacy_relation: '未见改善' }, { ...evidence, legacy_relation: '改善' }] });
+  assert.equal(graph.paths.length, 3);
+  assert.deepEqual(graph.paths.map(path => path.triple), [
+    { subject: '测试方', predicate: null, object: '示例病' },
+    { subject: '测试方', predicate: '未见改善', object: '示例病' },
+    { subject: '测试方', predicate: '改善', object: '示例病' },
+  ]);
+});

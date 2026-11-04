@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>药理研究助手</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg?v=20261014">
-<link rel="stylesheet" href="/assets/chat.css?v=20261102-jump-latest">
+<link rel="stylesheet" href="/assets/theme.css?v=20261104-unified">
+<link rel="stylesheet" href="/assets/chat.css?v=20261104-unified">
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
-<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261029-source-graph">
-<link rel="stylesheet" href="/assets/assistant.css?v=20261102-markdown">
+<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261104-unified">
+<link rel="stylesheet" href="/assets/assistant.css?v=20261104-unified">
 </head>
 <body>
 <div class="chat-shell">
@@ -66,6 +67,13 @@
     </div>
   </main>
 </div>
+<dialog id="rename-dialog" class="settings-dialog" aria-labelledby="rename-dialog-title">
+  <form id="rename-form">
+    <div class="dialog-heading"><h2 id="rename-dialog-title">重命名会话</h2></div>
+    <label>会话名称<input id="rename-title" type="text" required maxlength="100" autocomplete="off"></label>
+    <div class="rename-actions"><button type="button" id="cancel-rename">取消</button><button type="submit" class="primary-button">保存</button></div>
+  </form>
+</dialog>
 <dialog id="settings-dialog" class="settings-dialog">
   <form id="settings-form">
     <div class="dialog-heading"><h2>查询设置</h2><button type="button" id="close-settings" class="icon-button" aria-label="关闭设置"><img src="/assets/icons/x.svg" alt=""></button></div>
@@ -104,14 +112,14 @@
 <script src="/assets/query-presence.js?v=20261014-tab"></script>
 <script src="/assets/query-progress.js?v=20261015-layout"></script>
 <script src="/assets/formula-picker.js?v=20261025-herb-label"></script>
-<script src="/assets/reverse-chat.js?v=20261102-batches"></script>
+<script src="/assets/reverse-chat.js?v=20261104-message-actions"></script>
 <script src="/assets/evidence-graph.js?v=20261022"></script>
 <script src="/assets/literature-flow.js?v=20261102-batches"></script>
-<script src="/assets/cnki-graph.js?v=20261029-source-graph"></script>
+<script src="/assets/cnki-graph.js?v=20261104-triples"></script>
 <script src="/assets/task-clock.js?v=20261102-cnki-dialogue"></script>
 <script src="/assets/cnki-literature.js?v=20261102-merged-batches"></script>
 <script src="/assets/assistant-markdown.js?v=20261102-markdown"></script>
-<script src="/assets/assistant-ui.js?v=20261102-cnki-evidence"></script>
-<script src="/assets/chat.js?v=20261102-batches"></script>
+<script src="/assets/assistant-ui.js?v=20261104-message-actions"></script>
+<script src="/assets/chat.js?v=20261104-message-actions"></script>
 </body>
 </html>

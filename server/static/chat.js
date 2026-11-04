@@ -128,6 +128,35 @@ function cnkiSetting() {
   catch { return LiteratureFlow.newQueryEnabled(); }
 }
 
+function renameSession(session) {
+  const dialog = byId("rename-dialog"), input = byId("rename-title");
+  dialog.dataset.sessionId = session.id;
+  input.value = session.title;
+  input.setCustomValidity("");
+  dialog.showModal(); input.focus(); input.select();
+}
+
+function messageCopy(message, content) {
+  const button = action("", async () => {
+    let value = message.role === "user" ? message.text : message.research?.answer || message.text;
+    if (!value && content) {
+      const copy = content.cloneNode(true);
+      copy.querySelectorAll("button, .assistant-answer-actions, .cnki-actions, input, select").forEach(node => node.remove());
+      copy.querySelectorAll("p, h2, h3, h4, h5, tr, summary, blockquote, li, pre").forEach(node => node.append(document.createTextNode("\n")));
+      value = copy.textContent.trim();
+    }
+    if (!value) { byId("status-message").textContent = "这条消息暂无可复制的内容。"; return; }
+    try {
+      await navigator.clipboard.writeText(value);
+      button.setAttribute("aria-label", "已复制"); button.title = "已复制";
+      button.classList.add("copied");
+      setTimeout(() => { button.setAttribute("aria-label", "复制消息"); button.title = "复制消息"; button.classList.remove("copied"); }, 1500);
+    } catch { byId("status-message").textContent = "复制失败，请选择消息文字手动复制。"; }
+  }, "message-copy");
+  button.append(icon("copy")); button.title = "复制消息"; button.setAttribute("aria-label", "复制消息");
+  return button;
+}
+
 function renderHistory() {
   const list = byId("history-list");
   list.replaceChildren();
@@ -153,7 +182,10 @@ function renderHistory() {
     remove.append(icon("trash"));
     remove.setAttribute("aria-label", "删除对话：" + session.title);
     remove.disabled = appState.busy.has(session.id);
-    row.append(select, remove);
+    const rename = action("", () => renameSession(session), "history-rename");
+    rename.append(icon("pencil")); rename.title = "重命名会话";
+    rename.setAttribute("aria-label", "重命名会话：" + session.title);
+    row.append(select, rename, remove);
     list.append(row);
   }
 }
@@ -162,13 +194,14 @@ function messageContent(message) {
   const article = element("article", "message " + message.role);
   article.dataset.messageId = message.id;
   if (message.role === "user") {
-    article.append(element("div", "user-content", message.text));
+    const body = element("div", "user-message-body");
+    body.append(element("div", "user-content", message.text), messageCopy(message)); article.append(body);
     return { article, content: null };
   }
   const heading = element("div", "assistant-heading");
   heading.append(icon("leaf"), element("span", "", "药理研究助手"));
   const content = element("div", "assistant-content");
-  article.append(heading, content);
+  article.append(heading, content, messageCopy(message, content));
   return { article, content };
 }
 
@@ -604,7 +637,7 @@ async function submitMessage(suppliedText, context) {
   byId("status-message").textContent = "";
   const userMessage = { id: uid(), role: "user", kind: "text", text };
   session.messages.push(userMessage);
-  if (session.title === "新对话") session.title = text.slice(0, 32);
+  if (!session.customTitle && session.title === "新对话") session.title = text.slice(0, 32);
   session.updated = new Date().toISOString();
   byId("chat-input").value = "";
   byId("chat-input").style.height = "";
@@ -727,6 +760,18 @@ async function bootChat() {
   updateJumpToLatest();
   byId("new-chat").addEventListener("click", () => createSession());
   byId("history-search").addEventListener("input", renderHistory);
+  byId("cancel-rename").addEventListener("click", () => byId("rename-dialog").close());
+  byId("rename-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const input = byId("rename-title"), title = input.value.trim();
+    input.setCustomValidity(title ? "" : "请输入会话名称");
+    if (!input.reportValidity()) return;
+    const session = appState.sessions.find(item => item.id === byId("rename-dialog").dataset.sessionId);
+    if (session) { session.title = title; session.customTitle = true; saveSessions(); }
+    byId("rename-dialog").close(); renderHistory();
+    byId("conversation-title").textContent = currentSession()?.title || "新对话";
+  });
+  byId("rename-title").addEventListener("input", event => event.target.setCustomValidity(""));
   byId("composer-form").addEventListener("submit", (event) => { event.preventDefault(); submitMessage(); });
   byId("chat-input").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submitMessage(); }
