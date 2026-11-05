@@ -288,6 +288,13 @@ const AssistantUI = (() => {
       const result = data.cnki_result;
       const section = details("CNKI 全部关联候选（" + result.candidate_count + "）", content);
       section.append(nodes("p", "reply-note", "程序整理的已保存文献关联，包含 " + result.paper_count + " 篇去重题录；不等于临床疗效或已核实适应症。"));
+      const collection = result.collection;
+      if (collection?.mode === "quick" || collection?.selection?.mode === "quick" || collection?.complete === false) {
+        section.append(nodes("p", "assistant-warning", "本批为部分或快速截取文献，不代表全量；采集范围可能影响候选排序。"));
+      }
+      if (collection?.source_total_results != null && collection?.collected_results != null) {
+        section.append(nodes("p", "reply-note", "采集时站点结果 " + collection.source_total_results + " 条，本批采集 " + collection.collected_results + " 个检索位置；去重论文数单独统计。"));
+      }
       const grid = table(["文献中的疾病/药材/方剂", "全部关联篇数", "未标加减/联合篇数", "证据"], result.items.map(row => [row.names.join(" / "), row.paper_count, row.direct_paper_count]), section);
       let snapshotPromise;
       [...grid.querySelectorAll("tbody tr")].forEach((line, index) => {

@@ -61,6 +61,24 @@ def archive_run(run_directory, archive_root=None):
         manifest = read_json(run / 'manifest.json')
         if manifest.get('mode') != 'live':
             raise ValueError('only live runs can enter this archive')
+        if manifest.get('task', {}).get('mode') == 'fixture':
+            raise ValueError('synthetic fixture task cannot enter live archive')
+        source_id = manifest.get('analysis', {}).get('source_run_id')
+        sources = [(run, manifest)]
+        if source_id:
+            source_run = run.parent / _component(source_id)
+            source_manifest = read_json(source_run / 'manifest.json')
+            if source_manifest.get('mode') != 'live' or source_manifest.get('task', {}).get('mode') == 'fixture':
+                raise ValueError('synthetic or unverified analysis source cannot enter live archive')
+            sources.append((source_run, source_manifest))
+        for base, record in sources:
+            for relative in record.get('verified_targets', {}).values():
+                artifact = (base / relative).resolve()
+                if not artifact.is_relative_to(base.resolve()):
+                    raise ValueError('archive verified source escapes run')
+                value = read_json(artifact)
+                if value.get('evidence_type') == 'synthetic_engineering':
+                    raise ValueError('synthetic evidence cannot enter live archive')
         run_id = _component(manifest['run_id'])
         canonical = init_archive(manifest['task'], archive_root or run.parent.parent / 'data/pharm')
         created, reused = [], []

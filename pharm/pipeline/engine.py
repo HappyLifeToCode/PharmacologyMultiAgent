@@ -731,11 +731,14 @@ class Runner:
             if genes:
                 database = source_result.get("database")
                 recorded_hash = source_result.get("database_sha256")
+                if not recorded_hash:
+                    raise ValueError("来源运行缺少疾病索引哈希，不能确认索引版本，请重新进行疾病发现")
                 if not database or not Path(database).is_file():
-                    # 来源未记录索引路径（旧运行）或文件已移动：回退当前配置解析
+                    # A relocated file is acceptable only when it is the same recorded snapshot.
                     database = str(discovery.database_path(ROOT))
-                    recorded_hash = None
-                if recorded_hash and digest(database) != recorded_hash:
+                if not Path(database).is_file():
+                    raise FileNotFoundError("来源疾病索引不可用，请恢复原版本后续跑")
+                if digest(database) != recorded_hash:
                     raise ValueError("来源运行记录的疾病索引哈希与当前文件不一致，请核对索引版本")
                 with closing(discovery._connect(database)) as connection:
                     discovery._metadata(connection)
@@ -1241,6 +1244,14 @@ def _analysis_task(analysis, mode):
     mode = mode or source_manifest.get("mode") or "live"  # 缺省继承来源运行模式，保持证据类型一致
     if mode not in ("live", "fixture"):
         raise ValueError("不支持的运行模式")
+    if mode == "live":
+        if source_manifest.get("mode") != "live" or source_manifest.get("task", {}).get("mode") == "fixture":
+            raise ValueError("fixture 或模式未确认的来源不能转为 live 分析")
+        targets_ref = source_manifest.get("verified_targets", {}).get("herb_targets")
+        if targets_ref:
+            targets = read_json(source_dir / targets_ref)
+            if targets.get("evidence_type") == "synthetic_engineering":
+                raise ValueError("合成靶点不能进入 live 分析")
     agents = analysis.get("agents")
     if agents is None:
         agents = mode == "live"
@@ -1294,6 +1305,9 @@ def start(task_id=None, mode=None, resume=None, background=True, pipeline="disco
                 raise ValueError("旧结构运行不能由新流水线恢复，请新建运行")
             if not owned_run(manifest, ROOT):
                 raise ValueError("运行属于旧数据或其他工作区，不能恢复；请新建运行")
+            if manifest.get("pipeline") == "analysis" and manifest.get("mode") == "live":
+                origin = manifest.get("analysis", {})
+                _analysis_task({"discovery_run_id": origin.get("source_run_id"), "disease": origin.get("disease"), "agents": False}, "live")
             # Successful verified stages can be reused; all other stages get new attempts.
         else:
             if pipeline == "analysis":

@@ -103,8 +103,8 @@ def _custom_index(path, disease, genes):
                      [(gene, disease, "synthetic", i + 2, 5.0, "{}") for i, gene in enumerate(genes)], [])
 
 
-def _craft_source_run(root, targets_genes, disease, disease_genes):
-    """手工搭一个最小来源 discovery 运行（manifest + 两阶段产物）。"""
+def _craft_source_run(root, targets_genes, disease, disease_genes, formula=None):
+    """Isolated live-branch stub; no real research data or remote execution."""
     run_id = "src_" + uuid.uuid4().hex[:8]
     run = root / "runs" / run_id
     herb_dir = run / "herb_targets" / "attempt_01"
@@ -121,7 +121,7 @@ def _craft_source_run(root, targets_genes, disease, disease_genes):
     manifest = {"run_id": run_id, "workspace_id": common.workspace_identity(root)["workspace_id"],
                 "pipeline": "discovery", "workflow_version": engine.WORKFLOW_VERSION,
                 "mode": "live", "status": "succeeded",
-                "task": {"task_id": "web_src", "formula": None, "herbs": ["白芍"],
+                "task": {"task_id": "web_src", "formula": formula, "herbs": ["白芍"],
                          "batman_threshold": 0.84, "composition": "custom_herbs"},
                 "stages": {"disease_reverse": {"status": "succeeded"},
                            "herb_targets": {"status": "succeeded"}},
@@ -186,7 +186,7 @@ def _string_local_dir(tmp_path):
 
 
 def test_live_analysis_agent_sequence(root, mock_execute, tmp_path, monkeypatch):
-    source_id = fixture_discovery_run(root, {"formula": "温经汤", "mode": "fixture"})
+    source_id = _craft_source_run(root, ['TP53', 'VEGFA'], 'Hyperthyroidism', ['TP53', 'VEGFA'], formula='温经汤')
     string_dir = _string_local_dir(tmp_path)
     monkeypatch.setattr(engine.david, "run_david", lambda genes, task, directory, **kw: {
         "status": "succeeded", "significant_count": 2, "mapped_count": 2,
@@ -230,7 +230,7 @@ def test_analysis_resume_reuses_and_v3_rejected(root, monkeypatch, calls):
 
 def test_analysis_archive_layout(root, tmp_path, monkeypatch, calls):
     monkeypatch.setattr(engine.runtime, "execute", lambda *a, **k: calls.append("called"))
-    source_id = fixture_discovery_run(root, {"formula": "温经汤", "mode": "fixture"})
+    source_id = _craft_source_run(root, ['TP53', 'VEGFA'], 'Hyperthyroidism', ['TP53', 'VEGFA'], formula='温经汤')
     string_dir = _string_local_dir(tmp_path)
     monkeypatch.setattr(engine.david, "run_david", lambda genes, task, directory, **kw: {
         "status": "succeeded", "significant_count": 0, "mapped_count": 2,

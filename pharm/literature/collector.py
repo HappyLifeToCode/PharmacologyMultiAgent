@@ -22,7 +22,7 @@ from .. import llm
 
 PROMPTS = Path(__file__).with_name("prompts")
 DEFAULT_MODEL = "selected_api"
-RUNTIME_VERSION = "20261102-batched-listing-api"
+RUNTIME_VERSION = "20261105-scope-and-model-binding"
 
 
 class CollectionCancelled(RuntimeError):
@@ -547,6 +547,8 @@ def execute(task, work, *, root=ROOT, extract=False, runner=None, phased=False, 
                     frozen = inventory.load(work, task["keyword"])["data"]
                     selection = frozen.get("selection", {"mode": "all", "order": "relevance", "complete": True})
                     meta["collection"].update(scope="frozen_keyword_listing", inventory_sha256=scan["inventory_sha256"], inventory_frozen_at=scan["inventory_frozen_at"], selection=selection, complete=selection["mode"] == "all", mode=selection["mode"])
+                    meta["source_total_results"] = frozen.get("source_total_results", frozen["total_results"] if selection["mode"] == "all" else None)
+                    meta["collection"].update(source_total_results=meta["source_total_results"], collected_results=frozen["total_results"])
             elif not local_only:
                 meta.pop("collection_scan", None)
             target = Path(task["target"])

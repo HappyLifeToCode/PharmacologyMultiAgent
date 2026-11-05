@@ -1,5 +1,7 @@
 # 数据交接约定
 
+2026-11-05：analysis 不允许 fixture 来源转为 live，旧的不兼容 live 分析也拒绝续跑；归档额外拒绝来源或已核验产物的 synthetic_engineering 标记。机制分析必须持有来源索引哈希，原文件迁移后可使用当前配置定位，但必须通过原始哈希校验，不清除校验依据。CNKI 发布包顶层及 collection 保存 source_total_results，collection.collected_results 为实际采集检索位置数，去重论文数另行统计；旧快速清单没有站点原始总数时保留 null，不推算。文献 runtime_version=20261105-scope-and-model-binding。
+
 2026-10-26：文献任务状态新增browser_mode（background/interactive）及browser_fallback（http_403或null）。真实主文档403可在同一任务内自动切换一次有头模式，不新增研究POST、采集ID或修改范围/模型；续跑沿用该模式。子资源、iframe、429或DOM等待超时不会触发该切换。私有search/article-diagnostic仅记录主机、路径、HTTP状态与原因，URL查询参数不进入诊断文件或公开状态。原失败任务兼容保留，不重新生成旧成功快照。
 
 双流水线（workflow_version=4）的产物、状态语义与归档布局。旧九阶段契约已随重构废弃（Git 历史可查）。

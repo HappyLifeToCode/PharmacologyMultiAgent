@@ -134,7 +134,7 @@ async def complete(config, messages, tools=None, *, short=False, transport=None)
             if not isinstance(output, list): raise ValueError()
             content = "\n".join(item["text"] for item in output if item.get("type") == "text")
             calls = [{"id": item["id"], "type": "function", "function": {"name": item["name"], "arguments": json.dumps(item["input"], ensure_ascii=False)}} for item in output if item.get("type") == "tool_use"]
-            return {"role": "assistant", "content": content[:24000], "tool_calls": calls,
+            return {"role": "assistant", "content": content, "tool_calls": calls,
                     "anthropic_content": output, "anthropic_tools": payload.get("tools"),
                     "finish_reason": "length" if value.get("stop_reason") == "max_tokens" else "stop"}
         if responses:
@@ -142,13 +142,13 @@ async def complete(config, messages, tools=None, *, short=False, transport=None)
             if not isinstance(output, list): raise ValueError()
             calls = [{"id": item["call_id"], "type": "function", "function": {"name": item["name"], "arguments": item["arguments"]}} for item in output if item.get("type") == "function_call"]
             content = "\n".join(part["text"] for item in output if item.get("type") == "message" for part in item.get("content", []) if part.get("type") == "output_text")
-            return {"role": "assistant", "content": content[:24000], "tool_calls": calls,
+            return {"role": "assistant", "content": content, "tool_calls": calls,
                     "response_items": output, "finish_reason": "length" if value.get("status") == "incomplete" else "stop"}
         choice = value["choices"][0]
         message = choice["message"]
         if not isinstance(message, dict) or (message.get("content") is not None and not isinstance(message["content"], str)):
             raise ValueError()
-        return {"role": "assistant", "content": (message.get("content") or "")[:24000],
+        return {"role": "assistant", "content": message.get("content") or "",
                 "reasoning_content": message.get("reasoning_content") if isinstance(message.get("reasoning_content"), str) else None,
                 "tool_calls": message.get("tool_calls") or [], "finish_reason": choice.get("finish_reason")}
     except ModelError:

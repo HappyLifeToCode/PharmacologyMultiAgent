@@ -55,6 +55,12 @@ def start(root, record, args, network, selection):
     keyword = dataset.safe_keyword(args["keyword"])
     kind = args["kind"]
     local = load_result(root, keyword, kind)
+    collection = (local.get("source") or {}).get("collection") or {}
+    incomplete = collection.get("mode") == "quick" or (collection.get("selection") or {}).get("mode") == "quick" or collection.get("complete") is False
+    if incomplete and local["status"] in {"ready", "needs_extraction"}:
+        if not network:
+            return {"status": "disabled", "message": "本地仅有部分或快速截取的 CNKI 文献，不能当作全量结果。本轮未允许联网补采；可开启联网资料后继续。", "collection": collection}
+        local = {**local, "status": "not_found"}
     if local["status"] == "ready":
         return {"status": "cnki_ready", "keyword": keyword, "kind": kind, "local_reused": True}
     if local["status"] not in {"not_configured", "not_found", "needs_extraction"}:
@@ -94,9 +100,10 @@ def result(root, record, state, keyword, kind):
     snapshot_id = uuid4().hex
     snapshot = Path(root) / "local/assistant/cnki" / record["id"] / (snapshot_id + ".json")
     write_json(snapshot, value)
-    record["cnki_result"] = {"snapshot_id": snapshot_id, "sha256": digest(snapshot), "keyword": keyword, "kind": kind,
+    collection = value["source"].get("collection")
+    record["cnki_result"] = {"snapshot_id": snapshot_id, "sha256": digest(snapshot), "keyword": keyword, "kind": kind, "collection": collection,
                              "candidate_count": len(items), "paper_count": value["source"]["unique_paper_count"], "items": items}
-    summary = {"keyword": keyword, "kind": kind, "paper_count": value["source"]["unique_paper_count"],
+    summary = {"keyword": keyword, "kind": kind, "paper_count": value["source"]["unique_paper_count"], "collection": collection,
                "candidate_count": len(items), "candidates_shown": items[:40], "candidates_truncated": len(items) > 40,
                "source_files": value["source"]["files"], "ranking": value.get("source_ranking", {}).get("note"),
                "scope": "当前已保存并通过出处检查的知网标题摘要关系，非疗效结论；完整候选见页面列表及文献明细"}

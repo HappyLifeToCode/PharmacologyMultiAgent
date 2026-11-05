@@ -142,7 +142,8 @@ def analyze(result, *, project_dir=None, data_dir=None, catalog=None):
         raise ValueError("papers.json存在重复rank，无法可靠追溯")
     papers = {paper["rank"]: paper for paper in data["papers"]}
     if papers and provenance["files"].get("triples.jsonl") is None:
-        return {**base, "status": "needs_extraction", "message": "已有标题摘要，尚未生成文献关联排序。", "paper_count": len(papers)}
+        return {**base, "status": "needs_extraction", "message": "已有标题摘要，尚未生成文献关联排序。", "paper_count": len(papers),
+                "source": {**provenance, "collection": data.get("collection")}}
     if catalog is None:
         from ..agent import disease_input
         entities, names, _, errors = disease_input.catalog()

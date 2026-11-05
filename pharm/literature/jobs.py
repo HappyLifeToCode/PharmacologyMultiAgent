@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import copy
 from pathlib import Path
 import re
 import threading
@@ -9,6 +10,7 @@ import time
 
 from ..core.common import now, write_json
 from . import collector, dataset
+from .. import llm
 
 
 def task_directory(root, job_id):
@@ -103,9 +105,12 @@ class CollectionManager:
         return sorted(rows, key=lambda r: r.get("created_at") or "", reverse=True)
 
     def _start(self, root, task, work, model_selection=None):
+        # Capture when accepting start/resume, before waiting for either queue slot.
+        model_selection = copy.deepcopy(model_selection) if model_selection is not None else llm.capture(root, required=False)
         key = str(work)
         (work / "cancel.requested.json").unlink(missing_ok=True)
         task.update(status="queued", pipeline_phase="collecting", queued_at=now())
+        task.update(model=model_selection.get("model"), llm=llm.identity(model_selection))
         task.pop("started_at", None)
         task.pop("error", None); task.pop("finished_at", None)
         write_json(work / "task.json", task)

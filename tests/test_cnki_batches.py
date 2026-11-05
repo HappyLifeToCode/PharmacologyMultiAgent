@@ -78,6 +78,9 @@ def test_quick_mode_records_order_and_never_claims_all(tmp_path, monkeypatch):
     published = json.loads((work/'publish/cnki_测试方/papers.json').read_text(encoding='utf-8'))
     assert published['collection']['complete'] is False
     assert published['collection']['selection']['order'] == 'date'
+    assert published['source_total_results'] == 6
+    assert published['collection']['source_total_results'] == 6
+    assert published['collection']['collected_results'] == 3
 
 
 def test_batch_metadata_cannot_hide_missing_or_duplicate_children(tmp_path, monkeypatch):
