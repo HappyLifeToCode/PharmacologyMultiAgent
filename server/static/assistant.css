@@ -16,8 +16,9 @@
 .welcome-prompts span { color:var(--research-accent); margin:3px 0; }
 .welcome-prompts strong { font-size:13px; }
 .welcome-prompts small { grid-column:2; margin-top:2px; }
-.assistant-composer-options { display:flex; align-items:center; gap:12px; padding:4px 2px 9px; border-bottom:1px solid var(--line); margin-bottom:8px; }
-.assistant-composer-options select { border:0; background:var(--research-soft); color:var(--research-accent); padding:6px 9px; border-radius:6px; font:inherit; font-size:12px; }
+.assistant-composer-options { display:flex; align-items:center; gap:10px; padding:2px 2px 6px; border-bottom:1px solid var(--line); margin-bottom:5px; }
+.assistant-composer-options select { border:0; background:var(--research-soft); color:var(--research-accent); padding:4px 8px; border-radius:6px; font:inherit; font-size:12px; }
+.assistant-composer-options .query-direction { margin:0; }
 #mode-description { color:var(--muted); font-size:11px; flex:1; }
 #online-sources-label { display:flex; align-items:center; gap:6px; font-size:12px; white-space:nowrap; cursor:pointer; }
 #online-sources { accent-color:var(--research-accent); }

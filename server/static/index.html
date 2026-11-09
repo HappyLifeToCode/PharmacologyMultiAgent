@@ -6,11 +6,11 @@
 <title>药理研究助手</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg?v=20261014">
 <link rel="stylesheet" href="/assets/theme.css?v=20261104-unified">
-<link rel="stylesheet" href="/assets/chat.css?v=20261104-unified">
+<link rel="stylesheet" href="/assets/chat.css?v=20261105-compact-composer">
 <link rel="stylesheet" href="/assets/formula-picker.css?v=20261014">
 <link rel="stylesheet" href="/assets/evidence-graph.css?v=20261022">
-<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261104-unified">
-<link rel="stylesheet" href="/assets/assistant.css?v=20261104-unified">
+<link rel="stylesheet" href="/assets/cnki-literature.css?v=20261105-graph-close-gap">
+<link rel="stylesheet" href="/assets/assistant.css?v=20261105-direction-position">
 </head>
 <body>
 <div class="chat-shell">
@@ -56,9 +56,7 @@
       <button type="button" id="jump-to-latest" class="jump-to-latest" aria-label="跳到最新消息" title="跳到最新消息" aria-controls="message-scroll" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>
       <p class="status-message" id="status-message" role="status"></p>
       <form class="composer" id="composer-form">
-        <div class="assistant-composer-options"><label class="sr-only" for="chat-mode">工作模式</label><select id="chat-mode"><option value="assistant">研究问答</option><option value="database">数据库查询</option></select><span id="mode-description">本地资料优先 · 答案附来源</span><label class="sr-only" for="assistant-source-scope">资料范围</label><select id="assistant-source-scope"><option value="auto">按会话与问题</option><option value="cnki">仅 CNKI</option><option value="all">综合来源</option></select><label id="online-sources-label"><input id="online-sources" type="checkbox">联网资料</label></div>
-        <label class="sr-only" for="query-direction">查询方向</label>
-        <select id="query-direction" class="query-direction"><option value="auto">自动识别方向</option><option value="forward">方剂/药材 → 疾病</option><option value="reverse">疾病 → 药材</option></select>
+        <div class="assistant-composer-options"><label class="sr-only" for="chat-mode">工作模式</label><select id="chat-mode"><option value="assistant">研究问答</option><option value="database">数据库查询</option></select><span id="mode-description">本地资料优先 · 答案附来源</span><label class="sr-only" for="query-direction">查询方向</label><select id="query-direction" class="query-direction"><option value="auto">自动识别方向</option><option value="forward">方剂/药材 → 疾病</option><option value="reverse">疾病 → 药材</option></select><label class="sr-only" for="assistant-source-scope">资料范围</label><select id="assistant-source-scope"><option value="auto">按会话与问题</option><option value="cnki">仅 CNKI</option><option value="all">综合来源</option></select><label id="online-sources-label"><input id="online-sources" type="checkbox">联网资料</label></div>
         <label class="sr-only" for="chat-input">输入研究问题或继续追问</label>
         <textarea id="chat-input" rows="1" placeholder="输入疾病、方剂或药材，也可以继续追问…" maxlength="10000"></textarea>
         <div class="composer-toolbar"><button type="button" id="composer-settings" class="composer-settings"><img src="/assets/icons/settings.svg" alt="">查询设置</button><button type="button" id="choose-composition" class="composer-settings">选择/修改组成</button><span class="composer-shortcut">Enter 发送 · Shift+Enter 换行</span><button id="send-message" type="submit" class="send-button" aria-label="发送消息"><img src="/assets/icons/arrow-up.svg" alt=""></button></div>
@@ -115,9 +113,9 @@
 <script src="/assets/reverse-chat.js?v=20261104-message-actions"></script>
 <script src="/assets/evidence-graph.js?v=20261022"></script>
 <script src="/assets/literature-flow.js?v=20261102-batches"></script>
-<script src="/assets/cnki-graph.js?v=20261104-triples"></script>
+<script src="/assets/cnki-graph.js?v=20261105-graph-fixed-fab"></script>
 <script src="/assets/task-clock.js?v=20261102-cnki-dialogue"></script>
-<script src="/assets/cnki-literature.js?v=20261102-merged-batches"></script>
+<script src="/assets/cnki-literature.js?v=20261105-frequency-note-position"></script>
 <script src="/assets/assistant-markdown.js?v=20261102-markdown"></script>
 <script src="/assets/assistant-ui.js?v=20261105-review-fixes"></script>
 <script src="/assets/chat.js?v=20261104-message-actions"></script>

@@ -128,14 +128,19 @@ const CnkiLiterature = (() => {
       }
       evidenceLane(data);
       const frequencyOrder = data.ranking?.kind === "descriptive_retrieval_frequency";
-      if (!reverse) root.append(node("h5", "检索频次参考（保留原结果）"));
-      root.append(node("p", reverse ? data.ranking?.note : frequencyOrder ? "当前按篇数暂排：先看方名一致且未标加减/联合的篇数，再看全部关联篇数。两项都相同的条目视为并列，仅按病名顺序显示。" : data.ranking?.note, "cnki-notice"));
+      if (!reverse) {
+        root.append(node("h5", "检索频次参考（保留原结果）"));
+        root.append(node("p", frequencyOrder ? "当前按篇数暂排：先看方名一致且未标加减/联合的篇数，再看全部关联篇数。两项都相同的条目视为并列，仅按病名顺序显示。" : data.ranking?.note, "cnki-notice"));
+      }
       const explanation = details("篇数和排序是什么意思？", root);
       explanation.append(node("p", reverse ? "药材与方剂按论文原名分别整理；优先看未标加减或联合的去重篇数，再看全部关联篇数，最后按原名显示。这里的原名尚未自动对齐到BATMAN药材条目。" : "“方名一致且未标加减/联合”指论文方名与检索名一致、记录明确未标加减，且未识别出联合治疗。信息不全或名称不确定的文献不计入这一项；这不等于组成和剂量已经核实一致。"));
       explanation.append(node("p", "“全部关联”包含符合文字出处检查的所有关联论文，也包括加减方、联合干预和名称待确认的记录。同一篇论文多次提及只计一次。"));
       explanation.append(node("p", data.evidence_pipeline && !reverse ? "本表仍只反映检索关联篇数；临床、动物和综述的区别以及疗效方向已在上方独立的 P1/P2/P3 证据通道处理。" : "临床、动物和综述目前没有分别加权，摘要中的改善、阴性或不明确结论也尚未系统分类。排序反映这批文献的关联篇数，不能当作疗效强弱。"));
       const list = node("div", null, "cnki-list"); root.append(list);
-      if (reverse) root.insertBefore(node("h5", "文献关联药材（论文原名）"), list);
+      if (reverse) {
+        root.insertBefore(node("h5", "文献关联药材（论文原名）"), list);
+        root.insertBefore(node("p", data.ranking?.note, "cnki-notice"), list);
+      }
       function renderItems(items, parent, sourceOrder = false) {
         for (const item of items) {
         const section = details(item.rank + ". " + item.raw_names.join(" / "), parent);

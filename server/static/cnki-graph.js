@@ -44,9 +44,9 @@ const CnkiGraph = (() => {
     const markerId = "cnki-arrow-" + (++graphSequence);
     const root = node("section", null, "cnki-graph"), controls = node("div", null, "cnki-actions"), status = node("span");
     parent.append(root);
-    root.append(node("p", "流程图展示文献出处；三元组展示“主体 — 关系 — 客体”。点击节点查看原句。关系保留原提取记录，仍需结合文献复核。", "cnki-note"));
+    root.append(node("p", "流程图展示文献出处；三元组展示“主体 — 关系 — 客体”。点击节点查看原句，右上角小按钮可放大图谱，关闭按钮或 Esc 可返回。关系保留原提取记录，仍需结合文献复核。", "cnki-note"));
     if (!model.paths.length) { root.append(node("p", "这份记录缺少完整原句路径，请查看下方证据表；未补画推断关系。", "cnki-notice")); return; }
-    const viewport = node("div", null, "cnki-graph-viewport"), inspector = node("div", null, "cnki-graph-inspector");
+    const graphStage = node("div", null, "cnki-graph-stage"), viewport = node("div", null, "cnki-graph-viewport"), inspector = node("div", null, "cnki-graph-inspector");
     inspector.setAttribute("aria-live", "polite");
     let page = 0, svg;
     const views = node("fieldset", null, "cnki-graph-views");
@@ -65,10 +65,18 @@ const CnkiGraph = (() => {
     const action = (label, fn) => { const b = node("button", label); b.type = "button"; b.onclick = fn; return b; };
     const previous = action("上一组", () => { page--; render(); });
     const next = action("下一组", () => { page++; render(); });
+    const zoomTrigger = action("", openZoom);
+    zoomTrigger.className = "cnki-graph-zoom-fab";
+    zoomTrigger.setAttribute("aria-label", "放大图谱");
+    zoomTrigger.title = "放大图谱";
+    const zoomIcon = svgNode("svg", { viewBox: "0 0 24 24", width: 16, height: 16, fill: "none", stroke: "currentColor", "stroke-width": 2, "aria-hidden": "true", focusable: "false" });
+    zoomIcon.append(svgNode("circle", { cx: 11, cy: 11, r: 7 }), svgNode("line", { x1: 16, y1: 16, x2: 21, y2: 21 }));
+    zoomTrigger.prepend(zoomIcon);
     controls.append(previous, status, next,
       action("导出当前图 SVG", () => download(new XMLSerializer().serializeToString(svg), "cnki-trace-" + (page + 1) + ".svg", "image/svg+xml;charset=utf-8")),
       action("导出全部路径 JSON", () => download(JSON.stringify(model, null, 2), "cnki-trace.json", "application/json;charset=utf-8")));
-    root.append(controls, viewport, inspector);
+    root.append(controls, graphStage, inspector);
+    graphStage.append(viewport, zoomTrigger);
     function inspect(path, type) {
       inspector.replaceChildren(node("strong", path.evidence.title));
       const e = path.evidence, b = path.bibliography;
@@ -130,6 +138,21 @@ const CnkiGraph = (() => {
       inspect(rows[0], "paper");
     }
     render();
+    const zoomDialog = node("dialog", null, "cnki-graph-zoom"), zoomBody = node("div", null, "cnki-graph-zoom-body");
+    zoomDialog.setAttribute("aria-labelledby", markerId + "-zoom-title");
+    const zoomHeading = node("div", null, "cnki-graph-zoom-heading"), zoomTitle = node("strong", "文献证据溯源图（放大）");
+    zoomTitle.id = markerId + "-zoom-title";
+    zoomHeading.append(zoomTitle, action("关闭", () => zoomDialog.close()));
+    zoomDialog.append(zoomHeading, zoomBody);
+    root.append(zoomDialog);
+    function openZoom() {
+      zoomBody.replaceChildren(svg, inspector);
+      if (!zoomDialog.open) zoomDialog.showModal();
+    }
+    zoomDialog.addEventListener("close", () => {
+      viewport.replaceChildren(svg); graphStage.after(inspector); zoomBody.replaceChildren();
+      zoomTrigger.focus({ preventScroll: true });
+    });
     if (model.excluded) root.append(node("p", model.excluded + " 条记录缺少必要路径字段，未纳入图中。", "cnki-note"));
   }
   return { buildModel, mount };

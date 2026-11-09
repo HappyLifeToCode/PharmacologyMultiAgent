@@ -30,7 +30,8 @@
 .cnki-setting input { width: auto !important; flex-shrink: 0; }
 .cnki-source-list { max-height: 720px; border-top: 2px solid #728c6b; }
 .cnki-graph { margin: 12px 0; min-width: 0; }
-.cnki-graph-viewport { overflow-x: auto; max-width: 100%; margin: 12px 0; border: 1px solid #ded5c8; border-radius: 6px; }
+.cnki-graph-stage { position: relative; max-width: 100%; margin: 12px 0; }
+.cnki-graph-viewport { overflow-x: auto; max-width: 100%; margin: 0; border: 1px solid #ded5c8; border-radius: 6px; cursor: default; }
 .cnki-graph-viewport svg { display: block; min-width: 1000px; }
 .cnki-graph-viewport g:focus rect, .cnki-graph-viewport g[aria-pressed="true"] rect { stroke: #ac4a36; stroke-width: 2.5; }
 .cnki-graph-inspector { padding: 10px 12px; background: #f1f4eb; border-left: 3px solid #728c6b; }
@@ -40,3 +41,16 @@
 .cnki-graph-views legend { margin-bottom: 6px; color: #746b60; font-size: 12px; }
 .cnki-graph-views label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .cnki-graph-views input { width: auto; margin: 0; accent-color: #728c6b; }
+.cnki-panel .cnki-graph-zoom-fab { position: absolute; top: 6px; right: 6px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid #d8cbbc; border-radius: 5px; background: var(--ui-surface, #fffcf7); color: var(--ui-muted, #6b6259); cursor: pointer; opacity: .8; }
+.cnki-panel .cnki-graph-zoom-fab:hover, .cnki-panel .cnki-graph-zoom-fab:focus-visible { opacity: 1; }
+.cnki-panel .cnki-graph-zoom-fab:hover, .cnki-panel .cnki-graph-zoom-fab:focus-visible, .cnki-panel .cnki-graph-zoom .cnki-graph-zoom-heading button:hover, .cnki-panel .cnki-graph-zoom .cnki-graph-zoom-heading button:focus-visible { border-color: #ac4a36; background: #ac4a36; color: #fff; }
+.cnki-panel .cnki-graph-zoom-fab svg { width: 15px; height: 15px; min-width: 0; flex-shrink: 0; }
+.cnki-graph-zoom { width: min(1400px, 96vw); max-width: 96vw; height: 90svh; max-height: 90svh; padding: 16px; border: 1px solid #ded5c8; border-radius: 10px; background: var(--ui-surface, #fffcf7); color: var(--ui-text, #342f2a); }
+.cnki-graph-zoom::backdrop { background: #152f3e66; backdrop-filter: blur(2px); }
+.cnki-graph-zoom-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cnki-graph-zoom-heading strong { font-size: 16px; }
+.cnki-graph-zoom-heading button { position: relative; top: -4px; }
+.cnki-graph-zoom-body { height: calc(90svh - 90px); overflow: auto; border: 1px solid #ded5c8; border-radius: 6px; background: #fffdf8; }
+.cnki-graph-zoom-body svg { display: block; min-width: 1000px; width: 100%; height: auto; }
+.cnki-graph-zoom-body .cnki-graph-inspector { margin: 12px 0; }
+@media (max-width: 680px) { .cnki-graph-zoom { padding: 10px; } .cnki-graph-zoom-body { height: calc(90svh - 82px); } }
